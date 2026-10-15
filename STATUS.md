@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — 294-account latest-5 collection stopped safely at usage 72%
+
+- User Windows resumed `experiments/full_batch_collector.py --posts 5 --batch-size 10 --stop-usage 70` in `experiments/results/latest_5`. Last shown batch 19 (account ordinals 171..180) completed with HTTP 200 and usage **72%**; collector stopped per configured safety threshold.
+- **Verified from shown console log:** 175 accounts `success`, 114 `pending`, 5 `failed` (individual Meta error `110` / HTTP 400); sum 294, zero `rate_limited` accounts shown. At most 875 successful-account posts, **actual total posts must be read from `summary.json`**. Existing successes saved transactionally; failed account statuses preserved.
+- Meta code `110` commonly corresponds to invalid/not found target user ID on Business Discovery, but this is **not confirmed for these five accounts**; inspect `collection_status.csv` `error_message` and verify usernames/professional eligibility before considering any retry. The collector only resumes pending/rate_limited statuses; it does not auto-retry the 5 failed accounts.
+- **Do not immediately restart at 72%.** Wait for documented usage headroom / rolling quota recovery. Keep `--stop-usage 70` and resume with same source/env/output once headroom is demonstrated. A 60-minute wall clock delay is not proof of quota reset.
+- Friday deadline: while waiting, test delivery ZIP exporter (Windows SQLite closing fix pending user retest) and generate partial handoff ZIP from latest_5 with actual country/account coverage. If further collection becomes available before handoff, rebuild ZIP once final collection is done. Do not mistake 175/294 for complete official coverage.
+
+
 ## 2026-10-16 — Collector blocked by missing local Meta env; delivery test Windows lock fixed
 
 - User confirmed official 294-account CSV path exists (`Test-Path $src=True`), but suggested local `kq3_294_collection/.env.local` does **not** exist (`False`). The collector therefore cannot authenticate without locating another secure env file or configuring `META_ACCESS_TOKEN`, `META_IG_USER_ID` and optional graph version locally.
