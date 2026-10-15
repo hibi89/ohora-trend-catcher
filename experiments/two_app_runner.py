@@ -122,6 +122,8 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-batches-per-app", type=int, default=None,
                         help="guarded pilot: limit batches per app, then resume later")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--only-app", type=str, default=None,
+                        help="Run one named authorized app only, keeping original immutable range")
     parser.add_argument("--live", action="store_true", help="authorize real Meta requests")
     args = parser.parse_args(argv)
     try:
@@ -144,12 +146,18 @@ def run(argv: list[str] | None = None) -> int:
             print(f"  {name}: official rows {first}..{min(last, len(source))} "
                   f"({total} accounts), <= {(total + args.batch_size-1)//args.batch_size} outer batches; "
                   f"output={args.output_dir / name}")
+        if args.only_app is not None and args.only_app not in {name for name, *_ in plan}:
+            raise ValueError("--only-app must match an active configured app name")
         if not args.live:
             print("DRY RUN ONLY: no credential reads, API requests or file writes. "
                   "Run with --live only after verifying app credentials and quota.")
             return 0
+        # All configurations are validated first, even for a single-app run.
+        # This prevents accidental use of duplicate tokens or declared IDs.
         preflight_credentials(plan)
         for name, path, first, last, total in plan:
+            if args.only_app is not None and name != args.only_app:
+                continue
             print(f"START {name}: assigned rows {first}..{min(last,len(source))} "
                   f"(max {args.posts} posts each), safely resumable", flush=True)
             opts = ["--source", str(args.source), "--env-file", str(path),
