@@ -391,7 +391,10 @@ class FullBatchUnitTests(unittest.TestCase):
                                       if "testus" in name else
                                       int(name.rsplit("jp", 1)[-1]) + 101)
             batches.append(batch_ordinals)
-            return 200, fake_response(ops, count=10), {}, 0.02
+            responses = fake_response(ops, count=10)
+            for entry in responses:
+                entry["body"] = entry["body"].replace("fake-", f"run{len(batches)}-")
+            return 200, responses, {}, 0.02
         args = [
             "--source", str(self.source), "--env-file", str(env),
             "--posts", "10", "--batch-size", "10",
