@@ -148,6 +148,26 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inside the source"):
             b.build_bundle(self.source, self.source / "nested")
 
+    def test_empty_latest_source_is_not_exported(self):
+        self.posts = []
+        self.media = []
+        self.write_fixtures()
+        with self.assertRaisesRegex(ValueError, "No collected posts"):
+            b.build_bundle(self.source, self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_spreadsheet_formula_from_caption_is_safely_escaped(self):
+        self.posts[0]["caption"] = "=HYPERLINK(\"https://fake.invalid\")"
+        self.write_fixtures()
+        archive, _ = b.build_bundle(self.source, self.output)
+        with ZipFile(archive) as z:
+            posts = zip_csv(z, "posts_all_available.csv")
+            target = next(p for p in posts if p["post_id"] == self.posts[0]["post_id"])
+            self.assertTrue(target["caption"].startswith("'=HYPERLINK("))
+        # Source still contains original unmodified caption
+        source = b.read_csv(self.source / "posts.csv")
+        self.assertEqual("=HYPERLINK(\"https://fake.invalid\")", source[0]["caption"])
+
     def test_cli_preview_creates_zip_without_credentials(self):
         self.assertEqual(0, b.main([
             "--source", str(self.source), "--output-dir", str(self.output)]))
