@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Target exact failed image post before proceeding to P1
+
+- User correctly flagged that **one live `invalid_json` error remains unresolved**. A code patch for malformed JSON is not equivalent to successfully reclassifying the failed post.
+- Discovered safety bug in prior CLI advice: `--retry-failed --limit 1` can bill an unrelated, newer *unanalyzed* post instead of the known failed post, because normal selection is newest-first.
+- GitHub commits `2d72562296f7efe9578e5c5d5170582558fae86a`, `ceed2256e47874c1fab8aff6dbd36d2eac011ba0`: add `--post-id` to restrict all analysis to the exact post, and two mock regression tests for targeted recovery/unknown IDs. Expected offline suite **27 tests; user Windows execution pending**.
+- **Recovery command AFTER offline suite passes:** `python .\\vision\\vision_runner.py --post-id 17994612878841451 --retry-failed --limit 1 --live` (uses local MLAPI key, may make up to two paid calls if malformed output persists). Do NOT claim the error is solved until the post row becomes `status=success` and is visually reviewed.
+- Leave previous 20 cached successes untouched. Pause P1 until P0 user live retest verified.
+
+
 ## 2026-10-16 — V1 settings formally locked (design only)
 
 - User confirmed **latest 5**, **backfill 5**, **50 unique posts/account target**, **max 30-minute collection session**, **>=60-minute cooldown after finish**, **>=90-minute gap between starts**, and **GPT-6.1 Sol API insights weekly**.
