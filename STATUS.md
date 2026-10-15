@@ -1,5 +1,15 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Two-app five-post ninety-minute historical backfill coded
+
+- Updated decision: **5 posts per account × 150 account app A + 144 account app B**, 90-minute recurring **historical cursor backfill**, goal **50 unique posts/account** in ideal 10 cycles, not repeated newest-five scans. 900 minutes ≈ 15 hours of cycle cadence; for ten start ticks there are nine 90-min gaps (13.5h between first and last starts). Two ~9h working days possible only if 150/144 accounts fully processed each tick, valid media cursors/permissions and quota recovery.
+- **New GitHub code** `experiments/rolling_backfill.py` (append-only posts/media via unique IDs, read Graph `media.paging.cursors.after`, next page media.limit(5).after(cursor), stops at 50 or exhausted, blocks invalid/missing cursor, fair least-pages prioritization, per-batch usage logs, fixed A/B partitions, per-slot dedupe, 90m start/60m finish cooldown, 70% quota threshold, 30-minute max). Existing original collection experiments are NEVER modified.
+- **New GitHub code** `experiments/run_90m_cycle.py` one-shot approved business-hour dispatcher, explicitly OFF by default, requires two distinct authorized Meta app IDs/tokens/local credential files and business-hour window; `experiments/backfill_schedule.example.json` kept disabled and `.gitignore` excludes local config.
+- **New OFFLINE tests** `experiments/test_rolling_backfill.py` (10 cases) + `experiments/test_run_90m_cycle.py` (7 cases). User Windows run NOT YET DONE; do not claim passing tests until logs confirm. One-account two-cycle live pagination probe also NOT performed. Manual probe `--probe-ordinal 1` must be tested 90m apart in a NEW directory, separate from prior DBs.
+- Hongju original token expired and caller Instagram ID unavailable; app B CANNOT be enabled yet. No n8n/Windows actual 90-minute schedule created or turned on. Real two-app rate quota independence remains unverified. Detailed instructions `experiments/README_CURSOR_BACKFILL_90M.md`.
+- Previous Meta latest5+latest1+latest10 collection was reported **286 of 294 success, 8 Meta110 errors** in user screenshot; raw data in separate local SQLite. Those results are not yet merged into new history-backfill DB or delivery ZIP.
+
+
 ## 2026-10-16 — Slot2 151..294 prepared with read-only cross-source skip
 
 - User has their own valid local Meta token/IG ID but Hongju's earlier token was confirmed expired. User proposes reusing their own token/IG ID temporarily in two logical slots, then replacing slot2 with Hongju credentials after renewal. **Two logical slots with one token are NOT two independent API budgets**; do not perform parallel runs or assume exactly 60-minute reset.
