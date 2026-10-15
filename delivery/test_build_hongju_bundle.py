@@ -169,6 +169,84 @@ class HandoffTests(unittest.TestCase):
         source = b.read_csv(self.source / "posts.csv")
         self.assertEqual("=HYPERLINK(\"https://fake.invalid\")", source[0]["caption"])
 
+    def supplement(self):
+        folder = self.root / "supplement"
+        folder.mkdir(exist_ok=True)
+        accounts = [
+            dict(a, status=("success" if a["account_key"] == "JP_001" else "pending"))
+            for a in self.accounts
+        ]
+        posts = [{"post_id": "9999999999999999999", "account_key": "JP_001",
+                  "username": "jpnails", "country": "JP",
+                  "timestamp": "2026-10-16T01:00:00Z",
+                  "caption": "new", "like_count": "4", "comments_count": "1"}]
+        media = [{"media_id": "9999999999999999999",
+                  "post_id": "9999999999999999999",
+                  "account_key": "JP_001", "country": "JP",
+                  "media_type": "IMAGE", "media_url": "https://example.invalid/jp.jpg"}]
+        write_csv(folder / "accounts.csv",
+                  ["account_key", "username", "country", "status", "followers_count"],
+                  accounts)
+        write_csv(folder / "posts.csv",
+                  ["post_id", "account_key", "username", "country", "timestamp",
+                   "caption", "like_count", "comments_count"], posts)
+        write_csv(folder / "media.csv",
+                  ["media_id", "post_id", "account_key", "country",
+                   "media_type", "media_url"], media)
+        return folder
+
+    def test_merge_two_sources_covers_new_account_without_losing_old(self):
+        extra = self.supplement()
+        archive, info = b.build_bundle(self.source, self.output, supplement=extra)
+        self.assertEqual(3, info["source_accounts"])
+        self.assertEqual(3, info["accounts_with_posts"])
+        self.assertEqual(8, info["source_posts"])
+        self.assertEqual(7, info["latest_post_rows"])
+        self.assertEqual({"primary": 7, "supplement": 1},
+                         info["posts_by_collection_source"])
+        self.assertEqual({"KR": 5, "US": 1, "JP": 1}, info["latest_posts_by_country"])
+        with ZipFile(archive) as z:
+            all_posts = zip_csv(z, "posts_all_available.csv")
+            self.assertEqual(8, len(all_posts))
+            self.assertIn("9999999999999999999", {p["post_id"] for p in all_posts})
+            jp_post = next(p for p in all_posts if p["account_key"] == "JP_001")
+            self.assertEqual("supplement", jp_post["collection_source"])
+            coverage = zip_csv(z, "account_coverage.csv")
+            jp = next(a for a in coverage if a["account_key"] == "JP_001")
+            self.assertEqual("success", jp["status"])
+            self.assertEqual("1", jp["latest5_in_source"])
+            self.assertIn("병합", z.read("README_데이터안내.txt").decode("utf-8-sig"))
+
+    def test_merge_rejects_overlapping_completed_account(self):
+        extra = self.supplement()
+        rows = b.read_csv(extra / "accounts.csv")
+        rows[0]["status"] = "success"
+        write_csv(extra / "accounts.csv", list(rows[0]), rows)
+        with self.assertRaisesRegex(ValueError, "overlaps"):
+            b.build_bundle(self.source, self.output, supplement=extra)
+        self.assertFalse(self.output.exists())
+
+    def test_merge_rejects_different_country_username(self):
+        extra = self.supplement()
+        rows = b.read_csv(extra / "accounts.csv")
+        rows[2]["username"] = "not_jpnails"
+        write_csv(extra / "accounts.csv", list(rows[0]), rows)
+        with self.assertRaisesRegex(ValueError, "mismatch"):
+            b.build_bundle(self.source, self.output, supplement=extra)
+        self.assertFalse(self.output.exists())
+
+    def test_merge_preserves_both_sources_untouched(self):
+        extra = self.supplement()
+        source_before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                         for p in self.source.iterdir()}
+        extra_before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                        for p in extra.iterdir()}
+        b.build_bundle(self.source, self.output, supplement=extra)
+        self.assertEqual(source_before, {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                         for p in self.source.iterdir()})
+        self.assertEqual(extra_before, {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                         for p in extra.iterdir()})
+
     def test_cli_preview_creates_zip_without_credentials(self):
         self.assertEqual(0, b.main([
             "--source", str(self.source), "--output-dir", str(self.output)]))
