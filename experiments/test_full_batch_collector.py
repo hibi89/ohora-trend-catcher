@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -326,6 +327,123 @@ class FullBatchUnitTests(unittest.TestCase):
             pass
         with self.assertRaisesRegex(ValueError, "must differ"):
             mod.eligible_from_snapshot(old_db, self.hash, self.accounts, old_db)
+
+    def setup_cross_skip_sources(self):
+        primary_dir = self.base / "latest_5"
+        secondary_dir = self.base / "latest_1_pending"
+        primary_dir.mkdir()
+        secondary_dir.mkdir()
+        primary_db = primary_dir / "collection.sqlite"
+        secondary_db = secondary_dir / "collection.sqlite"
+        with closing(mod.database(primary_db, self.accounts, self.hash, 5)) as db:
+            with db:
+                for i, a in enumerate(self.accounts[:181], start=1):
+                    status = ("failed" if i in {32, 61, 100, 113, 152}
+                              else "success")
+                    db.execute("UPDATE accounts SET status=? WHERE account_key=?",
+                               (status, a["account_key"]))
+        with closing(mod.database(secondary_db, self.accounts, self.hash, 1)) as db:
+            with db:
+                for a in self.accounts[181:196]:
+                    db.execute("UPDATE accounts SET status='success' WHERE account_key=?",
+                               (a["account_key"],))
+        return primary_db, secondary_db
+
+    def test_split_151_294_skips_both_snapshots_preview_with_no_writes(self):
+        old, partial = self.setup_cross_skip_sources()
+        out = self.base / "split_10"
+        from contextlib import redirect_stdout
+        from io import StringIO
+        std = StringIO()
+        argv = ["--source", str(self.source), "--posts", "10",
+                "--batch-size", "10", "--start-ordinal", "151",
+                "--end-ordinal", "294", "--assigned-app", "owner_slot2_probe",
+                "--only-pending-from", str(old),
+                "--skip-collected-from", str(partial),
+                "--output-dir", str(out)]
+        with redirect_stdout(std), patch.object(mod, "request_batch") as net:
+            self.assertEqual(0, mod.main(argv))
+            net.assert_not_called()
+        printed = std.getvalue()
+        self.assertIn("144/294 assigned accounts", printed)
+        self.assertIn("98 eligible AFTER cross-DB skip", printed)
+        self.assertIn("197, 198, 199, 200", printed)
+        self.assertFalse(out.exists())
+
+    def test_split_10_posts_live_resumes_and_preserves_other_dbs(self):
+        old, partial = self.setup_cross_skip_sources()
+        out = self.base / "split_10"
+        env = self.base / "cfg.env"
+        env.write_text("META_ACCESS_TOKEN=FAKE_TEST_TOKEN\nMETA_IG_USER_ID=123\n")
+        before = [
+            (p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+            for p in (old, partial)
+        ]
+        batches = []
+        def fake_call(_ver, _token, ops, timeout=120):
+            from urllib.parse import parse_qs
+            batch_ordinals = []
+            for item in ops:
+                fields = parse_qs(item["relative_url"].split("?", 1)[1])["fields"][0]
+                self.assertIn("media.limit(10)", fields)
+                name = fields.split("business_discovery.username(", 1)[1].split(")", 1)[0]
+                batch_ordinals.append(int(name.rsplit("us", 1)[-1])
+                                      if "testus" in name else
+                                      int(name.rsplit("jp", 1)[-1]) + 101)
+            batches.append(batch_ordinals)
+            return 200, fake_response(ops, count=10), {}, 0.02
+        args = [
+            "--source", str(self.source), "--env-file", str(env),
+            "--posts", "10", "--batch-size", "10",
+            "--max-batches", "1", "--stop-usage", "70",
+            "--delay-seconds", "0",
+            "--start-ordinal", "151", "--end-ordinal", "294",
+            "--assigned-app", "owner_slot2_probe",
+            "--only-pending-from", str(old),
+            "--skip-collected-from", str(partial),
+            "--output-dir", str(out), "--live",
+        ]
+        with patch.object(mod, "request_batch", side_effect=fake_call):
+            self.assertEqual(1, mod.main(args))
+            self.assertEqual(1, len(batches))
+            self.assertEqual(10, len(batches[0]))
+            self.assertEqual(1, mod.main(args))
+            self.assertEqual(2, len(batches))
+        after = [
+            (p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+            for p in (old, partial)
+        ]
+        self.assertEqual(before, after)
+        with closing(sqlite3.connect(out / "collection.sqlite")) as db:
+            self.assertEqual(20, db.execute(
+                "SELECT count(*) FROM accounts WHERE status='success'").fetchone()[0])
+            self.assertEqual(200, db.execute("SELECT count(*) FROM posts").fetchone()[0])
+            seq = [r[0] for r in db.execute(
+                "SELECT ordinal FROM accounts WHERE status='success' ORDER BY ordinal")]
+            self.assertEqual(list(range(197, 217)), seq)
+            manifest = dict(db.execute("SELECT key,value FROM manifest"))
+            self.assertEqual("owner_slot2_probe", manifest["assigned_app"])
+            self.assertEqual("10", manifest["posts_requested"])
+        # New split directory may not change assigned range or depth on resume.
+        other = list(args)
+        other[other.index("--posts") + 1] = "5"
+        with patch.object(mod, "request_batch") as no_api:
+            self.assertEqual(2, mod.main(other))
+            no_api.assert_not_called()
+
+    def test_cross_skip_refuses_wrong_source_hash_or_same_destination(self):
+        old, partial = self.setup_cross_skip_sources()
+        out = self.base / "new"
+        changed = self.base / "different.csv"
+        changed.write_bytes(self.source.read_bytes() + b"\n")
+        args = ["--source", str(changed), "--output-dir", str(out),
+                "--skip-collected-from", str(partial)]
+        with patch.object(mod, "request_batch") as no_api:
+            self.assertEqual(2, mod.main(args + ["--live"]))
+            no_api.assert_not_called()
+        self.assertFalse(out.exists())
+        with self.assertRaisesRegex(ValueError, "must differ"):
+            mod.completed_from_snapshot(partial, self.hash, self.accounts, partial)
 
     def test_optional_usage_halt(self):
         cfg=self.base / ".env.local"
