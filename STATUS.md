@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — 1-post 10-account comparison; five-post follow-up prepared
+
+- User Windows pending-only batch 2 (original ordinals 187..196) succeeded **10/10**, response 1.859s, Meta app total_time moved **75% to 79%**, call_count=43%, resulting in 15/113 supplemental successes. Original 5-post database remains 176 successes/880 posts, original errors 5 (110), original pending 113. Combined coverage 191 unique accounts, 895 posts; 98 distinct official accounts remain uncollected.
+- User now requests **one 10-account × 5-post** comparison against 10×1, and expects to schedule batches with rest windows later. This run must use the existing original 5-post output directory, one batch only (`--max-batches 1`, `--batch-size 10`, `--posts 5`), with current app usage ~79%. Its likely next account ordinals are 182..191. No assistant-side live Meta calls; the Windows user must run it.
+- WARNING: 182..191 were already fetched by the one-post experiment. Merely concatenating original and supplement would duplicate accounts and posts. Handoff ZIP merge now **prefers five-post primary on whole-account overlaps**, keeps any nonoverlapping one-post accounts, validates account roster/IDs, and reports skipped/added counts. Source SQLite untouched. 15 offline delivery tests authored; user's Windows run pending.
+- If all requested 10 original accounts succeed with five posts, expected combined data after merge: 5-post primary **186 accounts/930 posts**, supplemental net **5 accounts/5 posts**, combined **191 accounts/935 posts**. If failures occur, recompute using actual DB counts. Existing handoff ZIP remains its earlier immutable 175-account snapshot.
+- Observed 10×1 app total_time change of +4 percentage points is NOT a controlled measurement of fixed cost. 10×5 may have a different rolling-window state. Cooling 50–60 minutes may not restore quota; confirm recent app usage before each separate run.
+
+
 ## 2026-10-16 — 1-post pending-only pilot tested on Windows
 
 - User's Windows run: **19/19 offline tests passed** for pending-only batch collector.
