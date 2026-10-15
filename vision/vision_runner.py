@@ -462,6 +462,12 @@ def run(args: argparse.Namespace) -> int:
     for m in media:
         media_by_post.setdefault(str(m.get("post_id") or ""), []).append(m)
     posts.sort(key=lambda p: (str(p.get("timestamp") or ""), str(p["post_id"])), reverse=True)
+    if args.post_id is not None:
+        # Exact post selection prevents a --limit 1 retry from billing a different,
+        # previously unanalysed post simply because it sorts first.
+        posts = [p for p in posts if str(p["post_id"]) == args.post_id]
+        if not posts:
+            raise ValueError("Requested --post-id does not exist in source collection")
     config = settings(args.env_file.expanduser())
     provider = provider_from(config, "VISION" if args.provider == "primary" else "VISION_FALLBACK")
     # Allow offline setup before key, and never reveal key in error messages.
@@ -566,6 +572,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=None, help="max uncached posts processed this run")
     p.add_argument("--delay-seconds", type=float, default=0.4)
     p.add_argument("--retry-failed", action="store_true")
+    p.add_argument("--post-id", type=str, default=None,
+                   help="target exactly this post ID, skipping every other source post")
     p.add_argument("--live", action="store_true", help="authorize actual external image model API calls")
     args = p.parse_args(argv)
     try:
