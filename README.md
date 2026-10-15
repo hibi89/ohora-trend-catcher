@@ -36,3 +36,5 @@ For continued edits: GitHub hosts code and documents, local PC hosts real data a
 - [delivery/README.md](delivery/README.md): 2026-10-16 데이터 전달 우선 워크플로, 오늘 인계 ZIP 실행법, Meta rate-limit 대안.
 - [delivery/build_hongju_bundle.py](delivery/build_hongju_bundle.py): API 호출 없는 읽기 전용 SQLite/CSV → 최신5·전체 게시물·계정별 커버리지 포함 ZIP 생성.
 - [delivery/test_build_hongju_bundle.py](delivery/test_build_hongju_bundle.py): 9개 오프라인 회귀 테스트. 사용자 Windows 검증 전.
+
+- [experiments/README_ONE_POST_PENDING_PROBE.md](experiments/README_ONE_POST_PENDING_PROBE.md): read-only selection of pending accounts for separate one-post quota pilot (requires offline tests and explicit small live batch).
