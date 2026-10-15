@@ -132,7 +132,7 @@ class CursorBackfillTests(unittest.TestCase):
         with patch.object(base, "request_batch", side_effect=responder):
             for i in range(10):
                 self.assertEqual(0, mod.main(self.args(cycle=f"round{i:03}")))
-            self.assertEqual(0, mod.main(self.args(cycle="round010")))
+            self.assertEqual(0, mod.main(self.args(cycle="round009")))  # duplicate trigger is a no-op
         self.assertEqual(10, state["page"])
         with closing(sqlite3.connect(self.output / "collection.sqlite")) as db:
             self.assertEqual(50, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
