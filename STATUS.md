@@ -1,5 +1,13 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Vision failed post recovered; one mocked test corrected
+
+- **User-verified live recovery:** `--post-id 17994612878841451 --retry-failed --limit 1 --live` reported `attempted=1, success=1, failed=0`. The exported `post_analysis.csv` row for that exact post is now `status=success`, `error_code` empty, model confidence 0.90, visual summary about the 'Muffler II' gel collection display. This establishes technical recovery, not ground-truth image accuracy.
+- **Windows test status:** prior 27-test suite yielded `FAILED (errors=1)` in `test_format_error_retried_once_and_cached`. Its final mock used an untargeted `--limit 1` run; the worker therefore correctly processed a *different* uncached post but received a `MagicMock` result, which `json.dumps` cannot serialize.
+- **Fix:** `vision/test_vision_runner.py` now specifies `--post-id P1` for the final cache assertion and verifies that `analyze()` was never called. Production runner unchanged. Code committed as `170c8f3e6f0f7d11261c29f9addfbe684f375899`.
+- **Next:** `git pull origin main` and `python -m unittest discover -s vision -p test_vision_runner.py -v`. Target: 27/27 tests OK. No further paid API retry is required for this recovered post; do not run the live retry again.
+
+
 ## 2026-10-16 — Target exact failed image post before proceeding to P1
 
 - User correctly flagged that **one live `invalid_json` error remains unresolved**. A code patch for malformed JSON is not equivalent to successfully reclassifying the failed post.
