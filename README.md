@@ -44,3 +44,9 @@ For continued edits: GitHub hosts code and documents, local PC hosts real data a
 - [실행 가이드: 2개 이상의 승인된 Meta 앱, 담당 범위, PowerShell, 재개/병합](experiments/README_TWO_APP_LATEST10.md)
 - [수집기](experiments/two_app_runner.py) · [오프라인 검증 테스트](experiments/test_two_app_runner.py)
 - 수집 행 번호 1–150/151–294, 앱별 독립 저장소. 스케줄러는 아직 구현하지 않음. API 호출은 명시적인 `--live`로만 실행.
+
+## 2026-10-16: 90-minute cursor backfill (disabled until verified)
+
+- **Latest design**: distinct properly authorized Meta apps A (official account ordinals 1–150) and B (151–294), five media posts per account each 90-minute cycle, per-account cursor advancement to **50 unique historical posts**. Re-querying latest five is NOT 50 unique.
+- **New code**: [cursor collector](experiments/rolling_backfill.py), [90-minute one-shot A/B dispatcher](experiments/run_90m_cycle.py), [disabled configuration example](experiments/backfill_schedule.example.json), plus 10 collector + 7 scheduler **offline tests (user Windows verification pending)**.
+- **Setup, token requirements, one-account two-cycle live pagination pilot**: [90-minute backfill guide](experiments/README_CURSOR_BACKFILL_90M.md). Scheduler remains disabled until the valid Hongju token/IG ID and distinct Meta App IDs are confirmed. Existing real data remains local/untouched.
