@@ -49,6 +49,42 @@ class FullBatchUnitTests(unittest.TestCase):
         make_source(self.source)
         self.accounts, self.hash = mod.load_source(self.source)
 
+    def test_initial_five_posts_isolated_and_manifest_locked(self):
+        cfg = self.base / "safe_env.local"
+        cfg.write_text("META_ACCESS_TOKEN=SYNTHETIC_SECRET\\nMETA_IG_USER_ID=123\\n")
+        output = self.base / "latest_5"
+        calls = []
+
+        def stub(_version, _token, operations, timeout=120):
+            calls.append(len(operations))
+            return 200, fake_response(operations, count=5), {}, 0.02
+
+        arguments = [
+            "--source", str(self.source), "--env-file", str(cfg),
+            "--output-dir", str(output), "--posts", "5",
+            "--batch-size", "10", "--max-batches", "1",
+            "--delay-seconds", "0", "--stop-usage", "75", "--live",
+        ]
+        with patch.object(mod, "request_batch", side_effect=stub):
+            self.assertEqual(1, mod.main(arguments))
+        self.assertEqual([10], calls)
+        with sqlite3.connect(output / "collection.sqlite") as conn:
+            self.assertEqual(
+                ("5",), conn.execute(
+                    "SELECT value FROM manifest WHERE key='posts_requested'"
+                ).fetchone()
+            )
+            self.assertEqual(10, conn.execute(
+                "SELECT count(*) FROM accounts WHERE status='success'"
+            ).fetchone()[0])
+            self.assertEqual(50, conn.execute(
+                "SELECT count(*) FROM posts"
+            ).fetchone()[0])
+        # Reusing a database with a different posts limit must be rejected.
+        with patch.object(mod, "request_batch") as unused:
+            self.assertEqual(2, mod.main(arguments[:-2] + ["--posts", "4", "--live"]))
+            unused.assert_not_called()
+
     def test_source_constraints_and_order(self):
         self.assertEqual(294, len(self.accounts))
         self.assertEqual(("KR_001", "KR_100", "US_001", "JP_093"),
