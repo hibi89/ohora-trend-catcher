@@ -1,6 +1,6 @@
 # OHORA Trend Catcher — 5-post incremental collection design (decision record)
 
-Status: **Design approved in principle; scheduled refresh, backfill, and vision analysis NOT implemented.** Updated 2026-10-16 KST.
+Status: **Latest-5 first acquisition and standalone post-level vision pipeline implemented offline. Recurring latest refresh, historical backfill, 90-minute scheduling, production dashboard and real vision endpoint checks NOT implemented/verified.** Updated 2026-10-16 KST.
 
 ## Why two phases?
 
@@ -34,8 +34,8 @@ Two architectures considered:
 - Configurable `backfill_depth_target` (e.g. 50 unique posts/account), not a license to delete existing historical data. New latest posts can increase the lifetime archive above this target.
 - The absence of more pages or an invalid cursor must be recorded, not interpreted as zero historical content.
 
-**Stage 3 — vision and dashboard:**
-- Build a queue from previously stored accessible image URLs, carousel children, and evaluated VIDEO thumbnails. One record per `media_id + model_version + prompt_version`; avoid repeat analysis.
+**Stage 3 — vision and dashboard (vision runner implemented offline; dashboard pending):**
+- `vision/vision_runner.py` chooses up to 3 representative images per post, analyzes the **post** from images plus caption, and deduplicates by `post_id + model + prompt_version` with a media-ID/caption fingerprint. `selected_media` records source media IDs/basis but does not claim separate per-media tags. The runner reads existing SQLite or CSV without modifying source data. Provider validation remains pending.
 - Feed visual content plus post caption and categorize `is_design_post`, color, technique, texture, motif, season, use. Image endpoint authentication, price and output validation must be proven on a small sample first.
 - Dashboard only queries stored DB; country + date range + design filter, ranking and export. Show data coverage limitations; user date filtering does not request Meta again.
 
