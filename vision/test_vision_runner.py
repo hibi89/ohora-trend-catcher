@@ -143,9 +143,12 @@ class VisionTests(unittest.TestCase):
             self.assertEqual(1, db.execute(
                 "SELECT COUNT(*) FROM post_analysis WHERE status='success'"
             ).fetchone()[0])
+        # Re-run only the previously classified post. An untargeted
+        # --limit 1 run would legitimately select a DIFFERENT uncached post;
+        # the default MagicMock response is not a valid model JSON result.
         with patch.object(v, "analyze") as fn:
-            self.assertEqual(0, self.run_live("--limit", "1"))
-            self.assertEqual(1, fn.call_count)  # another uncached post, not the first
+            self.assertEqual(0, self.run_live("--post-id", "P1", "--limit", "1"))
+            fn.assert_not_called()
 
     def test_json_length_finish_reason_is_detected(self):
         class Response:
