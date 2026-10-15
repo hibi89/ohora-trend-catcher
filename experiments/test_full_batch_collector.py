@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import sqlite3
+from contextlib import closing
 import sys
 import tempfile
 import unittest
@@ -68,7 +69,7 @@ class FullBatchUnitTests(unittest.TestCase):
         with patch.object(mod, "request_batch", side_effect=stub):
             self.assertEqual(1, mod.main(arguments))
         self.assertEqual([10], calls)
-        with sqlite3.connect(output / "collection.sqlite") as conn:
+        with closing(sqlite3.connect(output / "collection.sqlite")) as conn:
             self.assertEqual(
                 ("5",), conn.execute(
                     "SELECT value FROM manifest WHERE key='posts_requested'"
@@ -204,7 +205,7 @@ class FullBatchUnitTests(unittest.TestCase):
             self.assertEqual([10, 10], seen)
             self.assertEqual(1, mod.main(argv))  # 20 MORE, not same twenty
             self.assertEqual([10,10,10,10], seen)
-        with sqlite3.connect(out / "collection.sqlite") as db:
+        with closing(sqlite3.connect(out / "collection.sqlite")) as db:
             self.assertEqual(40, db.execute("SELECT count(*) FROM accounts WHERE status='success'").fetchone()[0])
             self.assertEqual(40, db.execute("SELECT count(*) FROM posts").fetchone()[0])
         # Tests are designed not to print secrets or persist token
