@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+from contextlib import closing
 import hashlib
 import io
 import json
@@ -128,7 +129,7 @@ class HandoffTests(unittest.TestCase):
 
     def test_works_with_experiment_sqlite_source(self):
         db = self.root / "experiment.sqlite"
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn:
             conn.executescript("""
             CREATE TABLE accounts (account_key TEXT,username TEXT,country TEXT,status TEXT);
             CREATE TABLE posts (post_id TEXT,account_key TEXT,timestamp TEXT,country TEXT);
