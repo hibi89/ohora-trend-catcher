@@ -253,6 +253,80 @@ class FullBatchUnitTests(unittest.TestCase):
         rc = mod.main(["--source",str(self.source),"--output-dir",str(legacy)])
         self.assertEqual(2, rc)
 
+    def test_one_post_restricts_to_old_pending_without_touching_old_db(self):
+        original = self.base / "latest_5"
+        original.mkdir()
+        original_db = original / "collection.sqlite"
+        with closing(mod.database(original_db, self.accounts, self.hash, 5)) as db:
+            with db:
+                for a in self.accounts[:176]:
+                    db.execute("UPDATE accounts SET status='success' WHERE account_key=?",
+                               (a["account_key"],))
+                for a in self.accounts[176:181]:
+                    db.execute("UPDATE accounts SET status='failed',error_code='110' "
+                               "WHERE account_key=?", (a["account_key"],))
+        self.assertEqual(113, len(mod.eligible_from_snapshot(
+            original_db, self.hash, self.accounts, self.base / "latest_1" / "collection.sqlite")))
+        cfg = self.base / "env.local"
+        cfg.write_text("META_ACCESS_TOKEN=TEST_KEY\nMETA_IG_USER_ID=123\n")
+        output = self.base / "latest_1"
+        seen = []
+        def fake_call(_version, _token, ops, timeout=120):
+            from urllib.parse import parse_qs
+            for op in ops:
+                fields = parse_qs(op["relative_url"].split("?", 1)[1])["fields"][0]
+                self.assertIn("media.limit(1)", fields)
+            seen.append(len(ops))
+            return 200, fake_response(ops, count=1), {}, 0.1
+        arguments = [
+            "--source", str(self.source), "--env-file", str(cfg),
+            "--posts", "1", "--batch-size", "10", "--max-batches", "1",
+            "--stop-usage", "85", "--delay-seconds", "0",
+            "--only-pending-from", str(original_db),
+            "--output-dir", str(output), "--live",
+        ]
+        with patch.object(mod, "request_batch", side_effect=fake_call):
+            self.assertEqual(1, mod.main(arguments))
+        self.assertEqual([10], seen)
+        with closing(sqlite3.connect(original_db)) as db:
+            self.assertEqual(0, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
+            self.assertEqual(176, db.execute(
+                "SELECT COUNT(*) FROM accounts WHERE status='success'").fetchone()[0])
+        with closing(sqlite3.connect(output / "collection.sqlite")) as db:
+            self.assertEqual(10, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
+            successful = {row[0] for row in db.execute(
+                "SELECT account_key FROM accounts WHERE status='success'")}
+            self.assertEqual({a["account_key"] for a in self.accounts[181:191]}, successful)
+            self.assertTrue(all(a["account_key"] not in successful for a in self.accounts[:181]))
+
+    def test_restrict_refuses_different_account_source(self):
+        original = self.base / "old"
+        original.mkdir()
+        db_path = original / "collection.sqlite"
+        with closing(mod.database(db_path, self.accounts, self.hash, 5)):
+            pass
+        changed = self.base / "alternative.csv"
+        changed.write_bytes(self.source.read_bytes() + b"\n")
+        env = self.base / "cfg.env"
+        env.write_text("META_ACCESS_TOKEN=DUMMY\nMETA_IG_USER_ID=123\n")
+        output = self.base / "new"
+        with patch.object(mod, "request_batch") as unused:
+            rc = mod.main(["--source", str(changed), "--env-file", str(env),
+                 "--output-dir", str(output), "--only-pending-from", str(db_path),
+                 "--posts", "1", "--live"])
+            self.assertEqual(2, rc)
+            unused.assert_not_called()
+        self.assertFalse(output.exists())
+
+    def test_restrict_refuses_destination_equal_original_sqlite(self):
+        old = self.base / "result"
+        old.mkdir()
+        old_db = old / "collection.sqlite"
+        with closing(mod.database(old_db, self.accounts, self.hash, 5)):
+            pass
+        with self.assertRaisesRegex(ValueError, "must differ"):
+            mod.eligible_from_snapshot(old_db, self.hash, self.accounts, old_db)
+
     def test_optional_usage_halt(self):
         cfg=self.base / ".env.local"
         cfg.write_text("META_ACCESS_TOKEN=TEST_SECRET\nMETA_IG_USER_ID=123\n")
