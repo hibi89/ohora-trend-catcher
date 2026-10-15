@@ -103,6 +103,7 @@ def combine_collections(primary: dict[str, list[dict]],
     new_accounts: list[dict] = []
     add_keys: set[str] = set()
     overlap_keys: set[str] = set()
+    recovered_keys: set[str] = set()
     for a in primary["accounts"]:
         key = str(a["account_key"])
         extra = extra_accounts[key]
@@ -114,12 +115,20 @@ def combine_collections(primary: dict[str, list[dict]],
                 # one-post snapshot from the same account is now redundant.
                 overlap_keys.add(key)
                 new_accounts.append(dict(a, collection_source="primary"))
-            elif base_status in {"pending", "rate_limited"}:
+            elif base_status in {"pending", "rate_limited", "failed"}:
                 add_keys.add(key)
-                new_accounts.append(dict(extra, collection_source="supplement"))
+                if base_status == "failed":
+                    # A failed five-post request does not invalidate an earlier
+                    # successful one-post result from this same official account.
+                    recovered_keys.add(key)
+                    new_accounts.append(dict(
+                        extra, collection_source="supplement",
+                        primary_latest5_status="failed",
+                        primary_latest5_error_code=a.get("error_code") or ""))
+                else:
+                    new_accounts.append(dict(extra, collection_source="supplement"))
             else:
-                # Do not silently override failed access/identity results.
-                raise ValueError("Supplement conflicts with failed primary account")
+                raise ValueError("Unsupported primary account status during merge")
         else:
             new_accounts.append(dict(a, collection_source="primary"))
 
@@ -148,6 +157,7 @@ def combine_collections(primary: dict[str, list[dict]],
         "_merge_meta": {
             "supplement_accounts_added": len(add_keys),
             "supplement_accounts_overlapped": len(overlap_keys),
+            "supplement_accounts_restored_after_primary_failure": len(recovered_keys),
             "supplement_post_rows_included": len(included_posts),
             "supplement_post_rows_ignored_overlap": len(extra_posts) - len(included_posts),
             "supplement_media_rows_included": len(included_media),
