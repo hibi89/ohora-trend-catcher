@@ -1,0 +1,26 @@
+name: Offline Meta Collector Tests
+on:
+  push:
+    paths:
+      - 'experiments/**'
+      - 'delivery/**'
+      - '.github/workflows/offline-collector-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-unittest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test existing Meta collection
+        run: python -m unittest discover -s experiments -p test_full_batch_collector.py -v
+      - name: Test two Meta app partitioning
+        run: python -m unittest discover -s experiments -p test_two_app_runner.py -v
+      - name: Test offline merged handoff
+        run: python -m unittest discover -s delivery -p test_build_hongju_bundle.py -v
