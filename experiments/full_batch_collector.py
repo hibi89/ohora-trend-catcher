@@ -474,8 +474,8 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("Output directory must be separate from existing legacy data")
     if not 1 <= args.batch_size <= 10:
         raise ValueError("--batch-size must be 1..10 until larger batches are verified")
-    if args.posts != 20:
-        raise ValueError("Full-collection experiment fixes --posts=20 for comparability")
+    if not 1 <= args.posts <= 20:
+        raise ValueError("--posts must be between 1 and 20")
     if args.delay_seconds < 0 or (args.max_batches is not None and args.max_batches < 1):
         raise ValueError("Invalid delay or max-batches")
     if args.stop_usage is not None and not (0 < args.stop_usage <= 100):
