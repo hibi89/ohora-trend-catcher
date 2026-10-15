@@ -141,7 +141,12 @@ class TwoAppTests(unittest.TestCase):
         seen = []
         def stub(_version, token, ops, timeout=120):
             seen.append(token)
-            return 200, fake_response(ops, count=10), {}, 0.1
+            # A different fixture post ID per batch avoids unrealistic duplicate
+            # IDs across distinct account sets in the fake Meta responses.
+            items = fake_response(ops, count=10)
+            for entry in items:
+                entry["body"] = entry["body"].replace("fake-", f"round{len(seen)}-")
+            return 200, items, {}, 0.1
         with patch.object(collector, "request_batch", side_effect=stub):
             for i in range(2):
                 self.assertEqual(0, duo.run(self.args(live=True)
