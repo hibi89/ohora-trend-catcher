@@ -13,6 +13,7 @@ Private project source mirror, prepared from the original locally collected ZIP 
 - `experiments/full_batch_collector.py`: isolated 294-account Meta Batch collection; `--posts 5` supported; run only after app usage recovers.
 - `vision/vision_runner.py`: **new image+caption AI analysis** from collected SQLite or CSV, idempotent per post, separately exported. See [vision/README.md](vision/README.md) for morning setup, tests and the explicit `--live --limit 1` provider check.
 - `docs/INCREMENTAL_V1_ARCHITECTURE.md`: latest-5/backfill-5/90-minute schedule planned but not yet implemented.
+- **[docs/V1_DELIVERY_ROADMAP.md](docs/V1_DELIVERY_ROADMAP.md)**: **confirmed V1 settings**, implementation stages P0–P6, acceptance checks, Gemini vision and separate weekly GPT-6.1 Sol API roles.
 
 ## Local setup / using `git pull`
 
