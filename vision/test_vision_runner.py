@@ -120,6 +120,47 @@ class VisionTests(unittest.TestCase):
         self.assertEqual([],d["color"])
         self.assertFalse(d["is_design_post"])
 
+    def test_wrapped_json_and_second_json_rejected(self):
+        wrapped = "Design analysis result:\n" + json.dumps(self.good()) + "\nCompleted."
+        out = v.parse_response(wrapped)
+        self.assertEqual(["pink"], out["color"])
+        with self.assertRaises(v.ProviderError) as caught:
+            v.parse_response(json.dumps(self.good()) + "\n" + json.dumps(self.good()))
+        self.assertEqual("invalid_json", caught.exception.code)
+
+    def test_broken_json_is_not_invented(self):
+        with self.assertRaises(v.ProviderError) as caught:
+            v.parse_response('Here is partial output: {"is_design_post":true, "color":')
+        self.assertEqual("invalid_json", caught.exception.code)
+
+    def test_format_error_retried_once_and_cached(self):
+        with patch.object(v, "analyze",
+                          side_effect=[v.ProviderError("invalid_json"), self.good()]) as fn:
+            self.assertEqual(0, self.run_live("--limit", "1"))
+            self.assertEqual(2, fn.call_count)
+            self.assertEqual(2200, fn.call_args.kwargs.get("max_tokens"))
+        with closing(sqlite3.connect(self.out / "vision.sqlite")) as db:
+            self.assertEqual(1, db.execute(
+                "SELECT COUNT(*) FROM post_analysis WHERE status='success'"
+            ).fetchone()[0])
+        with patch.object(v, "analyze") as fn:
+            self.assertEqual(0, self.run_live("--limit", "1"))
+            self.assertEqual(1, fn.call_count)  # another uncached post, not the first
+
+    def test_json_length_finish_reason_is_detected(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def read(self, limit):
+                return json.dumps({"choices": [{"finish_reason": "length",
+                     "message": {"content": json.dumps(VisionTests.good())}}]}).encode()
+        provider = v.Provider("primary", "https://api.example.invalid/v1",
+                              "FAKE_TEST_KEY", "fake-model")
+        with patch.object(v, "urlopen", return_value=Response()):
+            with self.assertRaises(v.ProviderError) as caught:
+                v.analyze(self.posts[0], v.select_images(self.media[:1], 3), provider, 10)
+        self.assertEqual("truncated_response", caught.exception.code)
+
     def test_read_sqlite_source(self):
         dbpath=self.source / "collection.sqlite"
         with closing(sqlite3.connect(dbpath)) as db:
@@ -227,7 +268,7 @@ class VisionTests(unittest.TestCase):
     def test_two_consecutive_bad_outputs_halt(self):
         with patch.object(v,"analyze",side_effect=v.ProviderError("invalid_schema")) as mock:
             self.assertEqual(3,self.run_live())
-            self.assertEqual(2,mock.call_count)
+            self.assertEqual(4,mock.call_count)  # 2 posts x 2 bounded format attempts
         with closing(sqlite3.connect(self.out/"vision.sqlite")) as db:
             self.assertEqual(2,db.execute("SELECT COUNT(*) FROM post_analysis WHERE status='failed'").fetchone()[0])
 
