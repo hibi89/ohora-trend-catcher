@@ -272,16 +272,12 @@ def database(path: Path, accounts: list[dict], digest: str, posts_requested: int
     return db
 
 
-def eligible_from_snapshot(path: Path, official_source_sha: str, accounts: list[dict],
-                           output_db: Path) -> set[str]:
-    """Read-only allowlist of still pending accounts in an earlier 5-post run.
-
-    The current 1-post experiment must have its OWN SQLite output directory.
-    It never updates the original 5-post database.
-    """
+def account_statuses_from_snapshot(path: Path, official_source_sha: str,
+                                   accounts: list[dict], output_db: Path) -> dict[str, str]:
+    """Validate and read another run's statuses read-only; never modify it."""
     src = path.expanduser().resolve()
     if not src.is_file() or src.suffix.lower() not in {".sqlite", ".db"}:
-        raise ValueError("--only-pending-from must be an existing collection SQLite file")
+        raise ValueError("Snapshot must be an existing collection SQLite file")
     if src == output_db.expanduser().resolve():
         raise ValueError("Source status SQLite and destination database must differ")
     uri = "file:" + src.as_posix() + "?mode=ro"
@@ -290,14 +286,30 @@ def eligible_from_snapshot(path: Path, official_source_sha: str, accounts: list[
             stored = dict(conn.execute("SELECT key,value FROM manifest"))
             states = conn.execute("SELECT account_key,status FROM accounts").fetchall()
         except sqlite3.Error:
-            raise ValueError("Original status database lacks manifest/accounts tables") from None
+            raise ValueError("Snapshot lacks manifest/accounts tables") from None
     if stored.get("source_sha256") != official_source_sha or len(states) != len(accounts):
-        raise ValueError("Original collection has a different account-list hash/count")
+        raise ValueError("Snapshot has a different account-list hash/count")
     actual = {str(k): str(status) for k, status in states}
     expected = {str(a["account_key"]) for a in accounts}
-    if set(actual) != expected:
-        raise ValueError("Original collection has different account keys")
-    return {k for k, status in actual.items() if status in {"pending", "rate_limited"}}
+    if len(actual) != len(states) or set(actual) != expected:
+        raise ValueError("Snapshot has duplicate or different account keys")
+    return actual
+
+
+def eligible_from_snapshot(path: Path, official_source_sha: str, accounts: list[dict],
+                           output_db: Path) -> set[str]:
+    """Existing semantics: only old pending/rate-limited accounts are eligible."""
+    states = account_statuses_from_snapshot(path, official_source_sha, accounts, output_db)
+    return {key for key, status in states.items()
+            if status in {"pending", "rate_limited"}}
+
+
+def completed_from_snapshot(path: Path, official_source_sha: str, accounts: list[dict],
+                            output_db: Path) -> set[str]:
+    """Exclude success and partial accounts collected in any other experiment."""
+    states = account_statuses_from_snapshot(path, official_source_sha, accounts, output_db)
+    return {key for key, status in states.items() if status in {"success", "partial"}}
+
 
 
 def as_integer(v: object) -> int | None:
@@ -563,13 +575,42 @@ def run(args: argparse.Namespace) -> int:
             args.only_pending_from, digest, source, args.output_dir / "collection.sqlite")
         print(f"Restricted to {len(allowlist)} previously pending/rate-limited accounts "
               "(no previously successful/failed accounts are re-requested)")
+    skipped_completed: set[str] = set()
+    for snapshot in args.skip_collected_from:
+        previously_collected = completed_from_snapshot(
+            snapshot, digest, source, args.output_dir / "collection.sqlite")
+        skipped_completed.update(previously_collected)
+    if skipped_completed:
+        if allowlist is None:
+            allowlist = {a["account_key"] for a in source}
+        allowlist.difference_update(skipped_completed)
+        print(f"Skip {len(skipped_completed)} distinct previously collected accounts "
+              "from other read-only snapshots")
     if partition is not None and partition[0] > len(source):
         raise ValueError("Assigned account range starts after the last source account")
-    assigned_count = len(source) if partition is None else max(0, min(len(source), partition[1]) - partition[0] + 1)
+    first, last = (partition[0], partition[1]) if partition else (1, len(source))
+    assigned_count = sum(first <= a["ordinal"] <= last for a in source)
+    eligible_preview = [
+        a for a in source if first <= a["ordinal"] <= last
+        and (allowlist is None or a["account_key"] in allowlist)
+    ]
+    existing_db = args.output_dir / "collection.sqlite"
+    if existing_db.is_file() and not args.live:
+        # Dry-run is strictly read-only, including when resuming.
+        uri = "file:" + existing_db.resolve().as_posix() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as db:
+            states = dict(db.execute("SELECT account_key,status FROM accounts"))
+        eligible_preview = [a for a in eligible_preview
+                            if states.get(a["account_key"]) in {"pending", "rate_limited"}]
     if not args.live:
-        print(f"DRY RUN: {assigned_count}/{len(source)} assigned accounts, {args.posts} recent posts each; "
-              f"{args.batch_size} per batch, {(assigned_count+args.batch_size-1)//args.batch_size} "
-              f"batches; no API requests or file writes")
+        count = len(eligible_preview)
+        print(f"DRY RUN: {assigned_count}/{len(source)} assigned accounts, "
+              f"{count} eligible AFTER cross-DB skip and existing output progress; "
+              f"{args.posts} recent posts each; {args.batch_size} per batch, "
+              f"{(count+args.batch_size-1)//args.batch_size} batches; "
+              "no API requests or file writes")
+        print("First eligible ordinal(s): " +
+              ", ".join(str(a["ordinal"]) for a in eligible_preview[:10]))
         print(f"Source sha256: {digest}")
         print(f"Output (separate from existing collector): {args.output_dir}")
         return 0
@@ -693,6 +734,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only-pending-from", type=Path, default=None,
                         help="read-only collection.sqlite to restrict this NEW isolated output "
                              "to accounts still pending/rate_limited in previous run")
+    parser.add_argument("--skip-collected-from", type=Path, action="append", default=[],
+                        help="repeatable read-only collection.sqlite; skip success/partial "
+                             "accounts already collected in another batch")
     parser.add_argument("--live", action="store_true", help="Authorize Meta API calls")
     args = parser.parse_args(argv)
     try:
