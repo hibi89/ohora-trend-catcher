@@ -32,3 +32,6 @@ venv/
 
 # Offline/live batch probe statistics stay local
 /experiments/results/
+
+# Local-only backfill scheduling details and account/token file paths
+/experiments/backfill_schedule.local.json
