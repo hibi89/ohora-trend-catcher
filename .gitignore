@@ -1,0 +1,31 @@
+# Secrets and private configuration
+**/.env.local
+**/.env.*.local
+**/*secret*.json
+**/*credentials*.json
+*.pem
+*.key
+
+# Source customer account list and real collection snapshots
+/account_list.csv
+/kq3_294_collection/accounts.csv
+/kq3_294_collection/posts.csv
+/kq3_294_collection/media.csv
+/kq3_294_collection/design_tags.csv
+/kq3_294_collection/collection_status.csv
+/kq3_294_collection/api_request_log.csv
+/kq3_294_collection/collection_summary.md
+/kq3_294_collection/manifest.json
+/kq3_294_collection/backups/
+/kq3_294_collection/collection.lock
+/analysis/snapshots/
+/analysis/**/*.csv
+
+# Generated and local environment
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.tmp
+.DS_Store
