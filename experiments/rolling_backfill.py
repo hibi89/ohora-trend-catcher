@@ -76,7 +76,7 @@ def select_pages(conn: sqlite3.Connection, first: int, last: int, cycle: str,
         FROM accounts a JOIN backfill_state s ON s.account_key=a.account_key
         WHERE a.ordinal BETWEEN ? AND ? AND s.exhausted=0 AND s.blocked=0
           AND (s.last_cycle IS NULL OR s.last_cycle <> ?)
-        ORDER BY a.ordinal
+        ORDER BY s.pages_fetched ASC, a.ordinal
         """, (first, last, cycle)).fetchall()
     return [dict(r) for r in result if r["saved"] < target][:limit]
 
@@ -211,8 +211,8 @@ def run(args) -> int:
                     if started_age < 90*60 or finished_age < 60*60:
                         print("SKIPPED: start-to-start 90min or finish-to-start 60min cooldown")
                         return 0
-            # Defensive starting cadence: manual repeat within the same 90-minute
-            # cycle is blocked even if cron triggers twice or requests fail.
+            # Reserve cycle before calls so overlapping tasks / duplicate
+            # triggers cannot repeat the same page or race this run.
             with db:
                 db.execute("INSERT INTO backfill_runs(cycle,started_utc) VALUES (?,?)",
                            (cycle, base.stamp()))
