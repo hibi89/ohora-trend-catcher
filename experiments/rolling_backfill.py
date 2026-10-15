@@ -232,15 +232,27 @@ def run(args) -> int:
                         print("No eligible cursor pages in this cycle")
                         break
                     ops = [cursor_operation(a, caller, a["next_cursor"]) for a in targets]
+                    batch_id = base.begin_batch(db, targets, TAKE)
                     print(f"App {args.app} cycle={cycle} batch {runs+1}: "
                           f"{targets[0]['ordinal']}..{targets[-1]['ordinal']} "
                           f"({len(targets)} accounts; 5 posts each)", flush=True)
                     try:
                         http, body, headers, sec = base.request_batch(version, token, ops)
                     except (URLError, TimeoutError, OSError):
+                        with db:
+                            db.execute("UPDATE batches SET finished_at=?,status=?,error=? "
+                                       "WHERE batch_id=?",
+                                       (base.stamp(), "transport_error",
+                                        "Meta transport error; no retry", batch_id))
                         print("HALTED: transport failure; no automatic retry")
                         break
                     if http != 200 or not isinstance(body, list) or len(body) != len(targets):
+                        with db:
+                            db.execute("""UPDATE batches SET finished_at=?,http_status=?,
+                                duration_seconds=?,status=?,error=? WHERE batch_id=?""",
+                                (base.stamp(), http, round(sec,3), "invalid_response",
+                                 "Malformed batch envelope; page checkpoints unchanged",
+                                 batch_id))
                         print(f"HALTED: invalid outer batch response HTTP={http}")
                         break
                     ratios = [base.usage(headers)]
@@ -278,6 +290,14 @@ def run(args) -> int:
                     runs += 1
                     vals = [x["total_time"] for x in ratios if "total_time" in x]
                     max_usage = max(vals) if vals else None
+                    app_usage = {"outer": ratios[0], "inner": ratios[1:],
+                                 "max_total_time_pct": max_usage}
+                    with db:
+                        db.execute("""UPDATE batches SET finished_at=?,http_status=?,
+                            duration_seconds=?,success_count=?,failed_count=?,
+                            rate_limited=?,usage_json=?,status=? WHERE batch_id=?""",
+                            (base.stamp(), http, round(sec, 3), ok, errors,
+                             int(fatal), json.dumps(app_usage), "completed", batch_id))
                     print(f"Batch {runs}: {sec:.3f}s success={ok} failed={errors} "
                           f"total_time_max={max_usage}% newly_unique_posts={fetched}")
                     if fatal:
