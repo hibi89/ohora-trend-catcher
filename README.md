@@ -38,3 +38,9 @@ For continued edits: GitHub hosts code and documents, local PC hosts real data a
 - [delivery/test_build_hongju_bundle.py](delivery/test_build_hongju_bundle.py): 9개 오프라인 회귀 테스트. 사용자 Windows 검증 전.
 
 - [experiments/README_ONE_POST_PENDING_PROBE.md](experiments/README_ONE_POST_PENDING_PROBE.md): read-only selection of pending accounts for separate one-post quota pilot (requires offline tests and explicit small live batch).
+
+## Meta 앱별 150/144계정 수동 수집 (10개씩)
+
+- [실행 가이드: 2개 이상의 승인된 Meta 앱, 담당 범위, PowerShell, 재개/병합](experiments/README_TWO_APP_LATEST10.md)
+- [수집기](experiments/two_app_runner.py) · [오프라인 검증 테스트](experiments/test_two_app_runner.py)
+- 수집 행 번호 1–150/151–294, 앱별 독립 저장소. 스케줄러는 아직 구현하지 않음. API 호출은 명시적인 `--live`로만 실행.
