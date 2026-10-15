@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — vision JSON safety improvements (Windows + live retest pending)
+
+- Observed user live paid MLAPI vision results: 21 post attempts, 20 success and 1 `invalid_json` (post ID stored locally); image-and-caption model service works, but output reliability needs improvement. This is a small sample, not a measured production failure rate.
+- Code commit `d4de3e4f6d7abbb53c94b1dde20ec71771365641`: recover a SINGLE complete JSON object when prose surrounds it; never fabricate truncated JSON. Detect model finish_reason length; allow exactly ONE extra model call on limited schema/format errors with larger max_tokens; no auto retry on 401/403/429 or transport faults; preserve cached successes and failed rows.
+- Test commit `d253ee456b9079cf37d85804f5072f65b306afa6`: 4 new offline tests for wrapped/duplicate/truncated JSON and bounded retry, and updated old two-invalid-output expectations. **25 total tests must be rerun on user's Windows PC; not yet verified after the new patch.**
+- Next user actions: `git pull origin main`, `python -m unittest discover -s vision -p test_vision_runner.py -v`, then one explicit real retry: `python .\vision\vision_runner.py --retry-failed --limit 1 --live`. Only if those pass consider larger analysis in batches.
+- Demo safeguard: PRECOMPUTE and store all classification before presentation; dashboard should only read cached success rows, disclose coverage/failures and operate without model/API availability. **Actual dashboard interface remains unimplemented**.
+
+
 ## 2026-10-16 — Image+caption vision pipeline ready for local provider validation
 
 **Code added:**
