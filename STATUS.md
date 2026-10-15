@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — User proposes 10-post, 150/144 authorized two-app division
+
+- User revised optimization hypothesis: each Business Discovery username is one Graph subrequest even if that request returns 10 posts; propose ~150 accounts per Meta app across **two separate, properly authorized apps** belonging to user and Hongju. Official file has 294 accounts, so use 150 + 144.
+- Do NOT equate 10 Graph batch operations in one outer HTTP request with one rate-limit call: they count as 10 subrequests, with processing total_time/call_count tracked by app/token, and possible user scope limits. Do NOT assume two personal logins guarantee independent app quota or treat extra apps as a workaround for rate limiting.
+- Still **unverified**: Meta 10-post total_time per account, Hongju app/token and permissions, app-level quota independence and 150/144 throughput. Need at most one small authorized 10×10 trial on recovered quota for each permitted independent app; protect at most 70% usage headroom, stop on code4.
+- Status of Hongju ZIP helper: original standalone 9/9 tests passed on Windows. New dual-source merge code supports five-post **primary precedence on account overlap**, skips prior one-post row duplicates, preserves earlier one-post successful data if five-post retry failed, and records source/overlap counts; 15 offline tests added but **NOT YET rerun on user's Windows**. Read-only source files. GitHub changes committed, no real Meta request or local ZIP created by assistant.
+- User now prioritizes idea over previous paired 10×5 test; do not auto-run any live test or change confirmed collection settings until the new design is validated.
+
+
 ## 2026-10-16 — 1-post 10-account comparison; five-post follow-up prepared
 
 - User Windows pending-only batch 2 (original ordinals 187..196) succeeded **10/10**, response 1.859s, Meta app total_time moved **75% to 79%**, call_count=43%, resulting in 15/113 supplemental successes. Original 5-post database remains 176 successes/880 posts, original errors 5 (110), original pending 113. Combined coverage 191 unique accounts, 895 posts; 98 distinct official accounts remain uncollected.
