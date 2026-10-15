@@ -67,3 +67,23 @@ PowerShell에서 OHORA 프로젝트 루트로 이동 후:
 - ZIP 목록에 실제 posts_latest5_per_account.csv와 manifest.json이 있으며 .env.local, API 키, batch 원본 응답 로그가 없는지 확인한다.
 - manifest의 source_accounts, accounts_with_posts, latest_post_rows, 국가별 covered_accounts 수를 전달 문구에 반영한다.
 - 홍주님께는 '*오늘 전달 데이터는 전체 계정 목록 중 N계정에서 확보한 M개 게시물이며, 미확보 계정 및 좋아요 결측은 별도 표시했습니다*'라고 정확하게 안내한다.
+
+## 7) 2026-10-16 — 5개 + 1개 실험 결과를 한 번에 전달
+
+실측: 기존 latest_5 DB는 성공 176계정/880게시물. 별도 latest_1_pending DB는 원래 미수집 대상 중 성공 15계정/15게시물. 두 자료를 합치면 191계정/895게시물이며, 오류 110은 5계정, 미수집은 98계정이다. 이것은 전체 294계정 전수 수집이 아니다.
+
+최신 코드가 추가된 뒤 Windows PowerShell에서:
+
+    git pull origin main
+    python -m unittest discover -s delivery -p test_build_hongju_bundle.py -v
+
+**기존 9개에서 4개 추가한 13개 테스트가 OK일 때만** 실제 병합 ZIP을 만든다. 두 원본 데이터베이스는 읽기 전용이며, 서로 다른 계정이 성공했는지 확인 후 안전하게 메모리에서만 합쳐 ZIP을 생성한다.
+
+    python .\delivery\build_hongju_bundle.py `
+      --source ".\experiments\results\latest_5" `
+      --supplement ".\experiments\results\latest_1_pending" `
+      --output-dir ".\experiments\results\hongju_delivery"
+
+**예상 결과:** `Source accounts=294, covered_accounts=191, source_posts=895, recent_posts=895` (그 시점까지 추가 수집이 없다면). 결과가 다르면 원본 DB 상태를 비교한다. 생성 ZIP은 타임스탬프가 붙으므로 기존 175계정 ZIP은 자동 덮어쓰지 않는다. ZIP 안의 `collection_source` 열은 각 행이 primary 또는 supplement에서 왔는지 표시한다. `account_coverage.csv`에는 계정별 5개 또는 1개 확보 여부가 보존된다. `manifest.json`에 병합 원본별 게시물 수를 기록한다.
+
+현재 API 사용량이 79%였으므로 **추가 Meta 호출 없이 ZIP 생성부터 진행**하자. CSV 생성과 테스트에는 Meta/OpenAI/Google 호출이 없다.
