@@ -6,6 +6,13 @@
 
 **P1보다 먼저 실행.** 오늘 학원 종료 전 홍주님에게 분석 가능한 원본/최신 5개/미디어/계정별 커버리지 ZIP을 전달한다. 도구: [delivery/README.md](../delivery/README.md), `delivery/build_hongju_bundle.py`, 오프라인 9개 테스트. 실제 Meta code4 잔여 사용량 제한으로 **294계정 최신5 수집 완료를 보장하지 않음**. 완료 불가능하면 기존 94성공계정·1,880게시물 자료를 부분 수집으로 명시하고 우선 전달한다. ZIP 생성 스크립트와 단위 테스트는 코드 반영됐지만 사용자 PC 검증/ZIP 생성은 아직이다.
 
+## 2026-10-16 — NEW confirmed target: 2 apps × 150/144 × 5 posts × 90-minute backfill
+
+**Latest user decision supersedes the earlier 10-post ×150 hypothesis above.** Set account-page depth **5**, split official accounts **A 1..150, B 151..294**, target **50 distinct historical posts** per account, **90-minute cycle** (not every 60 minutes). Ten *successful distinct* pages yield 50; ordinary repeated newest-five calls DO NOT. In ideal fully successful cycles the user expects ten cycles across ~two working days; rate limits, missing cursors or scarce account media may extend this.
+
+**Implementation now committed but not Windows-verified nor running:** `experiments/rolling_backfill.py` (media.after cursor, append-only SQLite, one page/account/cycle, >50 target stop, fair priority, 70%-usage guard and 90m/60m cooldown); `experiments/run_90m_cycle.py` (one-shot A/B dispatch, explicit KST business-hour approval, real distinct appID/token validation, disabled by default); 10+7 synthetic offline tests; `experiments/backfill_schedule.example.json`; full guide `experiments/README_CURSOR_BACKFILL_90M.md`. GitHub-only code changes; **no live Meta calls, actual scheduling, or Hongju credential updates have occurred**. The previous expired Hongju token is still a blocker, as is two-page Graph pagination live verification.
+
+Backfill output is kept distinct from existing `latest_5` (176 successes), `latest_1_pending` (15 successes), and `latest_10_owner_slot2_151_294` (95 successes) source DBs. A separately tested import/merge is required for aggregate coverage. Business Discovery may not return suitable paging cursors for every professional account; no automatic 50-post completion claim.
 ## 2026-10-16 — 10게시물 × 약150계정 × 2개 Meta 앱 구상 (검증 전)
 
 **사용자 제안(운영 방향):** Meta Business Discovery에서 계정당 하나의 subrequest에 media.limit(10)을 넣고, 약 294개 공식 계정을 사용자 Meta 앱(150) + 홍주님 Meta 앱(144)으로 나눠 정기 수집. 같은 게시물을 매번 20개 가져오는 것보다 10개 스냅샷과 포스트 ID upsert가 적절할 수 있다. **운영 값 변경은 정식 계측/홍주님 앱 접근 권한 확인 후 확정.** 기존 확정 V1 최신5 및 백필5 설정을 검증 없이 강제 덮어쓰지 않음.
