@@ -68,9 +68,13 @@ def load_source(path: Path) -> tuple[list[dict[str, str]], str]:
                 raise ValueError(f"Invalid Instagram username at row {i}")
             a["username"] = a["username"].lstrip("@")
             accounts.append(a)
-    if len(accounts) != 294 or {c: sum(x["country"] == c for x in accounts) for c in EXPECTED_COUNTS} != EXPECTED_COUNTS:
-        raise ValueError("Official account list must contain 294 entries (KR100/US101/JP93)")
-    if len({x["account_key"] for x in accounts}) != 294 or len({x["username"].casefold() for x in accounts}) != 294:
+    if len(accounts) < 294 or [a["country"] for a in accounts[:294]] != (
+            ["KR"] * 100 + ["US"] * 101 + ["JP"] * 93):
+        raise ValueError("Source must preserve the 294 official roster (KR100/US101/JP93) as the first rows")
+    if any(a["country"] not in EXPECTED_COUNTS for a in accounts):
+        raise ValueError("Only KR, US and JP country codes are supported")
+    if len({x["account_key"] for x in accounts}) != len(accounts) or (
+            len({x["username"].casefold() for x in accounts}) != len(accounts)):
         raise ValueError("Duplicate official account_key or username")
     return accounts, digest
 
@@ -82,7 +86,7 @@ def load_env(path: Path) -> dict[str, str]:
             line = raw.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, val = line.split("=", 1)
-                values.setdefault(key.strip(), val.strip().strip('"\''))
+                values[key.strip()] = val.strip().strip('"\'')
     return values
 
 
@@ -180,7 +184,8 @@ def process_lock(path: Path):
         fp.close()
 
 
-def database(path: Path, accounts: list[dict], digest: str, posts_requested: int) -> sqlite3.Connection:
+def database(path: Path, accounts: list[dict], digest: str, posts_requested: int,
+             partition: tuple[int, int, str] | None = None) -> sqlite3.Connection:
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
@@ -221,13 +226,46 @@ def database(path: Path, accounts: list[dict], digest: str, posts_requested: int
     CREATE INDEX IF NOT EXISTS ix_media_account ON media(account_key);
     """)
     new_manifest = {"source_sha256": digest, "posts_requested": str(posts_requested),
-                    "account_count": "294", "schema_version": "1"}
+                    "account_count": str(len(accounts)), "schema_version": "1"}
+    if partition is not None:
+        first, last, label = partition
+        new_manifest.update({"assigned_first": str(first),
+                             "assigned_last": str(last), "assigned_app": label})
     stored = dict(db.execute("SELECT key,value FROM manifest").fetchall())
-    if stored and any(stored.get(k) != v for k, v in new_manifest.items()):
-        db.close()
-        raise ValueError("Output database source/schema/limit differs: choose a new --output-dir, do not mix runs")
-    with db:
-        if not stored:
+    if stored:
+        immutable = set(new_manifest) - {"source_sha256", "account_count"}
+        if any(stored.get(k) != new_manifest[k] for k in immutable) or set(stored) != set(new_manifest):
+            db.close()
+            raise ValueError("Output database partition/schema/posts differs; use a separate --output-dir")
+        old_count = int(stored["account_count"])
+        if len(accounts) < old_count:
+            db.close()
+            raise ValueError("Source shrank; existing data cannot be removed")
+        # An account list may grow, but previously registered accounts must
+        # remain exactly unchanged and in the same order.
+        existing = db.execute(
+            "SELECT ordinal,account_key,username,country,image_url FROM accounts ORDER BY ordinal"
+        ).fetchall()
+        if len(existing) != old_count or any(
+                (int(row["ordinal"]), row["account_key"], row["username"],
+                 row["country"], row["image_url"]) !=
+                (accounts[i]["ordinal"], accounts[i]["account_key"],
+                 accounts[i]["username"], accounts[i]["country"], accounts[i]["image_url"])
+                for i, row in enumerate(existing)):
+            db.close()
+            raise ValueError("Existing account list changed/reordered; append only")
+        if len(accounts) == old_count and stored["source_sha256"] != digest:
+            db.close()
+            raise ValueError("Source CSV bytes changed; do not silently change existing manifest")
+        with db:
+            if len(accounts) > old_count:
+                db.executemany("""INSERT INTO accounts (ordinal,account_key,username,country,image_url,status)
+                    VALUES (:ordinal,:account_key,:username,:country,:image_url,'pending')""",
+                    accounts[old_count:])
+                db.execute("UPDATE manifest SET value=? WHERE key='account_count'", (str(len(accounts)),))
+                db.execute("UPDATE manifest SET value=? WHERE key='source_sha256'", (digest,))
+    else:
+        with db:
             db.executemany("INSERT INTO manifest (key,value) VALUES (?,?)", new_manifest.items())
             db.executemany("""INSERT INTO accounts (ordinal,account_key,username,country,image_url,status)
                 VALUES (:ordinal,:account_key,:username,:country,:image_url,'pending')""", accounts)
@@ -506,6 +544,16 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("--posts must be between 1 and 20")
     if args.delay_seconds < 0 or (args.max_batches is not None and args.max_batches < 1):
         raise ValueError("Invalid delay or max-batches")
+    if (args.start_ordinal is None) != (args.end_ordinal is None):
+        raise ValueError("Set --start-ordinal and --end-ordinal together")
+    partition = None
+    if args.start_ordinal is not None:
+        if (args.start_ordinal < 1 or args.end_ordinal < args.start_ordinal
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,30}", args.assigned_app or "")):
+            raise ValueError("Invalid assigned account range/app identifier")
+        partition = (args.start_ordinal, args.end_ordinal, args.assigned_app)
+    elif args.assigned_app:
+        raise ValueError("--assigned-app requires assigned ordinal range")
     if args.stop_usage is not None and not (0 < args.stop_usage <= 100):
         raise ValueError("--stop-usage must be >0 and <=100")
     source, digest = load_source(args.source)
@@ -515,9 +563,13 @@ def run(args: argparse.Namespace) -> int:
             args.only_pending_from, digest, source, args.output_dir / "collection.sqlite")
         print(f"Restricted to {len(allowlist)} previously pending/rate-limited accounts "
               "(no previously successful/failed accounts are re-requested)")
+    if partition is not None and partition[0] > len(source):
+        raise ValueError("Assigned account range starts after the last source account")
+    assigned_count = len(source) if partition is None else max(0, min(len(source), partition[1]) - partition[0] + 1)
     if not args.live:
-        print(f"DRY RUN: 294 accounts, {args.posts} recent posts each; {args.batch_size} per batch, "
-              f"{(294+args.batch_size-1)//args.batch_size} total batches; no API requests or file writes")
+        print(f"DRY RUN: {assigned_count}/{len(source)} assigned accounts, {args.posts} recent posts each; "
+              f"{args.batch_size} per batch, {(assigned_count+args.batch_size-1)//args.batch_size} "
+              f"batches; no API requests or file writes")
         print(f"Source sha256: {digest}")
         print(f"Output (separate from existing collector): {args.output_dir}")
         return 0
@@ -529,7 +581,7 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("Missing or invalid local Meta configuration; check --env-file")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with process_lock(args.output_dir):
-        conn = database(args.output_dir / "collection.sqlite", source, digest, args.posts)
+        conn = database(args.output_dir / "collection.sqlite", source, digest, args.posts, partition)
         try:
             export_all(conn, args.output_dir)
             sent = 0
@@ -537,10 +589,12 @@ def run(args: argparse.Namespace) -> int:
                 if args.max_batches and sent >= args.max_batches:
                     print(f"Run paused after --max-batches={args.max_batches}; rerun to resume")
                     break
+                first, last = (partition[0], partition[1]) if partition else (1, len(source))
                 if allowlist is None:
                     eligible = conn.execute("""SELECT ordinal,account_key,username,country,image_url
                         FROM accounts WHERE status IN ('pending','rate_limited')
-                        ORDER BY ordinal LIMIT ?""", (args.batch_size,)).fetchall()
+                        AND ordinal BETWEEN ? AND ? ORDER BY ordinal LIMIT ?""",
+                        (first, last, args.batch_size)).fetchall()
                 else:
                     if not allowlist:
                         print("Original status database has no remaining pending accounts.")
@@ -548,9 +602,9 @@ def run(args: argparse.Namespace) -> int:
                     placeholders = ",".join("?" for _ in allowlist)
                     eligible = conn.execute(
                         "SELECT ordinal,account_key,username,country,image_url FROM accounts "
-                        "WHERE status IN ('pending','rate_limited') AND account_key IN ("
-                        + placeholders + ") ORDER BY ordinal LIMIT ?",
-                        (*sorted(allowlist), args.batch_size)).fetchall()
+                        "WHERE status IN ('pending','rate_limited') AND ordinal BETWEEN ? AND ? "
+                        "AND account_key IN (" + placeholders + ") ORDER BY ordinal LIMIT ?",
+                        (first, last, *sorted(allowlist), args.batch_size)).fetchall()
                 if not eligible:
                     print("No pending or previously rate-limited accounts remain")
                     break
@@ -574,7 +628,7 @@ def run(args: argparse.Namespace) -> int:
                 issue = conn.execute("SELECT error FROM batches WHERE batch_id=?", (current,)).fetchone()[0]
                 print(f"Batch {current}: {seconds:.3f}s HTTP={http}, success={successes}, failed={failures}, "
                       f"usage_max_total_time={snapshot['max_total_time_pct']}%, "
-                      f"total_success={totals.get('success',0)}/294, pending={totals.get('pending',0)}, "
+                      f"total_success={totals.get('success',0)}/{len(source)}, pending={totals.get('pending',0)}, "
                       f"rate_limited={totals.get('rate_limited',0)}", flush=True)
                 if issue:
                     print(f"Batch {current} note: {issue}", flush=True)
@@ -582,12 +636,16 @@ def run(args: argparse.Namespace) -> int:
                 if stopped:
                     print("HALTED: Meta rate/auth limit or unexpected response. Saved every parseable subresponse.")
                     return 4
+                if args.require_usage and snapshot["max_total_time_pct"] is None:
+                    print("HALTED: Meta omitted X-App-Usage headers; unable to confirm quota")
+                    return 6
                 if (args.stop_usage is not None and snapshot["max_total_time_pct"] is not None
                         and snapshot["max_total_time_pct"] >= args.stop_usage):
                     print(f"HALTED: optional --stop-usage={args.stop_usage}% threshold reached")
                     return 5
                 if args.delay_seconds and sent and conn.execute(
-                        "SELECT COUNT(*) FROM accounts WHERE status IN ('pending','rate_limited')").fetchone()[0]:
+                        "SELECT COUNT(*) FROM accounts WHERE status IN ('pending','rate_limited') "
+                        "AND ordinal BETWEEN ? AND ?", (first, last)).fetchone()[0]:
                     time.sleep(args.delay_seconds)
             report = export_all(conn, args.output_dir)
             print("Final:", json.dumps(report, ensure_ascii=False))
@@ -601,6 +659,15 @@ def run(args: argparse.Namespace) -> int:
                     {"target_accounts": len(keys), "statuses": target_status},
                     ensure_ascii=False))
                 return 0 if not any(target_status.get(k) for k in
+                    ("failed", "partial", "pending", "rate_limited")) else 1
+            if partition is not None:
+                part_counts = dict(conn.execute(
+                    "SELECT status, COUNT(*) FROM accounts WHERE ordinal BETWEEN ? AND ? GROUP BY status",
+                    (partition[0], partition[1])).fetchall())
+                print("Assigned range progress:", json.dumps(
+                    {"app": partition[2], "first": partition[0], "last": min(len(source), partition[1]),
+                     "statuses": part_counts}, ensure_ascii=False))
+                return 0 if not any(part_counts.get(k) for k in
                     ("failed", "partial", "pending", "rate_limited")) else 1
             return 0 if not any(report["accounts"].get(k) for k in ("failed", "partial", "pending", "rate_limited")) else 1
         finally:
@@ -618,6 +685,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-batches", type=int, default=None, help="Optional cap; resume by running again")
     parser.add_argument("--stop-usage", type=float, default=None,
                         help="Optional % cutoff; omitted to observe Meta's actual limit")
+    parser.add_argument("--start-ordinal", type=int, default=None)
+    parser.add_argument("--end-ordinal", type=int, default=None)
+    parser.add_argument("--assigned-app", type=str, default="")
+    parser.add_argument("--require-usage", action="store_true",
+                        help="Halt if Meta does not return quota usage headers")
     parser.add_argument("--only-pending-from", type=Path, default=None,
                         help="read-only collection.sqlite to restrict this NEW isolated output "
                              "to accounts still pending/rate_limited in previous run")
