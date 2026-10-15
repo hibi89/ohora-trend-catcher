@@ -8,17 +8,16 @@ business-hour window and consent are configured and tested.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
 import sys
-from zoneinfo import ZoneInfo
 
 import full_batch_collector as base
 import rolling_backfill as backfill
 
-KST = ZoneInfo("Asia/Seoul")
+KST = timezone(timedelta(hours=9))  # Korea Standard Time has no DST
 
 
 def now_kst():
