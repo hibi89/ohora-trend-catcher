@@ -158,6 +158,21 @@ class TwoAppTests(unittest.TestCase):
                     "WHERE status='success'").fetchone()[0])
                 self.assertEqual(200, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
 
+    def test_only_hongju_app_runs_only_151_to_160(self):
+        seen = []
+        def stub(_version, token, ops, timeout=120):
+            seen.append((token, len(ops)))
+            return 200, fake_response(ops, count=10), {}, 0.1
+        with patch.object(collector, "request_batch", side_effect=stub):
+            self.assertEqual(0, duo.run(self.args(live=True) +
+                ["--only-app", "hongju", "--max-batches-per-app", "1"]))
+        self.assertEqual([("TOKEN_HONGJU", 10)], seen)
+        self.assertFalse((self.out / "owner").exists())
+        with closing(sqlite3.connect(self.out / "hongju" / "collection.sqlite")) as db:
+            self.assertEqual((151, 160), db.execute(
+                "SELECT min(ordinal),max(ordinal) FROM accounts "
+                "WHERE status='success'").fetchone())
+
     def test_usage_cutoff_app_a_stops_before_app_b(self):
         seen = []
         def high_usage(_version, token, ops, timeout=120):
