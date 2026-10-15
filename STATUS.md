@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Pending-only latest1 Meta quota experiment prepared (user run pending)
+
+- User's Meta dashboard displayed app total_time 75.8% and prior latest5 database contains **176 success, 5 failed (Meta 110), 113 pending**.
+- New read-only source filter --only-pending-from added to experiments/full_batch_collector.py: selects original pending/rate_limited accounts only, while storing one-post results in **independent** experiments/results/latest_1_pending. Old 880 post rows remain intact; schema/official-list hash verified, mismatch refused.
+- Added three offline unit tests for pending-only targeting, source mismatches and database path collision (19 tests expected; **Windows retest pending**). No live API request was made by assistant.
+- Documented cautious **5-account pilot**, --posts 1 --batch-size 5 --max-batches 1 --stop-usage 85, in experiments/README_ONE_POST_PENDING_PROBE.md. Never auto-run remaining 113 until usage delta measured.
+- Hypothetical threshold: starting 75.8%, all remaining 113 require <=0.214 percentage points/account before a 100% limit, assuming no quota recovery. Observed moving app-usage rates cannot identify fixed/per-post cost from a single pilot.
+
+
 ## 2026-10-16 — 294-account latest-5 collection stopped safely at usage 72%
 
 - User Windows resumed `experiments/full_batch_collector.py --posts 5 --batch-size 10 --stop-usage 70` in `experiments/results/latest_5`. Last shown batch 19 (account ordinals 171..180) completed with HTTP 200 and usage **72%**; collector stopped per configured safety threshold.
