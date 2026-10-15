@@ -116,9 +116,8 @@ def save_page(conn: sqlite3.Connection, account: dict, cycle: str, page: tuple,
         old = conn.execute("SELECT COUNT(*) FROM posts WHERE account_key=?", (key,)).fetchone()[0]
         # Keep every existing post; never delete/replace earlier cycles.
         for row in posts:
-            base.save_row_ignore(conn, "posts", row) if hasattr(base, "save_row_ignore") else conn.execute(
-                "INSERT OR IGNORE INTO posts (" + ",".join(row) + ") VALUES (" +
-                ",".join("?" for _ in row) + ")", list(row.values()))
+            conn.execute("INSERT OR IGNORE INTO posts (" + ",".join(row) + ") VALUES (" +
+                         ",".join("?" for _ in row) + ")", list(row.values()))
         for row in media:
             conn.execute("INSERT OR IGNORE INTO media (" + ",".join(row) + ") VALUES (" +
                          ",".join("?" for _ in row) + ")", list(row.values()))
@@ -156,12 +155,14 @@ def save_failure(conn: sqlite3.Connection, account: dict, cycle: str,
 
 def run(args) -> int:
     first, last = RANGES[args.app]
-    if not 1 <= args.batch_size <= 10 or not 1 <= args.max_batches if args.max_batches is not None else False:
+    if not 1 <= args.batch_size <= 10 or (args.max_batches is not None and args.max_batches < 1):
         raise ValueError("Invalid batch size or max-batches")
     if not 0 < args.stop_usage < 100:
         raise ValueError("Usage stop threshold must be between 0 and 100")
     if args.max_minutes < 1 or args.max_minutes > 30:
         raise ValueError("Run duration must be 1..30 minutes")
+    if args.delay_seconds < 0:
+        raise ValueError("delay-seconds must be nonnegative")
     if args.interval_minutes != 90:
         raise ValueError("This backfill is configured for 90-minute cycles")
     source, digest = base.load_source(args.source)
