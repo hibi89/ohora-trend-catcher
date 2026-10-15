@@ -253,12 +253,24 @@ def extract_content(response: dict) -> str:
 
 
 def parse_response(content: str) -> dict[str, Any]:
+    content = content.strip()
     if content.startswith("```"):
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content).strip()
     try:
         obj = json.loads(content)
     except ValueError:
-        raise ProviderError("invalid_json") from None
+        # Some gateways surround otherwise valid JSON with brief prose. Recover
+        # one complete JSON object; do not guess at or repair truncated JSON.
+        start = content.find("{")
+        if start < 0:
+            raise ProviderError("invalid_json") from None
+        try:
+            obj, used = json.JSONDecoder().raw_decode(content[start:])
+        except ValueError:
+            raise ProviderError("invalid_json") from None
+        remainder = content[start + used:]
+        if "{" in remainder or "}" in remainder or "}" in content[:start]:
+            raise ProviderError("invalid_json") from None
     if not isinstance(obj, dict) or type(obj.get("is_design_post")) is not bool:
         raise ProviderError("invalid_schema")
     result: dict[str, Any] = {}
@@ -316,7 +328,8 @@ def inline_image_url(url: str, timeout: int = 20, max_bytes: int = 5_000_000) ->
     return "data:" + actual + ";base64," + base64.b64encode(payload).decode("ascii")
 
 
-def analyze(post: dict, images: list[dict], provider: Provider, timeout: int, image_transfer: str = "remote") -> dict:
+def analyze(post: dict, images: list[dict], provider: Provider, timeout: int,
+            image_transfer: str = "remote", max_tokens: int = 1500) -> dict:
     endpoint = endpoint_url(provider.base_url)
     caption = (post.get("caption") or "")[:1800]
     media_content: list[dict] = [{"type": "text", "text": f"Caption (untrusted social text): {caption}\nVisual basis: " +
@@ -327,7 +340,7 @@ def analyze(post: dict, images: list[dict], provider: Provider, timeout: int, im
     payload = {"model": provider.model, "messages": [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": media_content}],
-        "temperature": 0.1, "max_tokens": 850}
+        "temperature": 0.1, "max_tokens": max_tokens}
     req = Request(endpoint, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"), method="POST",
                   headers={"Authorization": "Bearer " + provider.api_key,
                            "Content-Type": "application/json", "Accept": "application/json"})
@@ -347,6 +360,10 @@ def analyze(post: dict, images: list[dict], provider: Provider, timeout: int, im
         raise ProviderError("invalid_provider_json", stop=True) from None
     if not isinstance(decoded, dict):
         raise ProviderError("invalid_provider_json", stop=True)
+    choices = decoded.get("choices")
+    if (isinstance(choices, list) and choices and isinstance(choices[0], dict)
+            and choices[0].get("finish_reason") in {"length", "max_tokens"}):
+        raise ProviderError("truncated_response")
     return parse_response(extract_content(decoded))
 
 
@@ -496,7 +513,19 @@ def run_locked(args: argparse.Namespace, source: Path, output: Path, posts: list
                              ProviderError("no_usable_image_url"))
                 continue
             try:
-                result = analyze(post, media_images, provider, args.timeout, args.image_transfer)
+                try:
+                    result = analyze(post, media_images, provider, args.timeout, args.image_transfer)
+                except ProviderError as first_error:
+                    # Only a malformed/truncated model output gets ONE bounded
+                    # second attempt. Authentication, rate and network issues stop.
+                    if first_error.code not in {"invalid_json", "invalid_schema",
+                                                "invalid_confidence", "empty_content",
+                                                "truncated_response"}:
+                        raise
+                    print(f"Malformed model output for post {post['post_id']}; "
+                          "one retry with larger output budget.", flush=True)
+                    result = analyze(post, media_images, provider, args.timeout,
+                                     args.image_transfer, max_tokens=2200)
                 persist_post(db, post, media_images, provider.model, sig, "success", result, None)
                 succeeded += 1
                 consecutive_errors = 0
