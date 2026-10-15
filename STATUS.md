@@ -1,5 +1,15 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Two authorized Meta apps manual 10-post collector implemented (Windows acceptance pending)
+
+- New `experiments/two_app_runner.py` assigns original rows 1–150 to haein and 151–294 to hongju (current 294, 6 spare seats before 300), configurable `--capacity 150`, `--posts 10`, `--app NAME=ENV`, per-app input credential files and separate results. Does NOT implement scheduling or automated retries.
+- `experiments/full_batch_collector.py` now accepts `--start-ordinal/--end-ordinal/--assigned-app/--require-usage`; account range and app label are locked into each database manifest; per-app quota headers must be present, stop-usage default 70% in outer runner (evaluated post-batch). Supports append-only future CSV growth while refusing reordering or mutation of earlier accounts. Maintains 294-row fixed official prefix.
+- `--only-app hongju` / `--only-app haein` supports separate manual resumes when one app is paused, without crossing allocated ranges. Credential preflight rejects duplicate tokens, missing keys and duplicate declared app IDs; no token values logged. Declared app IDs are not proof of real Meta independent quota. Use only properly authorized apps/access.
+- New `experiments/test_two_app_runner.py` adds 14 fully offline tests to existing collector's 19 and delivery merge's 15: **48 expected**. GitHub workflow `.github/workflows/offline-collector-tests.yml` created (run status not confirmed by connector). **Do not claim tests passed yet**; user's Windows run required.
+- Full Windows PowerShell instructions in `experiments/README_TWO_APP_LATEST10.md`: update, tests, locally create Hongju env file, dry-run, app-by-app 10-account quota pilot, only then manually run pending 150/144 and create combined handoff ZIP with `delivery/build_hongju_bundle.py --supplement`. 5-minute completion and independent 2x quota are not guaranteed.
+- Existing 5-post/1-post data stores untouched; no assistant-run Meta API calls and no app credentials accessed.
+
+
 ## 2026-10-16 — User proposes 10-post, 150/144 authorized two-app division
 
 - User revised optimization hypothesis: each Business Discovery username is one Graph subrequest even if that request returns 10 posts; propose ~150 accounts per Meta app across **two separate, properly authorized apps** belonging to user and Hongju. Official file has 294 accounts, so use 150 + 144.
