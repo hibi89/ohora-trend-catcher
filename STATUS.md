@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — 1-post pending-only pilot tested on Windows
+
+- User's Windows run: **19/19 offline tests passed** for pending-only batch collector.
+- Live request on original pending account ordinals **182..186** (5 accounts) with `--posts 1 --batch-size 5 --max-batches 1` succeeded: **HTTP 200, success=5, failed=0, 5 posts / 7 media, 0.703s**.
+- Meta response snapshot: `total_time=75.0%`, `call_count=41.0%`, `total_cputime=0.0%`. Previous dashboard 75.8%; lower snapshot does **not** imply zero or negative incremental API cost; rolling-window decay can offset additional requests.
+- Current combined distinct account statuses across two isolated stores: old `latest_5`: 176 success, 5 failed code 110, original 113 pending; new restricted `latest_1_pending`: 5 success (all from those 113), **108 remain pending**. Overall 181 covered accounts/885 post records (880+5); no merged delivery ZIP yet.
+- Next: controlled 10-account 1-post batch (original status allowlist+new own checkpoint) with `--max-batches 1 --stop-usage 85`; reassess time and call-count usage before larger run. Ensure old `latest_5` records remain untouched. `--stop-usage` evaluated AFTER batch, not a preventative API gate.
+
+
 ## 2026-10-16 — Pending-only latest1 Meta quota experiment prepared (user run pending)
 
 - User's Meta dashboard displayed app total_time 75.8% and prior latest5 database contains **176 success, 5 failed (Meta 110), 113 pending**.
