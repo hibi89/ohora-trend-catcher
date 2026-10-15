@@ -77,13 +77,13 @@ PowerShell에서 OHORA 프로젝트 루트로 이동 후:
     git pull origin main
     python -m unittest discover -s delivery -p test_build_hongju_bundle.py -v
 
-**기존 9개에서 4개 추가한 13개 테스트가 OK일 때만** 실제 병합 ZIP을 만든다. 두 원본 데이터베이스는 읽기 전용이며, 서로 다른 계정이 성공했는지 확인 후 안전하게 메모리에서만 합쳐 ZIP을 생성한다.
+**기존 9개에서 6개 추가한 15개 테스트가 OK일 때만** 실제 병합 ZIP을 만든다. 두 원본 데이터베이스는 읽기 전용이며, 서로 다른 계정이 성공했는지 확인 후 안전하게 메모리에서만 합쳐 ZIP을 생성한다.
 
     python .\delivery\build_hongju_bundle.py `
       --source ".\experiments\results\latest_5" `
       --supplement ".\experiments\results\latest_1_pending" `
       --output-dir ".\experiments\results\hongju_delivery"
 
-**예상 결과:** `Source accounts=294, covered_accounts=191, source_posts=895, recent_posts=895` (그 시점까지 추가 수집이 없다면). 결과가 다르면 원본 DB 상태를 비교한다. 생성 ZIP은 타임스탬프가 붙으므로 기존 175계정 ZIP은 자동 덮어쓰지 않는다. ZIP 안의 `collection_source` 열은 각 행이 primary 또는 supplement에서 왔는지 표시한다. `account_coverage.csv`에는 계정별 5개 또는 1개 확보 여부가 보존된다. `manifest.json`에 병합 원본별 게시물 수를 기록한다.
+**예상 결과:** 5개 방식 재수집 *전*이라면 `Source accounts=294, covered_accounts=191, source_posts=895, recent_posts=895`. 10계정×5개 성공 *후*에는 `source_posts=935`, `recent_posts=935` 예상. 실제 출력으로 판단하고 실패·미수집 98개를 구분한다. 결과가 다르면 원본 DB 상태를 비교한다. 생성 ZIP은 타임스탬프가 붙으므로 기존 175계정 ZIP은 자동 덮어쓰지 않는다. ZIP 안의 `collection_source` 열은 각 행이 primary 또는 supplement에서 왔는지 표시한다. `account_coverage.csv`에는 계정별 5개 또는 1개 확보 여부가 보존된다. `manifest.json`에 병합 원본별 원시 게시물 수와 중복 계정 제외량/최종 포함량을 구분해 기록한다.
 
-현재 API 사용량이 79%였으므로 **추가 Meta 호출 없이 ZIP 생성부터 진행**하자. CSV 생성과 테스트에는 Meta/OpenAI/Google 호출이 없다.
+현재 API 사용량 79% 이후 별도 10계정 × 최신 5개 실험을 진행할 수 있다. 이때 수집한 10계정과 기존 1개 수집 계정이 겹쳐도 **5개 원본이 우선**이다. 기존 1개 쪽에서 겹치는 게시물은 ZIP 생성 단계에만 제외되고 실제 두 SQLite는 그대로 유지된다. 10계정 ×5개 성공시 예상 통합 결과는 **191계정 935게시물**(기존 5개 880 + 신규 50 + 겹치지 않는 1개 방식 5), 단 실제 결과에 따라 달라질 수 있다. CSV 생성과 테스트에는 Meta/OpenAI/Google 호출이 없다.
