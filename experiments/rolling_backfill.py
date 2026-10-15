@@ -155,6 +155,10 @@ def save_failure(conn: sqlite3.Connection, account: dict, cycle: str,
 
 def run(args) -> int:
     first, last = RANGES[args.app]
+    if args.probe_ordinal is not None:
+        if not first <= args.probe_ordinal <= last:
+            raise ValueError("Probe ordinal must be inside this app range")
+        first = last = args.probe_ordinal
     if not 1 <= args.batch_size <= 10 or (args.max_batches is not None and args.max_batches < 1):
         raise ValueError("Invalid batch size or max-batches")
     if not 0 < args.stop_usage < 100:
@@ -333,6 +337,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--probe-ordinal", type=int,
+                        help="Single account for isolated two-cycle cursor validation")
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--max-batches", type=int)
     parser.add_argument("--delay-seconds", type=float, default=1.)
