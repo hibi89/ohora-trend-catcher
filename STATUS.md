@@ -1,5 +1,15 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Slot2 151..294 prepared with read-only cross-source skip
+
+- User has their own valid local Meta token/IG ID but Hongju's earlier token was confirmed expired. User proposes reusing their own token/IG ID temporarily in two logical slots, then replacing slot2 with Hongju credentials after renewal. **Two logical slots with one token are NOT two independent API budgets**; do not perform parallel runs or assume exactly 60-minute reset.
+- Implemented repeatable `--skip-collected-from` read-only snapshot filters and combined it with `--only-pending-from` and existing `--start-ordinal 151 --end-ordinal 294 --assigned-app owner_slot2_probe`. Both prior 5-post + 1-post successful/partial statuses excluded; original 5-post failed statuses also excluded by pending-only gate; own destination DB already marks completed accounts and naturally resumes without re-request.
+- From user reports, predicted 144 candidate ordinals in slot2, 30 already complete +1 Meta110 failed in original, 15 complete in supplemental, therefore **98 eligible**, starting at ordinal **197**; local dry-run is authority.
+- `--posts 10` in brand-new `experiments/results/latest_10_owner_slot2_151_294/` DB; own original `$envFile` temporarily used. No credentials committed and no live Meta requests made by assistant. Model only updated GitHub source and tests. Dry run first, expected **22** total offline test cases; user Windows test pending.
+- Small live pilot only AFTER Meta dashboard indicates sufficient recovery, `--batch-size 10 --max-batches 1 --stop-usage 70 --require-usage`; quota threshold evaluated AFTER request. If tested and approved, rerun sans max batches, stopping on actual rate limit. `--only-pending-from` and `--skip-collected-from` flags must remain on every invocation.
+- Full instructions in `experiments/README_SLOT2_151_294.md`. Later Hongju auth must use separate credential file and output DB for provenance; 3-way delivery ZIP merging remains unimplemented.
+
+
 ## 2026-10-16 — Two authorized Meta apps manual 10-post collector implemented (Windows acceptance pending)
 
 - New `experiments/two_app_runner.py` assigns original rows 1–150 to haein and 151–294 to hongju (current 294, 6 spare seats before 300), configurable `--capacity 150`, `--posts 10`, `--app NAME=ENV`, per-app input credential files and separate results. Does NOT implement scheduling or automated retries.
