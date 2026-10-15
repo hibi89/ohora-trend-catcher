@@ -51,7 +51,7 @@ class FullBatchUnitTests(unittest.TestCase):
 
     def test_initial_five_posts_isolated_and_manifest_locked(self):
         cfg = self.base / "safe_env.local"
-        cfg.write_text("META_ACCESS_TOKEN=SYNTHETIC_SECRET\\nMETA_IG_USER_ID=123\\n")
+        cfg.write_text("META_ACCESS_TOKEN=SYNTHETIC_SECRET\nMETA_IG_USER_ID=123\n")
         output = self.base / "latest_5"
         calls = []
 
@@ -81,8 +81,10 @@ class FullBatchUnitTests(unittest.TestCase):
                 "SELECT count(*) FROM posts"
             ).fetchone()[0])
         # Reusing a database with a different posts limit must be rejected.
+        different = list(arguments)
+        different[different.index("--posts") + 1] = "4"
         with patch.object(mod, "request_batch") as unused:
-            self.assertEqual(2, mod.main(arguments[:-2] + ["--posts", "4", "--live"]))
+            self.assertEqual(2, mod.main(different))
             unused.assert_not_called()
 
     def test_source_constraints_and_order(self):
