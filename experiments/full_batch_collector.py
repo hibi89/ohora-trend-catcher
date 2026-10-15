@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 from email.message import Message
 import hashlib
@@ -232,6 +232,34 @@ def database(path: Path, accounts: list[dict], digest: str, posts_requested: int
             db.executemany("""INSERT INTO accounts (ordinal,account_key,username,country,image_url,status)
                 VALUES (:ordinal,:account_key,:username,:country,:image_url,'pending')""", accounts)
     return db
+
+
+def eligible_from_snapshot(path: Path, official_source_sha: str, accounts: list[dict],
+                           output_db: Path) -> set[str]:
+    """Read-only allowlist of still pending accounts in an earlier 5-post run.
+
+    The current 1-post experiment must have its OWN SQLite output directory.
+    It never updates the original 5-post database.
+    """
+    src = path.expanduser().resolve()
+    if not src.is_file() or src.suffix.lower() not in {".sqlite", ".db"}:
+        raise ValueError("--only-pending-from must be an existing collection SQLite file")
+    if src == output_db.expanduser().resolve():
+        raise ValueError("Source status SQLite and destination database must differ")
+    uri = "file:" + src.as_posix() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
+        try:
+            stored = dict(conn.execute("SELECT key,value FROM manifest"))
+            states = conn.execute("SELECT account_key,status FROM accounts").fetchall()
+        except sqlite3.Error:
+            raise ValueError("Original status database lacks manifest/accounts tables") from None
+    if stored.get("source_sha256") != official_source_sha or len(states) != len(accounts):
+        raise ValueError("Original collection has a different account-list hash/count")
+    actual = {str(k): str(status) for k, status in states}
+    expected = {str(a["account_key"]) for a in accounts}
+    if set(actual) != expected:
+        raise ValueError("Original collection has different account keys")
+    return {k for k, status in actual.items() if status in {"pending", "rate_limited"}}
 
 
 def as_integer(v: object) -> int | None:
@@ -481,6 +509,12 @@ def run(args: argparse.Namespace) -> int:
     if args.stop_usage is not None and not (0 < args.stop_usage <= 100):
         raise ValueError("--stop-usage must be >0 and <=100")
     source, digest = load_source(args.source)
+    allowlist = None
+    if args.only_pending_from is not None:
+        allowlist = eligible_from_snapshot(
+            args.only_pending_from, digest, source, args.output_dir / "collection.sqlite")
+        print(f"Restricted to {len(allowlist)} previously pending/rate-limited accounts "
+              "(no previously successful/failed accounts are re-requested)")
     if not args.live:
         print(f"DRY RUN: 294 accounts, {args.posts} recent posts each; {args.batch_size} per batch, "
               f"{(294+args.batch_size-1)//args.batch_size} total batches; no API requests or file writes")
@@ -503,9 +537,20 @@ def run(args: argparse.Namespace) -> int:
                 if args.max_batches and sent >= args.max_batches:
                     print(f"Run paused after --max-batches={args.max_batches}; rerun to resume")
                     break
-                eligible = conn.execute("""SELECT ordinal,account_key,username,country,image_url
-                    FROM accounts WHERE status IN ('pending','rate_limited') ORDER BY ordinal LIMIT ?""",
-                    (args.batch_size,)).fetchall()
+                if allowlist is None:
+                    eligible = conn.execute("""SELECT ordinal,account_key,username,country,image_url
+                        FROM accounts WHERE status IN ('pending','rate_limited')
+                        ORDER BY ordinal LIMIT ?""", (args.batch_size,)).fetchall()
+                else:
+                    if not allowlist:
+                        print("Original status database has no remaining pending accounts.")
+                        break
+                    placeholders = ",".join("?" for _ in allowlist)
+                    eligible = conn.execute(
+                        "SELECT ordinal,account_key,username,country,image_url FROM accounts "
+                        "WHERE status IN ('pending','rate_limited') AND account_key IN ("
+                        + placeholders + ") ORDER BY ordinal LIMIT ?",
+                        (*sorted(allowlist), args.batch_size)).fetchall()
                 if not eligible:
                     print("No pending or previously rate-limited accounts remain")
                     break
@@ -546,6 +591,17 @@ def run(args: argparse.Namespace) -> int:
                     time.sleep(args.delay_seconds)
             report = export_all(conn, args.output_dir)
             print("Final:", json.dumps(report, ensure_ascii=False))
+            if allowlist is not None:
+                keys = sorted(allowlist)
+                placeholders = ",".join("?" for _ in keys)
+                target_status = dict(conn.execute(
+                    "SELECT status,count(*) FROM accounts WHERE account_key IN ("
+                    + placeholders + ") GROUP BY status", keys).fetchall()) if keys else {}
+                print("Restricted target progress:", json.dumps(
+                    {"target_accounts": len(keys), "statuses": target_status},
+                    ensure_ascii=False))
+                return 0 if not any(target_status.get(k) for k in
+                    ("failed", "partial", "pending", "rate_limited")) else 1
             return 0 if not any(report["accounts"].get(k) for k in ("failed", "partial", "pending", "rate_limited")) else 1
         finally:
             conn.close()
@@ -562,6 +618,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-batches", type=int, default=None, help="Optional cap; resume by running again")
     parser.add_argument("--stop-usage", type=float, default=None,
                         help="Optional % cutoff; omitted to observe Meta's actual limit")
+    parser.add_argument("--only-pending-from", type=Path, default=None,
+                        help="read-only collection.sqlite to restrict this NEW isolated output "
+                             "to accounts still pending/rate_limited in previous run")
     parser.add_argument("--live", action="store_true", help="Authorize Meta API calls")
     args = parser.parse_args(argv)
     try:
