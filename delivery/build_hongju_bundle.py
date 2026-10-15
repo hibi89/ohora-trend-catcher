@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 import csv
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import io
 import json
@@ -59,7 +60,7 @@ def load_collection(source: Path) -> tuple[dict[str, list[dict]], str]:
 
     if database is not None:
         uri = "file:" + database.resolve().as_posix() + "?mode=ro"
-        with sqlite3.connect(uri, uri=True) as con:
+        with closing(sqlite3.connect(uri, uri=True)) as con:
             con.row_factory = sqlite3.Row
             tables = {x[0] for x in con.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
