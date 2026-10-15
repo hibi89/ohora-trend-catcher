@@ -47,3 +47,13 @@ python .\vision\vision_runner.py --source ".\experiments\results\full_294" --env
 - 독립 SQLite 저장소에 게시물당 트랜잭션으로 확정 저장. 중간 종료 시 기존 성공 결과 유지. 두 프로세스 동시 실행 잠금. 별도 실패·중단 이력 `run_log` 제공.
 - 모델 응답을 JSON 스키마로 검사. 실패·한계·숫자형 결측을 구분한다. 무제한 재시도 없음.
 - 아직 **n8n Schedule Trigger 연결/90분 자동 실행, 과거 게시물 페이지 확장, 대시보드 웹 프런트엔드, 정식 이미지 분류 정확도 검증**은 완료되지 않았다. 먼저 최소 1~10건 모델 실요청 후 품질을 확인한다.
+
+## 발표 안정성: 결과 사전 계산 + JSON 형식 보호 (2026-10-16)
+
+- **발표 도중 AI 대량 호출 금지.** 사전에 `--live` 배치 분석을 끝내고 `post_analysis.csv`/`vision.sqlite`의 **성공 확정 결과**만 대시보드에서 필터링한다. 대시보드 웹 UI 연결은 아직 별도 구현 단계이므로 현재 구현된 것으로 해석하지 않는다.
+- 실제 샘플은 21개 게시물 시도 중 20개 성공, 1개 `invalid_json`; 실패 비율은 소표본 실측일 뿐 미래 실패율의 예측이 아니다.
+- 모델 응답이 JSON 앞뒤에 설명을 덧붙인 경우 **하나의 완전한 JSON 객체만** 엄격히 추출한다. JSON을 임의로 만들거나 잘린 내용을 억지로 완성하지 않는다.
+- `finish_reason=length`/max_tokens를 감지하고, `invalid_json`, `invalid_schema`, `invalid_confidence`, `empty_content`, `truncated_response` **형식 오류에만 한 번** 더 호출한다(재시도는 비용이 추가될 수 있음). 최초 최대 출력 1500토큰, 한 번 재시도 시 2200토큰. 권한/속도/한도 오류는 자동 재시도하지 않는다.
+- 재시도 후에도 실패하면 기록하고 다른 건은 계속 처리한다. 모델 제공자 오류 또는 연속 오류 2건 시 안전 중단; 그때까지 성공한 결과는 삭제하지 않는다.
+- **실제 API에 대한 회귀 검증 미완료:** GitHub에 반영한 다음 `python -m unittest discover -s vision -p test_vision_runner.py -v`로 오프라인 테스트 통과를 먼저 확인하고, 실패한 1건만 `python .\vision\vision_runner.py --retry-failed --limit 1 --live`로 검증한다.
+- 발표 전 검수 기준: 오류 0건만을 목표로 단정하지 않고, 전체/국가별 유효 표본 수 및 미분류 건수를 보여주며 KQ3 필터별 데이터가 충분한지 확인한다.
