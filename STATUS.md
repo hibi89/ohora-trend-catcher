@@ -1,5 +1,13 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — V1 settings formally locked (design only)
+
+- User confirmed **latest 5**, **backfill 5**, **50 unique posts/account target**, **max 30-minute collection session**, **>=60-minute cooldown after finish**, **>=90-minute gap between starts**, and **GPT-6.1 Sol API insights weekly**.
+- Delivery roadmap: [docs/V1_DELIVERY_ROADMAP.md](docs/V1_DELIVERY_ROADMAP.md). Operating windows and Sol vendor API model/reasoning parameters are **not specified/verified yet**; no n8n scheduler or weekly AI job is active.
+- Development: user + ChatGPT directly; Gemini 3.8 Flash API for image/caption tags; GPT-6.1 Sol separate paid API in n8n for cached weekly narrative interpretations, NOT the ChatGPT model or Codex. No Codex/Luna EH.
+- Current phase: offline 25-test vision retest + single malformed-output retry validation, then durable post-ID-based upsert/latest refresh, backfill and analysis queue, DB-only dashboard, weekly Sol and n8n schedule. Existing initial 5-post collector alone **cannot** repeatedly refresh without replacing or skipping successful account data.
+
+
 ## 2026-10-16 — vision JSON safety improvements (Windows + live retest pending)
 
 - Observed user live paid MLAPI vision results: 21 post attempts, 20 success and 1 `invalid_json` (post ID stored locally); image-and-caption model service works, but output reliability needs improvement. This is a small sample, not a measured production failure rate.
