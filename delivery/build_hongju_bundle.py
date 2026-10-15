@@ -329,7 +329,7 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5,
            "첫 번째 원본은 계정당 최대 5개, 추가 원본은 계정당 최대 1개를 수집했습니다.\n"
            if supplement is not None else "")
         + ("중복 계정 " + str(summary["supplement_accounts_overlapped"])
-           + "개는 기존 5개 수집본을 우선하여 제외했습니다.\\n"
+           + "개는 기존 5개 수집본을 우선하여 제외했습니다.\n"
            if supplement is not None else "")
         + "게시물이 확보된 계정: " + str(summary["accounts_with_posts"]) + "\n"
         "현재 수집 원본 게시물: " + str(summary["source_posts"]) + "\n"
