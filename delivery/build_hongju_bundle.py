@@ -76,6 +76,64 @@ def load_collection(source: Path) -> tuple[dict[str, list[dict]], str]:
     raise ValueError("Source requires collection.sqlite or accounts.csv/posts.csv/media.csv")
 
 
+
+def combine_collections(primary: dict[str, list[dict]],
+                        supplement: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """Merge disjoint successful-account batches in memory, preserving all original rows.
+
+    Each collection contains the same official 294 account roster. Original
+    successes and API-110 failures are protected; only previously pending
+    accounts may contribute results from the smaller-post experiment.
+    """
+    original_accounts = {str(a["account_key"]): a for a in primary["accounts"]}
+    extra_accounts = {str(a["account_key"]): a for a in supplement["accounts"]}
+    if len(original_accounts) != len(primary["accounts"]) or (
+            len(extra_accounts) != len(supplement["accounts"])):
+        raise ValueError("Duplicate account keys in a merge source")
+    if original_accounts.keys() != extra_accounts.keys():
+        raise ValueError("Supplement account roster differs from primary")
+    for key, base in original_accounts.items():
+        second = extra_accounts[key]
+        if (str(base.get("country")) != str(second.get("country"))
+                or str(base.get("username")).casefold() !=
+                str(second.get("username")).casefold()):
+            raise ValueError("Country or username mismatch for supplement account")
+
+    new_accounts = []
+    add_keys: set[str] = set()
+    for a in primary["accounts"]:
+        key = str(a["account_key"])
+        extra = extra_accounts[key]
+        if str(extra.get("status")) in {"success", "partial"}:
+            if str(a.get("status")) not in {"pending", "rate_limited"}:
+                raise ValueError("Supplement overlaps an already processed account")
+            add_keys.add(key)
+            new_accounts.append(dict(extra, collection_source="supplement"))
+        else:
+            new_accounts.append(dict(a, collection_source="primary"))
+
+    extra_posts = supplement["posts"]
+    extra_media = supplement["media"]
+    if any(str(p.get("account_key")) not in add_keys for p in extra_posts):
+        raise ValueError("Supplement post belongs to an ineligible account")
+    if any(str(m.get("account_key")) not in add_keys for m in extra_media):
+        raise ValueError("Supplement media belongs to an ineligible account")
+    primary_ids = {str(p["post_id"]) for p in primary["posts"]}
+    primary_media_ids = {str(m["media_id"]) for m in primary["media"]}
+    if any(str(p.get("post_id")) in primary_ids for p in extra_posts):
+        raise ValueError("Duplicate post ID across primary and supplement")
+    if any(str(m.get("media_id")) in primary_media_ids for m in extra_media):
+        raise ValueError("Duplicate media ID across primary and supplement")
+
+    return {
+        "accounts": new_accounts,
+        "posts": [dict(p, collection_source="primary") for p in primary["posts"]]
+                 + [dict(p, collection_source="supplement") for p in extra_posts],
+        "media": [dict(m, collection_source="primary") for m in primary["media"]]
+                 + [dict(m, collection_source="supplement") for m in extra_media],
+    }
+
+
 def require_columns(rows: list[dict], required: set[str], name: str) -> None:
     if rows and not required.issubset(rows[0]):
         raise ValueError("Missing required columns in " + name)
@@ -195,7 +253,8 @@ def csv_bytes(rows: list[dict], preferred: tuple[str, ...]) -> bytes:
     return mem.getvalue().encode("utf-8-sig")
 
 
-def build_bundle(source: Path, output_dir: Path, latest_n: int = 5) -> tuple[Path, dict]:
+def build_bundle(source: Path, output_dir: Path, latest_n: int = 5,
+                 supplement: Path | None = None) -> tuple[Path, dict]:
     source = source.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     if output_dir == source or source in output_dir.parents:
@@ -203,8 +262,29 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5) -> tuple[Pat
     if latest_n < 1 or latest_n > 50:
         raise ValueError("latest_n must be 1..50")
     data, origin_format = load_collection(source)
+    if supplement is not None:
+        supplement = supplement.expanduser().resolve()
+        if supplement == source:
+            raise ValueError("Supplement must differ from primary source")
+        if supplement == output_dir or (supplement.is_dir() and supplement in output_dir.parents):
+            raise ValueError("Output directory must not be inside supplemental source")
+        # Verify both inputs independently before combining. All reads are read-only.
+        prepare(data, latest_n)
+        additional, extra_format = load_collection(supplement)
+        prepare(additional, latest_n)
+        primary_post_count = len(data["posts"])
+        extra_post_count = len(additional["posts"])
+        data = combine_collections(data, additional)
+        origin_format += " + " + extra_format
     outputs, summary = prepare(data, latest_n)
     summary["source_format"] = origin_format
+    if supplement is not None:
+        summary["merged_from_two_sources"] = True
+        summary["primary_source_posts"] = primary_post_count
+        summary["supplement_source_posts"] = extra_post_count
+        summary["source_directory_names"] = [source.name, supplement.name]
+        summary["posts_by_collection_source"] = {
+            "primary": primary_post_count, "supplement": extra_post_count}
     summary["created_at_kst"] = datetime.now(KST).isoformat(timespec="seconds")
     # Never include a private filesystem path, API secret, model key or raw request logs.
     summary["source_directory_name"] = source.name
@@ -218,6 +298,9 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5) -> tuple[Pat
         "OHORA Trend Catcher — 홍주님 데이터 전달 안내\n"
         "생성: " + summary["created_at_kst"] + "\n\n"
         "전체 계정: " + str(summary["source_accounts"]) + "\n"
+        + ("두 개의 수집 원본을 안전하게 병합한 전달본입니다.\n"
+           "첫 번째 원본은 계정당 최대 5개, 추가 원본은 계정당 최대 1개를 수집했습니다.\n"
+           if supplement is not None else "")
         "게시물이 확보된 계정: " + str(summary["accounts_with_posts"]) + "\n"
         "현재 수집 원본 게시물: " + str(summary["source_posts"]) + "\n"
         "계정별 최근 " + str(latest_n) + "개 추출: " + str(summary["latest_post_rows"]) + "\n"
@@ -263,9 +346,11 @@ def main(argv=None) -> int:
     parser.add_argument("--output-dir", type=Path,
                         default=Path("experiments/results/hongju_delivery"))
     parser.add_argument("--latest-n", type=int, default=5)
+    parser.add_argument("--supplement", type=Path, default=None,
+                        help="optional second, disjoint partial collection for the same accounts")
     args = parser.parse_args(argv)
     try:
-        archive, summary = build_bundle(args.source, args.output_dir, args.latest_n)
+        archive, summary = build_bundle(args.source, args.output_dir, args.latest_n, args.supplement)
     except (OSError, ValueError, sqlite3.Error, csv.Error) as exc:
         print("Handoff not created: " + str(exc)[:180], file=sys.stderr)
         return 2
