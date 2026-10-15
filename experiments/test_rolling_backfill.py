@@ -90,6 +90,25 @@ class CursorBackfillTests(unittest.TestCase):
         self.assertIn("media.limit(5).after(ABCD+/=09){", f2)
         self.assertNotIn("FAKE_LOCAL_TEST_TOKEN", first["relative_url"])
 
+    def test_single_account_probe_can_advance_one_cursor_without_other_accounts(self):
+        probes = []
+        def responder(_ver, _token, ops, timeout=120):
+            fields = parse_qs(ops[0]["relative_url"].split("?", 1)[1])["fields"][0]
+            probes.append(fields)
+            return fake_meta(fake_result(1 if len(probes)==1 else 6,
+                                         after="NEXT111" if len(probes)==1 else "NEXT222"))
+        with patch.object(base, "request_batch", side_effect=responder):
+            self.assertEqual(0, mod.main(self.args(cycle="p001") + [
+                "--probe-ordinal", "1"]))
+            self.assertEqual(0, mod.main(self.args(cycle="p002") + [
+                "--probe-ordinal", "1"]))
+        self.assertEqual(2, len(probes))
+        self.assertIn(".after(NEXT111)", probes[1])
+        with closing(sqlite3.connect(self.output / "collection.sqlite")) as db:
+            self.assertEqual(10, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
+            self.assertEqual(0, db.execute(
+                "SELECT COUNT(*) FROM posts WHERE account_key<>'KR_001'").fetchone()[0])
+
     def test_dry_run_never_writes_or_calls_api(self):
         with patch.object(base, "request_batch") as unused:
             self.assertEqual(0, mod.main(self.args(live=False)))
