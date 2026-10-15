@@ -301,7 +301,7 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5,
         + ("두 개의 수집 원본을 안전하게 병합한 전달본입니다.\n"
            "첫 번째 원본은 계정당 최대 5개, 추가 원본은 계정당 최대 1개를 수집했습니다.\n"
            if supplement is not None else "")
-        "게시물이 확보된 계정: " + str(summary["accounts_with_posts"]) + "\n"
+        + "게시물이 확보된 계정: " + str(summary["accounts_with_posts"]) + "\n"
         "현재 수집 원본 게시물: " + str(summary["source_posts"]) + "\n"
         "계정별 최근 " + str(latest_n) + "개 추출: " + str(summary["latest_post_rows"]) + "\n"
         "이미지/동영상 미디어 행: " + str(summary["source_media_rows"]) + "\n\n"
