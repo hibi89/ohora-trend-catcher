@@ -223,6 +223,29 @@ class VisionTests(unittest.TestCase):
         with closing(sqlite3.connect(self.out/"vision.sqlite")) as db:
             self.assertEqual(2,db.execute("SELECT attempts FROM post_analysis WHERE post_id='P1'").fetchone()[0])
 
+    def test_targeted_failed_post_recovery_never_calls_other_post(self):
+        # Initial artificial provider failure is persisted specifically for P1.
+        with patch.object(v, "analyze", side_effect=v.ProviderError("invalid_json")) as fail:
+            self.assertEqual(1, self.run_live("--post-id", "P1", "--limit", "1"))
+            self.assertEqual(2, fail.call_count)
+        with patch.object(v, "analyze", return_value=self.good()) as recovered:
+            self.assertEqual(0, self.run_live("--post-id", "P1", "--retry-failed", "--limit", "1"))
+            self.assertEqual(1, recovered.call_count)
+            self.assertEqual("P1", recovered.call_args.args[0]["post_id"])
+        with closing(sqlite3.connect(self.out / "vision.sqlite")) as db:
+            actual = db.execute("SELECT post_id,status,attempts FROM post_analysis").fetchall()
+            self.assertEqual([("P1", "success", 2)], actual)
+        # Successful P1 is cached: an identical targeted rerun costs zero API calls.
+        with patch.object(v, "analyze") as unused:
+            self.assertEqual(0, self.run_live("--post-id", "P1", "--retry-failed"))
+            unused.assert_not_called()
+
+    def test_unknown_post_id_rejected_without_writing_results(self):
+        with patch.object(v, "analyze") as unused:
+            self.assertEqual(2, self.run_live("--post-id", "UNKNOWN_POST"))
+            unused.assert_not_called()
+        self.assertFalse(self.out.exists())
+
     def test_image_inline_converts_valid_jpeg_without_file(self):
         class Response:
             def __init__(self):
