@@ -10,6 +10,9 @@ Private project source mirror, prepared from the original locally collected ZIP 
 - `kq3_294_collection/test_step4_synthetic.py`: existing 9 synthetic offline tests.
 - `kq3_294_collection/n8n_*.json`: local-only workflow wrappers, containing a machine-specific absolute path; adjust deliberately before import on another PC.
 - `analysis/`: original diagnosis text, dated snapshot; it does not reflect future collections.
+- `experiments/full_batch_collector.py`: isolated 294-account Meta Batch collection; `--posts 5` supported; run only after app usage recovers.
+- `vision/vision_runner.py`: **new image+caption AI analysis** from collected SQLite or CSV, idempotent per post, separately exported. See [vision/README.md](vision/README.md) for morning setup, tests and the explicit `--live --limit 1` provider check.
+- `docs/INCREMENTAL_V1_ARCHITECTURE.md`: latest-5/backfill-5/90-minute schedule planned but not yet implemented.
 
 ## Local setup / using `git pull`
 
