@@ -1,5 +1,15 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — P-1 Friday Hongju delivery prioritized over P1
+
+- Deadline-driven priority: send analysis-ready Instagram collected data to Hongju during Friday classes before building incremental P1.
+- Added delivery/build_hongju_bundle.py: **offline only**, read-only SQLite or CSV source, creates timestamped ZIP with both all available posts and most recent 5 per account, media, account coverage, dataset manifest and instructions. No source mutation, credential collection or image model call. Refuses empty datasets. Protects against spreadsheet formula injection in handoff copy.
+- Added 9 offline tests in delivery/test_build_hongju_bundle.py (still **pending user Windows execution**), and delivery/README.md handoff runbook.
+- Existing 294 latest-5 collection is not known to have succeeded (Meta code4 exhausted usage); preferred existing fallback legacy snapshot is ~94 covered accounts/1,880 posts, and another experimental snapshot ~77 covered accounts/1,540 posts. Exact current counts must come from manifest, not assumptions.
+- Next user action after rest: git pull; run `python -m unittest discover -s delivery -p test_build_hongju_bundle.py -v`, select valid data source; generate ZIP; confirm coverage and deliver. If the Meta app actually recovered, optionally test one latest-5 batch before expanding; never let the full 294 goal prevent same-day partial handoff.
+- P1 latest-refresh, P2 historical expansion and scheduled n8n remain unchanged in architecture but temporarily postponed until handoff.
+
+
 ## 2026-10-16 — P0 verified on user's Windows PC
 
 - **User Windows offline suite:** `Ran 27 tests in 0.806s`, final `OK` (27/27 tests pass) after `git pull origin main`. In-test log messages including `provider_http_403`/`invalid_schema`/`Provider stopped safely` come from deliberately mocked adverse conditions, **not live model calls**.
