@@ -79,11 +79,12 @@ def load_collection(source: Path) -> tuple[dict[str, list[dict]], str]:
 
 def combine_collections(primary: dict[str, list[dict]],
                         supplement: dict[str, list[dict]]) -> dict[str, list[dict]]:
-    """Merge disjoint successful-account batches in memory, preserving all original rows.
+    """Prefer the richer primary account snapshot on overlaps; add only new accounts.
 
-    Each collection contains the same official 294 account roster. Original
-    successes and API-110 failures are protected; only previously pending
-    accounts may contribute results from the smaller-post experiment.
+    Both sources must have the same official roster. The supplement is a
+    one-post experiment: some of its accounts may subsequently be recollected
+    with five posts by the primary collector. In that case, retain primary
+    account/posts/media and skip the entire overlapping supplemental account.
     """
     original_accounts = {str(a["account_key"]): a for a in primary["accounts"]}
     extra_accounts = {str(a["account_key"]): a for a in supplement["accounts"]}
@@ -99,38 +100,60 @@ def combine_collections(primary: dict[str, list[dict]],
                 str(second.get("username")).casefold()):
             raise ValueError("Country or username mismatch for supplement account")
 
-    new_accounts = []
+    new_accounts: list[dict] = []
     add_keys: set[str] = set()
+    overlap_keys: set[str] = set()
     for a in primary["accounts"]:
         key = str(a["account_key"])
         extra = extra_accounts[key]
-        if str(extra.get("status")) in {"success", "partial"}:
-            if str(a.get("status")) not in {"pending", "rate_limited"}:
-                raise ValueError("Supplement overlaps an already processed account")
-            add_keys.add(key)
-            new_accounts.append(dict(extra, collection_source="supplement"))
+        base_status = str(a.get("status") or "pending")
+        extra_status = str(extra.get("status") or "pending")
+        if extra_status in {"success", "partial"}:
+            if base_status in {"success", "partial"}:
+                # Existing five-post snapshot is authoritative. A prior
+                # one-post snapshot from the same account is now redundant.
+                overlap_keys.add(key)
+                new_accounts.append(dict(a, collection_source="primary"))
+            elif base_status in {"pending", "rate_limited"}:
+                add_keys.add(key)
+                new_accounts.append(dict(extra, collection_source="supplement"))
+            else:
+                # Do not silently override failed access/identity results.
+                raise ValueError("Supplement conflicts with failed primary account")
         else:
             new_accounts.append(dict(a, collection_source="primary"))
 
     extra_posts = supplement["posts"]
     extra_media = supplement["media"]
-    if any(str(p.get("account_key")) not in add_keys for p in extra_posts):
+    expected_keys = add_keys | overlap_keys
+    if any(str(p.get("account_key")) not in expected_keys for p in extra_posts):
         raise ValueError("Supplement post belongs to an ineligible account")
-    if any(str(m.get("account_key")) not in add_keys for m in extra_media):
+    if any(str(m.get("account_key")) not in expected_keys for m in extra_media):
         raise ValueError("Supplement media belongs to an ineligible account")
+    included_posts = [p for p in extra_posts if str(p["account_key"]) in add_keys]
+    included_media = [m for m in extra_media if str(m["account_key"]) in add_keys]
     primary_ids = {str(p["post_id"]) for p in primary["posts"]}
     primary_media_ids = {str(m["media_id"]) for m in primary["media"]}
-    if any(str(p.get("post_id")) in primary_ids for p in extra_posts):
-        raise ValueError("Duplicate post ID across primary and supplement")
-    if any(str(m.get("media_id")) in primary_media_ids for m in extra_media):
-        raise ValueError("Duplicate media ID across primary and supplement")
+    if any(str(p.get("post_id")) in primary_ids for p in included_posts):
+        raise ValueError("Duplicate post ID across unrelated source accounts")
+    if any(str(m.get("media_id")) in primary_media_ids for m in included_media):
+        raise ValueError("Duplicate media ID across unrelated source accounts")
 
     return {
         "accounts": new_accounts,
         "posts": [dict(p, collection_source="primary") for p in primary["posts"]]
-                 + [dict(p, collection_source="supplement") for p in extra_posts],
+                 + [dict(p, collection_source="supplement") for p in included_posts],
         "media": [dict(m, collection_source="primary") for m in primary["media"]]
-                 + [dict(m, collection_source="supplement") for m in extra_media],
+                 + [dict(m, collection_source="supplement") for m in included_media],
+        "_merge_meta": {
+            "supplement_accounts_added": len(add_keys),
+            "supplement_accounts_overlapped": len(overlap_keys),
+            "supplement_post_rows_included": len(included_posts),
+            "supplement_post_rows_ignored_overlap": len(extra_posts) - len(included_posts),
+            "supplement_media_rows_included": len(included_media),
+            "supplement_media_rows_ignored_overlap": len(extra_media) - len(included_media),
+            "merge_precedence": "primary_over_supplement_per_account",
+        },
     }
 
 
@@ -275,6 +298,7 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5,
         primary_post_count = len(data["posts"])
         extra_post_count = len(additional["posts"])
         data = combine_collections(data, additional)
+        merge_meta = data["_merge_meta"]
         origin_format += " + " + extra_format
     outputs, summary = prepare(data, latest_n)
     summary["source_format"] = origin_format
@@ -284,7 +308,10 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5,
         summary["supplement_source_posts"] = extra_post_count
         summary["source_directory_names"] = [source.name, supplement.name]
         summary["posts_by_collection_source"] = {
-            "primary": primary_post_count, "supplement": extra_post_count}
+            "primary": primary_post_count,
+            "supplement_in_source": extra_post_count,
+            "supplement_included": merge_meta["supplement_post_rows_included"]}
+        summary.update(merge_meta)
     summary["created_at_kst"] = datetime.now(KST).isoformat(timespec="seconds")
     # Never include a private filesystem path, API secret, model key or raw request logs.
     summary["source_directory_name"] = source.name
@@ -300,6 +327,9 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5,
         "전체 계정: " + str(summary["source_accounts"]) + "\n"
         + ("두 개의 수집 원본을 안전하게 병합한 전달본입니다.\n"
            "첫 번째 원본은 계정당 최대 5개, 추가 원본은 계정당 최대 1개를 수집했습니다.\n"
+           if supplement is not None else "")
+        + ("중복 계정 " + str(summary["supplement_accounts_overlapped"])
+           + "개는 기존 5개 수집본을 우선하여 제외했습니다.\\n"
            if supplement is not None else "")
         + "게시물이 확보된 계정: " + str(summary["accounts_with_posts"]) + "\n"
         "현재 수집 원본 게시물: " + str(summary["source_posts"]) + "\n"
