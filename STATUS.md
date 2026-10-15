@@ -1,5 +1,13 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Collector blocked by missing local Meta env; delivery test Windows lock fixed
+
+- User confirmed official 294-account CSV path exists (`Test-Path $src=True`), but suggested local `kq3_294_collection/.env.local` does **not** exist (`False`). The collector therefore cannot authenticate without locating another secure env file or configuring `META_ACCESS_TOKEN`, `META_IG_USER_ID` and optional graph version locally.
+- User ran Friday handoff test: `Ran 9 tests ... FAILED (errors=1)` on Windows with `PermissionError [WinError 32]` for the temporary `experiment.sqlite` file. Cause: `with sqlite3.connect(...)` is a transaction manager but not an explicit connection closer. Fixed **both** fixture and exporter with `contextlib.closing` in commits `5602e192adda3488f5ae16a4e2597c24815d2207` and `2b61b77b81ef03a304a454ba95c0b2557535f813`. Windows user retest pending.
+- Urgent next action: find existing .env.local by **file path only** and run one guarded latest-5 batch, then resume remaining batches when safe. Do not paste API token. Delivery tests can be rerun before packaging after collection; no need to block Meta collector on unrelated ZIP test failure.
+- No new Meta run was performed by assistant; real API collection must run on user's Windows PC.
+
+
 ## 2026-10-16 — P-1 Friday Hongju delivery prioritized over P1
 
 - Deadline-driven priority: send analysis-ready Instagram collected data to Hongju during Friday classes before building incremental P1.
