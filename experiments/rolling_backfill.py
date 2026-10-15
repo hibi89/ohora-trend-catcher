@@ -197,6 +197,20 @@ def run(args) -> int:
             if db.execute("SELECT 1 FROM backfill_runs WHERE cycle=?", (cycle,)).fetchone():
                 print(f"SKIPPED: app {args.app} already ran cycle={cycle}")
                 return 0
+            if args.cycle_id is None:
+                # Production: enforce exact cooldown in addition to fixed slots.
+                # Explicit cycle IDs are reserved for network-free unit tests.
+                prev = db.execute(
+                    "SELECT started_utc,finished_utc FROM backfill_runs "
+                    "ORDER BY started_utc DESC LIMIT 1").fetchone()
+                if prev:
+                    current = now()
+                    started_age = (current - datetime.fromisoformat(prev["started_utc"])).total_seconds()
+                    finished_age = ((current - datetime.fromisoformat(prev["finished_utc"])).total_seconds()
+                                    if prev["finished_utc"] else -1)
+                    if started_age < 90*60 or finished_age < 60*60:
+                        print("SKIPPED: start-to-start 90min or finish-to-start 60min cooldown")
+                        return 0
             # Defensive starting cadence: manual repeat within the same 90-minute
             # cycle is blocked even if cron triggers twice or requests fail.
             with db:
@@ -305,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-usage", type=float, default=70.)
     parser.add_argument("--max-minutes", type=int, default=30)
     parser.add_argument("--interval-minutes", type=int, default=90)
-    parser.add_argument("--cycle-id", help="Manual cycle ID for offline tests; omit in production")
+    parser.add_argument("--cycle-id", help="Test-only cycle ID; NEVER set in live scheduling")
     parser.add_argument("--live", action="store_true")
     args = parser.parse_args(argv)
     try:
