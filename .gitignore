@@ -29,3 +29,6 @@ __pycache__/
 venv/
 *.tmp
 .DS_Store
+
+# Offline/live batch probe statistics stay local
+/experiments/results/
