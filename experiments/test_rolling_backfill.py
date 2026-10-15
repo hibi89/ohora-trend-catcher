@@ -107,6 +107,9 @@ class CursorBackfillTests(unittest.TestCase):
         with patch.object(base, "request_batch", side_effect=responder):
             self.assertEqual(0, mod.main(self.args(cycle="cycle001")))
             self.assertEqual(0, mod.main(self.args(cycle="cycle001")))
+            with closing(sqlite3.connect(self.output / "collection.sqlite")) as db:
+                db.execute("UPDATE backfill_state SET blocked=1 WHERE account_key<>'KR_001'")
+                db.commit()
             self.assertEqual(0, mod.main(self.args(cycle="cycle002")))
         self.assertEqual(2, len(calls))
         self.assertNotIn(".after(", calls[0])
@@ -130,7 +133,11 @@ class CursorBackfillTests(unittest.TestCase):
             n = state["page"]
             return fake_meta(fake_result((n-1)*5 + 1, after=f"CURSOR{n}"))
         with patch.object(base, "request_batch", side_effect=responder):
-            for i in range(10):
+            self.assertEqual(0, mod.main(self.args(cycle="round000")))
+            with closing(sqlite3.connect(self.output / "collection.sqlite")) as db:
+                db.execute("UPDATE backfill_state SET blocked=1 WHERE account_key<>'KR_001'")
+                db.commit()
+            for i in range(1, 10):
                 self.assertEqual(0, mod.main(self.args(cycle=f"round{i:03}")))
             self.assertEqual(0, mod.main(self.args(cycle="round009")))  # duplicate trigger is a no-op
         self.assertEqual(10, state["page"])
@@ -144,7 +151,7 @@ class CursorBackfillTests(unittest.TestCase):
     def test_missing_cursor_on_full_page_is_blocked_no_repeated_head(self):
         with patch.object(base, "request_batch", return_value=fake_meta(fake_result(1, after=None))) as fn:
             self.assertEqual(0, mod.main(self.args(cycle="round001")))
-            self.assertEqual(0, mod.main(self.args(cycle="round002")))
+            self.assertEqual(0, mod.main(self.args(cycle="round001")))
             self.assertEqual(1, fn.call_count)
         with closing(sqlite3.connect(self.output / "collection.sqlite")) as db:
             self.assertEqual(5, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
@@ -155,7 +162,7 @@ class CursorBackfillTests(unittest.TestCase):
         with patch.object(base, "request_batch", return_value=fake_meta(
                 fake_result(1, media_count=3, n=3, after=None))) as fn:
             self.assertEqual(0, mod.main(self.args(cycle="cycle001")))
-            self.assertEqual(0, mod.main(self.args(cycle="cycle002")))
+            self.assertEqual(0, mod.main(self.args(cycle="cycle001")))
             self.assertEqual(1, fn.call_count)
         with closing(sqlite3.connect(self.output / "collection.sqlite")) as db:
             self.assertEqual(3, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
@@ -168,7 +175,7 @@ class CursorBackfillTests(unittest.TestCase):
                     {}, 0.01)
         with patch.object(base, "request_batch", return_value=response) as fn:
             self.assertEqual(0, mod.main(self.args(cycle="cycle001")))
-            self.assertEqual(0, mod.main(self.args(cycle="cycle002")))
+            self.assertEqual(0, mod.main(self.args(cycle="cycle001")))
         self.assertEqual(1, fn.call_count)
         with closing(sqlite3.connect(self.output / "collection.sqlite")) as db:
             self.assertEqual(0, db.execute("SELECT COUNT(*) FROM posts").fetchone()[0])
