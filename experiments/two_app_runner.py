@@ -79,7 +79,7 @@ def preflight_credentials(plan: list[tuple[str, Path, int, int, int]]) -> None:
             line = raw.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, val = line.split("=", 1)
-                local[key.strip()] = val.strip().strip("'\\"")
+                local[key.strip()] = val.strip().strip(chr(39) + chr(34))
         token = local.get("META_ACCESS_TOKEN", "")
         caller = local.get("META_IG_USER_ID", "")
         version = local.get("META_GRAPH_VERSION", "v26.0")
