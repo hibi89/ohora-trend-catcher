@@ -34,23 +34,24 @@ Two architectures considered:
 - Configurable `backfill_depth_target` (e.g. 50 unique posts/account), not a license to delete existing historical data. New latest posts can increase the lifetime archive above this target.
 - The absence of more pages or an invalid cursor must be recorded, not interpreted as zero historical content.
 
-**Stage 3 — vision and dashboard (vision runner implemented offline; dashboard pending):**
-- `vision/vision_runner.py` chooses up to 3 representative images per post, analyzes the **post** from images plus caption, and deduplicates by `post_id + model + prompt_version` with a media-ID/caption fingerprint. `selected_media` records source media IDs/basis but does not claim separate per-media tags. The runner reads existing SQLite or CSV without modifying source data. Provider validation remains pending.
+**Stage 3 — vision and dashboard (user live MLAPI test: 20 successes/1 invalid_json; dashboard pending):**
+- `vision/vision_runner.py` chooses up to 3 representative images per post, analyzes the **post** from images plus caption, and deduplicates by `post_id + model + prompt_version` with a media-ID/caption fingerprint. `selected_media` records source media IDs/basis but does not claim separate per-media tags. The runner reads existing SQLite or CSV without modifying source data. Provider connection has been validated on a small live sample; output reliability, costs and large-scale quality are not validated.
 - Feed visual content plus post caption and categorize `is_design_post`, color, technique, texture, motif, season, use. Image endpoint authentication, price and output validation must be proven on a small sample first.
 - Dashboard only queries stored DB; country + date range + design filter, ranking and export. Show data coverage limitations; user date filtering does not request Meta again.
 
 ## Optional schedule (DEFER activation until Stage 1+2 tested)
 
-Draft settings (user can edit after reviewing):
+**Confirmed V1 operating values (2026-10-16; user can later revise):** Full implementation milestones and completion criteria: [V1_DELIVERY_ROADMAP.md](V1_DELIVERY_ROADMAP.md).
 ```yaml
 timezone: Asia/Seoul
 enabled: false
 operating_windows: []  # user must provide actual start/end hours
 latest_n: 5
 backfill_n: 5
-backfill_depth_target: 50
+backfill_depth_target: 50  # unique-post target, NOT deletion/retention cap
 accounts_per_batch: 10
 max_run_minutes: 30
+sol_insights_cadence: weekly
 minimum_gap_start_to_start_minutes: 90
 minimum_cooldown_after_finish_minutes: 60
 usage_guard_total_time_percent: 70
