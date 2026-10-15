@@ -202,7 +202,8 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(3, info["accounts_with_posts"])
         self.assertEqual(8, info["source_posts"])
         self.assertEqual(7, info["latest_post_rows"])
-        self.assertEqual({"primary": 7, "supplement": 1},
+        self.assertEqual({"primary": 7, "supplement_in_source": 1,
+                          "supplement_included": 1},
                          info["posts_by_collection_source"])
         self.assertEqual({"KR": 5, "US": 1, "JP": 1}, info["latest_posts_by_country"])
         with ZipFile(archive) as z:
@@ -217,12 +218,66 @@ class HandoffTests(unittest.TestCase):
             self.assertEqual("1", jp["latest5_in_source"])
             self.assertIn("병합", z.read("README_데이터안내.txt").decode("utf-8-sig"))
 
-    def test_merge_rejects_overlapping_completed_account(self):
+    def test_merge_primary_five_post_wins_over_previous_one_post(self):
+        # Simulates a new 5-post run that caught up with a prior 1-post
+        # result for JP_001. Both copies of the post must not be delivered.
+        self.accounts[2]["status"] = "success"
+        self.posts.append({
+            "post_id": "9999999999999999999", "account_key": "JP_001",
+            "username": "jpnails", "country": "JP",
+            "timestamp": "2026-10-16T01:00:00Z",
+            "caption": "primary has the richer/newer record",
+            "like_count": "7", "comments_count": "3",
+        })
+        self.media.append({
+            "media_id": "9999999999999999999",
+            "post_id": "9999999999999999999",
+            "account_key": "JP_001", "country": "JP",
+            "media_type": "IMAGE", "media_url": "https://cdn.example.invalid/better.jpg",
+        })
+        self.write_fixtures()
         extra = self.supplement()
-        rows = b.read_csv(extra / "accounts.csv")
-        rows[0]["status"] = "success"
-        write_csv(extra / "accounts.csv", list(rows[0]), rows)
-        with self.assertRaisesRegex(ValueError, "overlaps"):
+        archive, info = b.build_bundle(self.source, self.output, supplement=extra)
+        self.assertEqual(3, info["accounts_with_posts"])
+        self.assertEqual(8, info["source_posts"])
+        self.assertEqual(1, info["supplement_accounts_overlapped"])
+        self.assertEqual(0, info["supplement_post_rows_included"])
+        self.assertEqual(1, info["supplement_post_rows_ignored_overlap"])
+        with ZipFile(archive) as z:
+            posts = zip_csv(z, "posts_all_available.csv")
+            matches = [p for p in posts if p["post_id"] == "9999999999999999999"]
+            self.assertEqual(1, len(matches))
+            self.assertEqual("primary has the richer/newer record", matches[0]["caption"])
+            self.assertEqual("primary", matches[0]["collection_source"])
+
+    def test_merge_mixed_overlap_and_new_supplement_account(self):
+        # Supplemental KR_001 is already in primary, but JP_001 is new.
+        # Keep KR primary rows and add the JP supplement, total 8 posts.
+        extra = self.supplement()
+        accounts = b.read_csv(extra / "accounts.csv")
+        accounts[0]["status"] = "success"
+        write_csv(extra / "accounts.csv", list(accounts[0]), accounts)
+        sp = b.read_csv(extra / "posts.csv")
+        sp.append(dict(self.posts[0]))
+        write_csv(extra / "posts.csv", list(sp[0]), sp)
+        sm = b.read_csv(extra / "media.csv")
+        sm.append(dict(self.media[0]))
+        write_csv(extra / "media.csv", list(sm[0]), sm)
+        archive, info = b.build_bundle(self.source, self.output, supplement=extra)
+        self.assertEqual(8, info["source_posts"])
+        self.assertEqual(1, info["supplement_accounts_overlapped"])
+        self.assertEqual(1, info["supplement_accounts_added"])
+        self.assertEqual(1, info["supplement_post_rows_ignored_overlap"])
+        self.assertEqual(1, info["supplement_post_rows_included"])
+        with ZipFile(archive) as z:
+            post_ids = [p["post_id"] for p in zip_csv(z, "posts_all_available.csv")]
+            self.assertEqual(len(post_ids), len(set(post_ids)))
+
+    def test_merge_rejects_supplement_on_known_failed_account(self):
+        self.accounts[2]["status"] = "failed"
+        self.write_fixtures()
+        extra = self.supplement()
+        with self.assertRaisesRegex(ValueError, "conflicts with failed"):
             b.build_bundle(self.source, self.output, supplement=extra)
         self.assertFalse(self.output.exists())
 
