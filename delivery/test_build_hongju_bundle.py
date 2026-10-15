@@ -273,13 +273,22 @@ class HandoffTests(unittest.TestCase):
             post_ids = [p["post_id"] for p in zip_csv(z, "posts_all_available.csv")]
             self.assertEqual(len(post_ids), len(set(post_ids)))
 
-    def test_merge_rejects_supplement_on_known_failed_account(self):
+    def test_merge_falls_back_to_one_post_when_five_post_retry_failed(self):
         self.accounts[2]["status"] = "failed"
+        self.accounts[2]["error_code"] = "110"
         self.write_fixtures()
         extra = self.supplement()
-        with self.assertRaisesRegex(ValueError, "conflicts with failed"):
-            b.build_bundle(self.source, self.output, supplement=extra)
-        self.assertFalse(self.output.exists())
+        archive, info = b.build_bundle(self.source, self.output, supplement=extra)
+        self.assertEqual(3, info["accounts_with_posts"])
+        self.assertEqual(1, info["supplement_accounts_restored_after_primary_failure"])
+        self.assertEqual(8, info["source_posts"])
+        with ZipFile(archive) as z:
+            accounts = zip_csv(z, "accounts.csv")
+            jp = next(a for a in accounts if a["account_key"] == "JP_001")
+            self.assertEqual("success", jp["status"])
+            self.assertEqual("failed", jp["primary_latest5_status"])
+            self.assertEqual("110", jp["primary_latest5_error_code"])
+            self.assertEqual("supplement", jp["collection_source"])
 
     def test_merge_rejects_different_country_username(self):
         extra = self.supplement()
