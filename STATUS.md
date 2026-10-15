@@ -1,5 +1,19 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — Image+caption vision pipeline ready for local provider validation
+
+**Code added:**
+- `vision/vision_runner.py`: read-only import from full_294/latest_5 SQLite or original posts/media CSV; select representative image/carousel/video thumbnail plus caption; schema-validated `is_design_post` and color/technique/texture/motif/season/use labels; one SQLite transaction per post; CSV exports and caching; manual provider switch; safe stop on auth/rate/format errors; explicit paid `--live` only.
+- `vision/test_vision_runner.py`: **21/21 offline tests passed** in the development environment. No external provider requests.
+- `vision/setup_env.ps1` prompts for endpoint/model/key and writes *only local* gitignored `vision/.env.local`. The actual user-supplied API key is **not** in GitHub, Library or outputs.
+- `vision/README.md`: PowerShell morning runbook; run one paid API call only after user reviews provider setup.
+- Real legacy source dataset **1,880 posts / 5,307 media records** was parsed offline; mocked model integration processed three posts, exported analysis rows, and SHA-256 of original CSVs was unchanged.
+- External `mlapi.run` endpoint authorization, accepted model ID, remote image URL fetch behavior, *actual AI inference quality*, cost, and Windows user run are **not yet validated**. Do not call this completely done.
+- Already observed: user's Windows original 16/16 collector tests passed after SQLite closing fix. First live latest-5 Meta test hit code 4 due to lingering 101% usage; no successful new posts from that test.
+- Next: user pulls GitHub code, runs vision tests locally, configures fresh API key securely, offline preview from `experiments/results/full_294`, then one small `--live --limit 1` check before any bulk analyses. Collector runs only after Meta usage sufficiently recovers.
+- 90-minute n8n scheduling, recurring latest upserts and cursor backfill, dashboard UI remain *separate future work*.
+
+
 ## Windows test fix — 2026-10-16
 
 - User's Windows Python 3.11 run of `test_full_batch_collector.py` reported 16 tests, 2 errors: WinError 32 when `TemporaryDirectory` tried to unlink `collection.sqlite`.
