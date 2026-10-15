@@ -87,6 +87,8 @@ def prepare(data: dict[str, list[dict]], latest_n: int) -> tuple[dict[str, list[
     require_columns(media, {"media_id", "post_id"}, "media")
     if not accounts:
         raise ValueError("No accounts in source; refusing an uninformative handoff")
+    if not posts:
+        raise ValueError("No collected posts in source; refusing an empty handoff ZIP")
     account_ids = [str(a.get("account_key") or "") for a in accounts]
     post_ids = [str(p.get("post_id") or "") for p in posts]
     media_ids = [str(m.get("media_id") or "") for m in media]
@@ -100,8 +102,9 @@ def prepare(data: dict[str, list[dict]], latest_n: int) -> tuple[dict[str, list[
         if key not in accounts_by_id:
             raise ValueError("Post references missing account")
         all_posts_by_account[key].append(p)
+    known_post_ids = set(post_ids)
     for m in media:
-        if str(m["post_id"]) not in set(post_ids):
+        if str(m["post_id"]) not in known_post_ids:
             raise ValueError("Media references missing post")
 
     # Source timestamps are Meta ISO strings; ISO lexical ordering is suitable
@@ -177,7 +180,17 @@ def csv_bytes(rows: list[dict], preferred: tuple[str, ...]) -> bytes:
     mem = io.StringIO(newline="")
     writer = csv.DictWriter(mem, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
-    writer.writerows(rows)
+    for row in rows:
+        # Protect Excel/LibreOffice users against spreadsheet formula injection
+        # in untrusted social text. This alters only the DELIVERY COPY.
+        sanitized = {}
+        for key, value in row.items():
+            if isinstance(value, str) and value.lstrip().startswith(
+                    ("=", "+", "-", "@", "\t", "\r", "\n")):
+                sanitized[key] = "'" + value
+            else:
+                sanitized[key] = value
+        writer.writerow(sanitized)
     return mem.getvalue().encode("utf-8-sig")
 
 
@@ -222,6 +235,8 @@ def build_bundle(source: Path, output_dir: Path, latest_n: int = 5) -> tuple[Pat
         "SNS 미디어 URL은 만료되거나 접근권한으로 열리지 않을 수 있습니다.\n"
         "게시물 ID는 Excel에서 숫자로 자동 변환하면 정밀도가 손실될 수 있습니다."
         " 가져오기 기능에서 텍스트 열로 지정하세요.\n"
+        "악성 수식으로 시작하는 SNS 텍스트는 CSV 전달 사본에서 작은따옴표를 앞에 붙여"
+        " 스프레드시트 수식 실행을 방지합니다. 원본 데이터는 수정하지 않았습니다.\n"
         "프로필과 게시물은 공개 수집 자료이며 API 자격정보는 포함하지 않습니다.\n"
         "이 묶음은 294개 전체 수집의 완료나 이미지분석 완료를 보증하지 않습니다.\n"
     )
