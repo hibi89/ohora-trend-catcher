@@ -16,15 +16,15 @@ Likely users: OHORA product-planning, design and marketing teams. Focus on early
 
 ## Current pipeline
 
-1. **Before presentation:** ingest up to **20 latest posts per account** using Instagram Business Discovery; preserve source IDs, timestamps, engagement fields where available, media metadata, post permalink and account metadata.
+1. **Before presentation:** first acquire up to **5 latest posts per account** via Meta Batch and preserve IDs, timestamps, engagement fields when available, media metadata and permalinks. The older **20-post** setting was an internal experiment target, **not a verified customer-mandated minimum**. Future backfill by 5 posts at a time is planned, subject to rate limits.
 2. **Before presentation:** classify accessible IMAGE and carousel images (and evaluate VIDEO thumbnails separately) into canonical nail-design dimensions: color, technique, texture, motif, season, use-case and whether content is about nail designs.
 3. **During presentation:** read stored DB data; filter by country, user-selected date window and design, compute comparable engagement results, visualize and export CSV/XLSX. Target end-to-end within **2–3 minutes** (engineering target, not measured performance). Do not run a full Meta scrape or batch vision analysis on dashboard refresh.
 
 - `like_count` may be absent; **NULL is not zero**.
 - `comments_count` is available in the 2026-10-15 snapshot but must be checked for future data.
 - Engagement count (likes + comments) is calculated only when both fields exist. Relative engagement rate can use current followers but must disclose that it is not necessarily contemporaneous with a post.
-- 20 **latest posts** != all posts from a date interval; explicitly show coverage and absence/limitations when users select historical ranges.
-- Design tagging was not complete in snapshot (0 rows). Vision endpoint and cost/permissions require independent verification.
+- A **latest-5 snapshot** (or historical latest-20 experiment) is not a complete date interval; explicitly show coverage and absence/limitations when users select historical ranges.
+- Design tagging was not complete in the dated snapshot (0 rows). A post-level offline-tested vision runner is now available; provider authentication, model acceptance, image URL access, actual classification quality, and cost **remain unverified until a real one-post test**.
 - Official Business Discovery generally does **not** disclose third-party post saves/shares or proprietary insights; do not claim to collect them.
 - Existing program does not download original image bytes; it stores URLs and metadata. Video direct URLs can be blank and available thumbnails may not represent the whole video.
 
