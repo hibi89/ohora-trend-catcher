@@ -1,5 +1,13 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-16 — P0 verified on user's Windows PC
+
+- **User Windows offline suite:** `Ran 27 tests in 0.806s`, final `OK` (27/27 tests pass) after `git pull origin main`. In-test log messages including `provider_http_403`/`invalid_schema`/`Provider stopped safely` come from deliberately mocked adverse conditions, **not live model calls**.
+- **Previously failed real image post:** User's earlier live exact-post rerun reported `attempted=1, success=1, failed=0` for `17994612878841451`, and local CSV row `status=success`, blank error code, model confidence 0.90.
+- **P0 completed for functional/incident regression scope only:** one actual error recovered + offline suite all green; **not** proof of accuracy, high-volume reliability, or zero future failures. Do not pay to retry the already successful post.
+- **Next P1:** durable append-only/UPSERT DB and recurring latest-5 collector; preserve original existing 20-post result set and make no live Meta calls without user approval and usage headroom checks.
+
+
 ## 2026-10-16 — Vision failed post recovered; one mocked test corrected
 
 - **User-verified live recovery:** `--post-id 17994612878841451 --retry-failed --limit 1 --live` reported `attempted=1, success=1, failed=0`. The exported `post_analysis.csv` row for that exact post is now `status=success`, `error_code` empty, model confidence 0.90, visual summary about the 'Muffler II' gel collection display. This establishes technical recovery, not ground-truth image accuracy.
