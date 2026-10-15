@@ -6,6 +6,16 @@
 
 **P1보다 먼저 실행.** 오늘 학원 종료 전 홍주님에게 분석 가능한 원본/최신 5개/미디어/계정별 커버리지 ZIP을 전달한다. 도구: [delivery/README.md](../delivery/README.md), `delivery/build_hongju_bundle.py`, 오프라인 9개 테스트. 실제 Meta code4 잔여 사용량 제한으로 **294계정 최신5 수집 완료를 보장하지 않음**. 완료 불가능하면 기존 94성공계정·1,880게시물 자료를 부분 수집으로 명시하고 우선 전달한다. ZIP 생성 스크립트와 단위 테스트는 코드 반영됐지만 사용자 PC 검증/ZIP 생성은 아직이다.
 
+## 2026-10-16 — 10게시물 × 약150계정 × 2개 Meta 앱 구상 (검증 전)
+
+**사용자 제안(운영 방향):** Meta Business Discovery에서 계정당 하나의 subrequest에 media.limit(10)을 넣고, 약 294개 공식 계정을 사용자 Meta 앱(150) + 홍주님 Meta 앱(144)으로 나눠 정기 수집. 같은 게시물을 매번 20개 가져오는 것보다 10개 스냅샷과 포스트 ID upsert가 적절할 수 있다. **운영 값 변경은 정식 계측/홍주님 앱 접근 권한 확인 후 확정.** 기존 확정 V1 최신5 및 백필5 설정을 검증 없이 강제 덮어쓰지 않음.
+
+- Batch outer HTTP 한 번에 10계정 조회를 실어도 Meta 제한 계산상 내부 Business Discovery 10개 subrequest는 개별 호출로 집계된다. 즉 150계정 ≈150 조회(subrequests), 15 outer Batch HTTP 요청이다.
+- 사용량이 계정당 기본 처리 비용 위주라는 정황은 있지만, 10게시물일 때 총시간이 5게시물과 같다는 증거는 없음. 1개/5개 교차 실험에서 이동창 효과가 혼합됨. 첫 번째 앱의 실측은 5개×180계정 요청 무렵 total_time 72%, 1개×10계정 요청 시 75→79%였음. 오늘 10개 대량 수집을 무검증 실행하지 않음.
+- 다른 Meta **개인 로그인**만으로 두 개 독립 사용량이 보장되지 않음. 승인된 별도 앱 ID, 각각의 유효한 토큰과 Instagram professional source·연결 Facebook Page·필요 권한을 확인해야 함. 동일 개인 토큰/공유 사업체나 사용자 수준 quota 가능성 확인. 새 앱을 단지 Meta 사용량 제한 우회 목적으로 복제·운용해서는 안 됨.
+- 운영 제안: Meta app A 계정1..150, app B 계정151..294, each distinct independent DB and no overlapping account range; nightly/weekly cadence and target depth configurable. 각각 별도 호출 로그, 실패 로그, x-app-usage 및 정상 권한 검증. 마지막에 account_key/post_id/media_id 기준 병합, NULL likes 보존.
+- 구현 전 acceptance: 계정당 10개, Batch 10계정 소규모 실측, 앱별 usage/call_count/total_time 비교, Meta Business Discovery 접근 가능여부 및 권한 확인, 150/144 분할/중복금지 단위 테스트, 자격증명 분리 보관, 장애 시 그 앱만 중단하고 성공 데이터를 보존.
+- 현재 전달 마감 우선과 과거 latest5 176계정/880개, latest1 15계정/15개 + 회복 대기 98계정은 별도 관리. 2앱 체계 검증 전 기존 수집기는 안전 가드 유지.
 ## 1. 확정한 운영 설정
 
 ```yaml
