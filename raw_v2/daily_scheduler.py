@@ -73,7 +73,13 @@ def select_daily_tasks(db, day, max_tasks=294, policy='daily'):
     if catchup:
         return catchup[:max_tasks]
 
-    history=[a for a in accounts if not a['blocked'] and a['latest_id'] and not a['backfill_done']
+    proven={r[0] for r in db.execute(
+        """SELECT DISTINCT account_key FROM history_page_evidence
+           WHERE completion_basis IN ('cutoff_crossed','api_terminal')""")}
+    # Legacy backfill_done=1 with a cursor and no page evidence is NOT verified.
+    # Preserve the existing flag; allow forward cursor traversal to establish proof.
+    history=[a for a in accounts if not a['blocked'] and a['latest_id']
+             and (not a['backfill_done'] or (a['backfill_cursor'] and a['account_key'] not in proven))
              and not a['catchup_cursor'] and failures.get((a['account_key'],'history'),0)<MAX_FRONT_ATTEMPTS]
     history.sort(key=lambda a:(a['last_history'] or '',a['ordinal']))
     return [('history',a) for a in history[:max_tasks]]
