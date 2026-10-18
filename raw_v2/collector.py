@@ -538,6 +538,12 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
         start=now();run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+str(os.getpid())+'_'+uuid.uuid4().hex[:8]
         halted=False;max_seen=None
         try:
+            unresolved=db.execute("""SELECT run_id,batch_no,status FROM batch_attempts
+                WHERE status NOT IN ('complete','aborted_before_send')
+                LIMIT 1""").fetchone()
+            if unresolved:
+                raise ValueError('unresolved prior batch; audit/reconcile before another API request: '
+                                 +str(tuple(unresolved)))
             slot=active_slot(db,63)
             if slot is None:return 0
             already={r[0] for r in db.execute('SELECT account_key FROM slot_accounts WHERE slot_id=?',(slot,))}
@@ -556,9 +562,23 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
                 batch,tasks=tasks[:args.batch_size],tasks[args.batch_size:]
                 ops=[make_op(a,caller,phase,limit=args.limit,extended=args.extended_fields) for phase,a in batch]
                 t0=now()
+                plans=[{'account_key':a['account_key'],'ordinal':a['ordinal'],
+                        'phase':phase,'requested_cursor':a['catchup_cursor'] if phase=='catchup'
+                        else a['backfill_cursor'] if phase=='history' else None}
+                       for phase,a in batch]
+                with db:
+                    db.execute("""INSERT INTO batch_attempts
+                        (run_id,batch_no,slot_id,request_json,started_at,status)
+                        VALUES (?,?,?,?,?,'prepared')""",
+                        (run_id,b,slot,json.dumps(plans),t0))
                 try:http,body,headers=client(version,token,ops)
                 except (URLError,OSError,TimeoutError) as e:
                     print('HALTED: network error; no checkpoint advanced');halted=True;break
+                batch_raw=persist_response(base,run_id,f'batch_{b:04}',body,token)
+                with db:
+                    db.execute("""UPDATE batch_attempts SET status='response_saved',response_path=?
+                                  WHERE run_id=? AND batch_no=?""",
+                               (str(batch_raw.relative_to(base)),run_id,b))
                 outer_usage=usage(headers)
                 if not isinstance(body,list) or len(body)!=len(batch):
                     print('HALTED: outer batch invalid or API error; no checkpoints advanced');halted=True
@@ -610,8 +630,13 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
                                 args.window_days,limit=args.limit,
                                 commit_hook=lambda nc,ic,hm: log_result('success',ic,hm))
                             status='success';reason='page_saved';has_next='true' if more else 'false'
-                        except (ValueError,sqlite3.Error) as exc:
+                        except sqlite3.Error:
+                            # Never disguise local storage failure as a bad Meta post.
+                            raise
+                        except ValueError as exc:
                             error_code='invalid_payload';error_message=str(exc)[:300]
+                            if 'account identity mismatch' in str(exc) or 'missing numeric business discovery ID' in str(exc):
+                                fatal=True
                             # Payload and request log roll back together.
                     else:
                         if error_code in STOP_ERRORS or code in (401,403,429):fatal=True
@@ -620,6 +645,9 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
                         with db:
                             log_result('failed',0,False)
                     print(f'{a["account_key"]} {phase}: {status} HTTP={code} received={count} new={new} like-field diagnostics saved')
+                with db:
+                    db.execute("""UPDATE batch_attempts SET status='complete'
+                                  WHERE run_id=? AND batch_no=?""",(run_id,b))
                 if fatal or not batch_usage or max_seen>=args.stop_usage:
                     print(f'HALTED: stop flag or usage unavailable/at threshold; app_usage_max={max_seen}')
                     halted=True;break
@@ -658,7 +686,7 @@ def main(argv=None):
     p.add_argument('--extended-fields',action='store_true',help='Unverified profile fields; separate controlled trial only')
     a=p.parse_args(argv)
     try:return run(a)
-    except (ValueError,sqlite3.Error) as e:
+    except (ValueError,sqlite3.Error,OSError) as e:
         print('HALTED:',str(e),file=sys.stderr);return 1
 
 if __name__=='__main__':raise SystemExit(main())
