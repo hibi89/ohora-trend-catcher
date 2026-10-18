@@ -35,3 +35,6 @@ venv/
 
 # Local-only backfill scheduling details and account/token file paths
 /experiments/backfill_schedule.local.json
+
+# Isolated OHORA RAW v2 local DB, run JSON/CSV and checkpoint data
+/raw_v2_results/
