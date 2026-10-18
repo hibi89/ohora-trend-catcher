@@ -138,12 +138,15 @@ def parse_args(argv=None):
                         default='daily')
     parser.add_argument('--acknowledge-warnings',action='store_true',
                         help='Proceed after inspecting a WARN-only read-only audit; FAIL is always blocked')
+    parser.add_argument('--pilot-bypass-cooldown',action='store_true',help='One-time 5-account pilot only; preserve existing slot and cooldown records')
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     options=parse_args(argv)
     if not 1<=options.max_batches<=30:raise ValueError('--max-batches must be 1..30')
+    if options.pilot_bypass_cooldown and not (options.live and options.once and options.max_batches==1 and options.policy=='history-only'):
+        raise ValueError('pilot bypass requires --live --once --max-batches 1 --policy history-only')
     rows,digest=collector.load_accounts(options.source)
     if not options.live:
         print('DRY RUN: policy='+options.policy+'; 294 accounts, 4 posts, batch 5,',
@@ -175,7 +178,7 @@ def main(argv=None):
         source=options.source,env_file=options.env_file,output_dir=base,
         live=True,mode='daily',batch_size=BATCH_SIZE,max_batches=options.max_batches,
         limit=DAILY_LIMIT,window_days=7,history_days=365,stop_usage=STOP_USAGE,
-        extended_fields=False,cycle_minutes=65)
+        extended_fields=False,cycle_minutes=65,pilot_bypass=options.pilot_bypass_cooldown)
     print('OHORA RAW policy:',options.policy)
     print('Profile: 294 accounts, 4 posts, batch 5, up to 150 per slot, 85% usage, '
           'cooldown=max(finish+63min, start+65min)')
@@ -209,7 +212,9 @@ def main(argv=None):
             ready=snap['ready']
             if ready is not None:
                 remaining=(ready-datetime.now(ready.tzinfo)).total_seconds()
-                if remaining>0:
+                if remaining>0 and options.pilot_bypass_cooldown:
+                    print('PILOT BYPASS: local cooldown skipped once; persisted slot record retained')
+                elif remaining>0:
                     print(f'Cooling down until {ready.isoformat()} UTC; {int(remaining)+1}s remaining')
                     if options.once:
                         print('SCHEDULER_RESULT_JSON '+json.dumps({
