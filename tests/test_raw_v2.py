@@ -39,7 +39,7 @@ def payload(ids,after='NEXT',followers=200):
 def owner_payload(p, op):
     """Synthetic Business Discovery must match the requested account."""
     text=unquote(op['relative_url'])
-    match=re.search(r'business_discovery.username\\(([^)]+)\\)',text)
+    match=re.search(r'business_discovery\.username\(([^)]+)\)',text)
     if not match:raise AssertionError('Missing Business Discovery username')
     p['business_discovery']['username']=match.group(1)
     return p
