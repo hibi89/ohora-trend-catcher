@@ -163,6 +163,20 @@ class Tests(unittest.TestCase):
         vals=dict(self.db.execute("SELECT field_name,status FROM field_observations WHERE resource_type='posts' AND item_id=?",(str(10**17+1),)))
         self.assertEqual(vals['like_count'],'returned')
         self.assertEqual(vals['view_count'],'not_tested')
+    def test_csv_optional_fields_headers_are_present(self):
+        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345')
+        args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'headers',live=True,mode='balanced',batch_size=1,
+                       max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
+        def fake(v,t,ops):return 200,[{'code':200,'body':json.dumps(payload([1],after=None))}],{'X-App-Usage':'{"total_time":2}'}
+        self.assertEqual(m.run(args,fake),0)
+        folder=next((args.output_dir/'runs').iterdir())
+        with (folder/'posts.csv').open(encoding='utf-8-sig',newline='') as fp:
+            rows=list(csv.DictReader(fp))
+        self.assertEqual(rows[0]['shortcode'],'')
+        self.assertEqual(rows[0]['view_count'],'')
+        with (folder/'post_media.csv').open(encoding='utf-8-sig',newline='') as fp:
+            self.assertIn('collected_at',next(csv.reader(fp)))
+        self.assertEqual(v.verify(args.output_dir)['checks'],'PASS')
     def test_outer_error_safe(self):
         self.assertEqual(m.usage({'X-App-Usage':'{"total_time":72}'}),72.0)
         self.assertIsNone(m.usage({}))
