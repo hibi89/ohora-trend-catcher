@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in OHORA RAW v2; independent of all legacy stores. Python 3.11+.
 
-A slot may span manual invocations: up to 150 distinct accounts then 60-minute cooldown.
+A slot may span manual invocations: up to 150 distinct accounts then 65-minute cooldown.
 No scheduler is installed. No requests without --live.
 The collector prioritizes unscanned accounts, writes an immutable sanitized API
 response per subrequest, and uses separate latest/catchup/history checkpoints.
@@ -419,7 +419,7 @@ def process_lock(base):
 
 
 
-def active_slot(db, cooldown_minutes=60):
+def active_slot(db, cooldown_minutes=65):
     """Resume partial 150-account slot; cool down only after slot closes.
 
     Adopt a prior pilot made by RAW v2.1 (before slots existed) if it is recent,
@@ -441,20 +441,20 @@ def active_slot(db, cooldown_minutes=60):
         if prior['status']=='active':return prior['slot_id']
         next_time=parse_date(prior['ready_at'])
         if next_time and datetime.now(timezone.utc)<next_time:
-            print('SKIPPED: 60-minute post-completion cooldown; next start after '+prior['ready_at'])
+            print('SKIPPED: 65-minute post-completion cooldown; next start after '+prior['ready_at'])
             return None
     with db:
         row=db.execute('INSERT INTO slots(started_at,status) VALUES (?,?)',(now(),'active'))
     return row.lastrowid
 
 
-def close_slot(db,sid,reason,cooldown_minutes=60):
+def close_slot(db,sid,reason,cooldown_minutes=65):
     finished=now()
     ready=(parse_date(finished)+timedelta(minutes=cooldown_minutes)).isoformat()
     with db:
         db.execute('UPDATE slots SET finished_at=?,ready_at=?,status=?,reason=? WHERE slot_id=? AND status=?',
                    (finished,ready,'cooldown',reason,sid,'active'))
-    print(f'SLOT CLOSED: {reason}; next slot after {ready} (60min after finish)')
+    print(f'SLOT CLOSED: {reason}; next slot after {ready} (65min after finish)')
 
 
 def run(args,client=request_batch):
@@ -464,7 +464,7 @@ def run(args,client=request_batch):
     if not 1 <= args.window_days <= 31:raise ValueError('window-days 1..31 required')
     if args.history_days not in (365,730):raise ValueError('history-days must be 365 or 730')
     if not args.live:
-        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit={args.limit}, {args.window_days}d logical windows, 150 unique accounts/slot, 60min post-finish cooldown; NO writes/API')
+        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit={args.limit}, {args.window_days}d logical windows, 150 unique accounts/slot, 65min post-finish cooldown; NO writes/API')
         return 0
     token,caller,version=load_env(args.env_file)
     base=Path(args.output_dir).resolve()
@@ -476,7 +476,7 @@ def run(args,client=request_batch):
         start=now();run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+str(os.getpid())+'_'+uuid.uuid4().hex[:8]
         halted=False;max_seen=None
         try:
-            slot=active_slot(db,60)
+            slot=active_slot(db,65)
             if slot is None:return 0
             already={r[0] for r in db.execute('SELECT account_key FROM slot_accounts WHERE slot_id=?',(slot,))}
             remaining=SLOT_ACCOUNT_LIMIT-len(already)
@@ -566,7 +566,7 @@ def main(argv=None):
     p.add_argument('--limit',type=int,default=DEFAULT_POST_LIMIT,choices=(4,5),help='Posts per account request; default 4. Existing 5-post data remain intact.')
     p.add_argument('--window-days',type=int,default=7,help='Logical client-side coverage; not API server filter')
     p.add_argument('--history-days',type=int,default=365)
-    p.add_argument('--cycle-minutes',type=int,default=70,help='Deprecated: previous start-to-start cooldown; slot now cools 60min after finish')
+    p.add_argument('--cycle-minutes',type=int,default=70,help='Deprecated: previous start-to-start cooldown; slot now cools 65min after finish')
     p.add_argument('--stop-usage',type=float,default=70)
     p.add_argument('--extended-fields',action='store_true',help='Unverified profile fields; separate controlled trial only')
     a=p.parse_args(argv)
