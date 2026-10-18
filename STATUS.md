@@ -1,5 +1,13 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-18 late — Real 5-account validation and 150-account/60-minute policy restoration
+
+- Windows Python 3.11: after CP949 read and SQLite test cleanup fixes, offline test 20/20 PASS (user log). User's local live pilot run `20261018T143306Z_2840`: 5/5 requests HTTP 200, 25 new posts, 25 observations, SHA/SQLite integrity PASS. `like_count` absent on 6/25 posts, all VIDEO/REELS (2 KR_001, 1 KR_003, 3 KR_004); cause still unproven; `usage_max=0.0` observed, NOT equivalent to zero request cost.
+- User corrected cadence: **up to 150 distinct accounts continuously per slot, max 5 posts per account; wait 60 minutes after slot finishes** (or safely halts). ~70-minute start-to-start interval is only an estimate if collection lasts ~10 minutes. NOT a blanket 70-minute wait after a 5-account pilot.
+- Implemented `slots` and `slot_accounts` bookkeeping in isolated cumulative SQLite; one partial run can be immediately continued until 150 accounts requested. Previous 5-account pilot is automatically adopted into the new slot if recent (<70 minutes) so the next run can do remaining 145. On API halt or reaching 150, cool down for 60 minutes after finish; skip until then; preserve original per-account/page checkpoints.
+- Updated Windows opt-in loop to 30 batches × 5 accounts by default and 60-minute post-finish sleep; default local output under LOCALAPPDATA. Code/runner/docs/tests pushed to main. **Linux Python 3.13.5 synthetic 22/22 unit tests PASS** incl. 5→150, old-pilot adoption, slot cooldown. GitHub Actions/Windows revised tests and actual 150-account API run **NOT YET VERIFIED**.
+- Next from user's existing Git repository root: `git pull origin main`, `python -m unittest discover -s tests -p "test_raw_v2.py" -v`, then explicit `--max-batches 30 --batch-size 5 --live` to resume when ready and observe actual `X-App-Usage`. Do NOT reset/move existing `%LOCALAPPDATA%\\OHORA_RAW_v2` DB, and do not commit credentials or official source CSV.
+
 ## 2026-10-18 — RAW v2 implementation, offline verified; Meta live not yet tested
 
 - **Current approved direction:** 294 official accounts, account/page resume, 7-day client-side logical periods, maximum 5 media per account API page, 70-minute minimum start interval, 365 days (option 730) historical coverage, repeated likes/comments/followers observations.
