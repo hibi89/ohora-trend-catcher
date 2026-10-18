@@ -3,9 +3,11 @@ import json
 import sqlite3
 import sys
 from argparse import Namespace
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'raw_v2'))
@@ -44,6 +46,13 @@ class DailyTests(unittest.TestCase):
 
     def account(self,key='KR_001'):
         return dict(self.db.execute('SELECT * FROM accounts WHERE account_key=?',(key,)).fetchone())
+
+    def mark_fronts_complete(self,day='2026-10-19'):
+        with self.db:
+            self.db.executemany(
+                "INSERT INTO daily_account_state(day_kst,account_key,status,attempts,updated_at) VALUES (?,?,?,?,?)",
+                [(day,a['account_key'],'success',1,c.now())
+                 for a in self.db.execute('SELECT account_key FROM accounts')])
 
     def test_daily_front_order_and_retry_priority(self):
         tasks=sched.select_daily_tasks(self.db,'2026-10-19')
@@ -164,11 +173,15 @@ class DailyTests(unittest.TestCase):
             return 200,[{'code':200,'body':json.dumps(body),'headers':[]}],{'X-App-Usage':'{"total_time":3}'}
         def chooser(db,n):
             return [('front',dict(db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone()))]
-        self.assertEqual(c.run(args,fake,chooser,'2026-10-19'),0)
-        with sqlite3.connect(out/'collection.sqlite') as db:
+        with patch.object(c,'datetime',wraps=c.datetime) as clock:
+            clock.now.return_value=c.parse_date('2026-10-19T01:00:00+00:00')
+            self.assertEqual(c.run(args,fake,chooser,'2026-10-19'),0)
+        with closing(sqlite3.connect(out/'collection.sqlite')) as db:
             db.execute("UPDATE slots SET ready_at='2000-01-01T00:00:00+00:00'");db.commit()
-        self.assertEqual(c.run(args,fake,chooser,'2026-10-20'),0)
-        with sqlite3.connect(out/'collection.sqlite') as db:
+        with patch.object(c,'datetime',wraps=c.datetime) as clock:
+            clock.now.return_value=c.parse_date('2026-10-20T01:00:00+00:00')
+            self.assertEqual(c.run(args,fake,chooser,'2026-10-20'),0)
+        with closing(sqlite3.connect(out/'collection.sqlite')) as db:
             reqs=[row[0] for row in db.execute('SELECT request_id FROM request_log')]
             self.assertEqual(len(reqs),2)
             self.assertEqual(len(set(reqs)),2)
@@ -184,12 +197,66 @@ class DailyTests(unittest.TestCase):
         self.assertEqual(tasks[0][1]['account_key'],'KR_002')
         self.assertTrue(all(phase=='front' and not a['latest_id'] for phase,a in tasks))
 
-    def test_history_only_never_spends_calls_on_latest(self):
+    def test_history_only_waits_for_daily_front_without_requesting_latest(self):
         c.insert_success(self.db,self.account(),'front',make_page([1],after='OLDER'),
                          'R1','r1',c.now(),365,limit=4)
         tasks=sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only')
+        self.assertEqual(tasks,[])
+        self.mark_fronts_complete()
+        tasks=sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only')
         self.assertEqual(tasks[0][0],'history')
         self.assertEqual(tasks[0][1]['account_key'],'KR_001')
+        self.assertEqual(sched.select_daily_tasks(self.db,'2026-10-20',policy='history-only'),[])
+
+    def test_history_only_allows_front_exceptions_but_not_retryable_fronts(self):
+        self.mark_fronts_complete()
+        c.insert_success(self.db,self.account(),'front',make_page([1],after='OLDER'),
+                         'R1','r1',c.now(),365,limit=4)
+        with self.db:
+            self.db.execute("UPDATE daily_account_state SET status='retry_pending',attempts=1 WHERE account_key='KR_002'")
+            self.db.execute("UPDATE accounts SET catchup_cursor='GAP',catchup_anchor='ANCHOR' WHERE account_key='KR_001'")
+        self.assertEqual(sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only'),[])
+        with self.db:
+            self.db.execute("UPDATE daily_account_state SET attempts=2 WHERE account_key='KR_002'")
+            self.db.execute("UPDATE accounts SET blocked=1 WHERE account_key='KR_003'")
+        self.assertEqual(sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only')[0][0],'catchup')
+
+    def test_inspect_history_only_distinguishes_pending_front_and_exhausted_exception(self):
+        self.mark_fronts_complete()
+        with self.db:
+            self.db.execute("UPDATE daily_account_state SET status='retry_pending',attempts=1 WHERE account_key='KR_002'")
+            self.db.execute("UPDATE accounts SET blocked=1 WHERE account_key='KR_003'")
+        with patch.object(sched,'today_kst',return_value='2026-10-19'):
+            snap=sched.inspect_store(self.base/'store',self.accounts,self.digest,'history-only')
+        self.assertEqual((snap['stage'],snap['front_pending'],snap['exceptions'],snap['blocked']),
+                         ('front_pending',1,0,1))
+        with self.db:
+            self.db.execute("UPDATE daily_account_state SET attempts=2 WHERE account_key='KR_002'")
+        with patch.object(sched,'today_kst',return_value='2026-10-19'):
+            snap=sched.inspect_store(self.base/'store',self.accounts,self.digest,'history-only')
+        self.assertEqual((snap['stage'],snap['front_pending'],snap['exceptions']),('done',0,1))
+
+    def test_history_only_reports_pending_front_and_never_calls_collector(self):
+        options=['--source',str(self.source),'--output-dir',str(self.base/'live_empty'),
+                 '--env-file',str(self.base/'unused.env'),'--live','--once','--policy','history-only']
+        snapshot={'day':'2026-10-19','stage':'front_pending','front_pending':294,
+                  'success':0,'exceptions':0,'blocked':0,'pending_gaps':0,'ready':None}
+        with patch.object(c,'load_env'),patch.object(sched,'inspect_store',return_value=snapshot), \
+             patch.object(c,'run') as run:
+            self.assertEqual(sched.main(options),4)
+            run.assert_not_called()
+
+    def test_history_only_rechecks_date_after_each_completed_batch(self):
+        options=['--source',str(self.source),'--output-dir',str(self.base/'live_empty'),
+                 '--env-file',str(self.base/'unused.env'),'--live','--once','--policy','history-only']
+        snapshot={'day':'2026-10-19','stage':'history','front_pending':0,
+                  'success':294,'exceptions':0,'blocked':0,'pending_gaps':0,'ready':None}
+        with patch.object(c,'load_env'),patch.object(sched,'inspect_store',return_value=snapshot), \
+             patch.object(c,'run',return_value=0) as run:
+            self.assertEqual(sched.main(options),0)
+            self.assertEqual(run.call_args.kwargs['daily_day'],'2026-10-19')
+            self.assertEqual(run.call_args.kwargs['cooldown_minutes'],63)
+            self.assertEqual(run.call_args.args[0].cycle_minutes,65)
 
     def test_daily_front_policy_never_enters_history(self):
         c.insert_success(self.db,self.account(),'front',make_page([1],after='OLDER'),
@@ -207,9 +274,25 @@ class DailyTests(unittest.TestCase):
                          'R1','r1',c.now(),365,limit=4)
         with self.db:
             self.db.execute("UPDATE accounts SET backfill_done=1 WHERE account_key='KR_001'")
+        self.mark_fronts_complete()
         tasks=sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only')
         self.assertEqual(tasks[0][1]['account_key'],'KR_001')
         self.assertEqual(self.account()['backfill_done'],1)  # old data not cleared
+
+    def test_legacy_done_flag_without_cursor_restarts_proof_without_erasing_flag(self):
+        with self.db:
+            self.db.execute("UPDATE accounts SET latest_id='123',backfill_done=1,backfill_cursor=NULL WHERE account_key='KR_001'")
+        self.mark_fronts_complete()
+        tasks=sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only')
+        self.assertEqual([(p,a['account_key']) for p,a in tasks],[('history','KR_001')])
+        self.assertIsNone(tasks[0][1]['backfill_cursor'])
+        self.assertEqual(self.account()['backfill_done'],1)
+
+    def test_verified_terminal_front_does_not_restart_history(self):
+        c.insert_success(self.db,self.account(),'front',make_page([1],after=None),
+                         'R1','r1',c.now(),365,limit=4)
+        self.mark_fronts_complete()
+        self.assertEqual(sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only'),[])
 
     def test_daily_dryrun_does_not_touch_db(self):
         result=sched.main(['--source',str(self.source),'--output-dir',str(self.base/'missing')])

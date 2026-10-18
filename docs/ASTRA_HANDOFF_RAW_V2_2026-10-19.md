@@ -1,5 +1,7 @@
 # OHORA RAW v2.1 — Astra review handoff (2026-10-19)
 
+> **검수 후 갱신(2026-10-19):** 이 문서는 `500523b...` 이전 구현의 인수인계 기록이다. 후속 검수 결과와 93개 Windows 오프라인 테스트는 [RAW_V2_REVIEW_2026-10-19.md](RAW_V2_REVIEW_2026-10-19.md)를 따른다. 아래 구현 목록의 **65-minute cooldown은 확인된 불일치**이며, 현재 공통 규칙은 `max(finish+63min, start+65min, saved ready_at)`이다. 완료 증거는 단일 종료행 대신 최초 페이지부터 전체 연결로 검증한다. 운영 DB 읽기 전용 진단은 WARN, 운영 DB 복구와 Meta 호출은 미수행이다.
+
 ## Status
 - Branch: `main`; most recent implementation commit before this handoff: `9f8657e922e0d72e6278cddbea93e56311446a20`.
 - CI at that commit: **success** (GitHub Actions run 39150239533). Earlier 53 offline unit tests passed at 1750da4; confirm latest count from CI logs.

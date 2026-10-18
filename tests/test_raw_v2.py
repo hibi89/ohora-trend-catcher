@@ -231,7 +231,9 @@ class Tests(unittest.TestCase):
         self.assertEqual(m.run(args,fake),0)
         self.assertEqual(calls[0],30)
         with closing(sqlite3.connect(args.output_dir/'collection.sqlite')) as d:
-            d.execute("UPDATE slots SET ready_at='2000-01-01T00:00:00+00:00'");d.commit()
+            # Simulate elapsed time in all slot clocks; moving ready_at alone
+            # must not bypass the common finish/start minimum wait rule.
+            d.execute("UPDATE slots SET started_at='2000-01-01T00:00:00+00:00',finished_at='2000-01-01T00:10:00+00:00',ready_at='2000-01-01T01:13:00+00:00'");d.commit()
         args.max_batches=30
         self.assertEqual(m.run(args,fake),0)
         self.assertEqual(calls[0],60)  # 144 unscanned + 6 history accounts, up to 150

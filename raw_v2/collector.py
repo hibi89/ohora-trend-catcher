@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in OHORA RAW v2; independent of all legacy stores. Python 3.11+.
 
-A slot may span manual invocations: up to 150 distinct accounts then 65-minute cooldown.
+A slot may span manual invocations: up to 150 distinct accounts then at least 63 minutes after finish.
 No scheduler is installed. No requests without --live.
 The collector prioritizes unscanned accounts, writes an immutable sanitized API
 response per subrequest, and uses separate latest/catchup/history checkpoints.
@@ -12,6 +12,7 @@ import csv
 from datetime import datetime, timezone, timedelta
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -154,6 +155,10 @@ def connect(path, accounts, source_sha):
        request_id TEXT PRIMARY KEY,account_key TEXT NOT NULL REFERENCES accounts(account_key),
        requested_cursor TEXT,response_cursor TEXT,oldest_page_ts TEXT,newest_page_ts TEXT,
        cutoff_ts TEXT,completion_basis TEXT,observed_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS catchup_page_evidence(
+       request_id TEXT PRIMARY KEY,account_key TEXT NOT NULL REFERENCES accounts(account_key),
+       anchor TEXT NOT NULL,requested_cursor TEXT,response_cursor TEXT,
+       oldest_page_ts TEXT,newest_page_ts TEXT,completion_basis TEXT,observed_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS batch_attempts(
        run_id TEXT NOT NULL,batch_no INTEGER NOT NULL,slot_id INTEGER NOT NULL,
        request_json TEXT NOT NULL,started_at TEXT NOT NULL,
@@ -196,6 +201,63 @@ def fixed_history_cutoff(db, history_days, reference=None):
     return anchor-timedelta(days=history_days)
 
 
+def history_chain_status(db, account_key, history_days=365):
+    """Read proof from a head page through every cursor edge to its boundary.
+
+    Old completion flags and isolated terminal pages are not continuity proof.
+    A later NULL-cursor history request begins a new proof without deleting any
+    earlier rows. Raw-response/request provenance is checked separately by audit.
+    """
+    result={'verified':False,'basis':None,'reason':'no_root','request_ids':[]}
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_page_evidence'").fetchone():
+        return result
+    rows=[dict(r) for r in db.execute(
+        'SELECT rowid AS evidence_order,* FROM history_page_evidence WHERE account_key=? ORDER BY rowid',
+        (account_key,))]
+    roots=[i for i,r in enumerate(rows) if r['requested_cursor'] is None]
+    if not roots:return result
+    chain=rows[roots[-1]:]
+    result['request_ids']=[r['request_id'] for r in chain]
+    expected=None;previous_oldest=None;seen=set();target=fixed_history_cutoff(db,history_days)
+    for n,r in enumerate(chain):
+        if r['requested_cursor']!=expected:
+            result['reason']='disconnected_cursor';return result
+        after=r['response_cursor'];basis=r['completion_basis']
+        oldest=parse_date(r['oldest_page_ts']);newest=parse_date(r['newest_page_ts'])
+        if after and after in seen:
+            result['reason']='cursor_cycle';return result
+        if after:seen.add(after)
+        if bool(oldest)!=bool(newest) or (oldest and newest<oldest):
+            result['reason']='invalid_page_dates';return result
+        if oldest and previous_oldest and newest>previous_oldest:
+            result['reason']='timestamp_regression';return result
+        terminal=basis in ('api_terminal','front_terminal')
+        crossed=basis=='cutoff_crossed'
+        if terminal and after:
+            result['reason']='terminal_with_cursor';return result
+        if crossed and (not oldest or oldest>target):
+            result['reason']='cutoff_not_reached';return result
+        if not terminal and not crossed and (not after or not oldest):
+            result['reason']='unknown_continuation';return result
+        if basis not in ('front_root','front_terminal','continuing','api_terminal','cutoff_crossed'):
+            result['reason']='unknown_basis';return result
+        if terminal or crossed:
+            if n!=len(chain)-1:
+                result['reason']='pages_after_completion';return result
+            account=db.execute('SELECT backfill_done,backfill_cursor FROM accounts WHERE account_key=?',(account_key,)).fetchone()
+            if not account or not account['backfill_done'] or account['backfill_cursor']!=after:
+                result['reason']='checkpoint_mismatch';return result
+            result.update(verified=True,basis=basis,reason='verified')
+            return result
+        previous_oldest=oldest;expected=after
+    result['reason']='continuing'
+    return result
+
+
+def history_completion_verified(db, account_key, history_days=365):
+    return history_chain_status(db,account_key,history_days)['verified']
+
+
 def make_op(account,caller,phase,limit=5,extended=False):
     fields=BASE_PROFILE + (','+EXTRA_PROFILE if extended else '')
     media='media.limit(%d)'%limit
@@ -223,12 +285,12 @@ def select_tasks(db,mode,max_tasks,cutoff_days=365,refresh_hours=24):
         elif mode=='front':
             phase='front';priority=r['last_attempt'] or ''
         elif mode=='history':
-            if r['backfill_done']:continue
+            if r['backfill_done'] and history_completion_verified(db,r['account_key'],cutoff_days):continue
             phase='history' if r['latest_id'] else 'front'
             priority=r['last_attempt'] or ''
         elif not r['latest_id'] or latest_due:
             phase='front';priority=r['last_attempt'] or ''
-        elif not r['backfill_done']:
+        elif not r['backfill_done'] or not history_completion_verified(db,r['account_key'],cutoff_days):
             phase='history';priority=r['last_attempt'] or ''
         else:
             continue  # recent front already observed, historical target complete
@@ -254,8 +316,13 @@ def usage(headers):
     try: val=json.loads(headers.get('x-app-usage') or '{}')
     except (ValueError,TypeError):return None
     if not isinstance(val,dict):return None
-    numbers=[float(val[k]) for k in ('call_count','total_time','total_cputime')
-             if isinstance(val.get(k),(int,float)) and not isinstance(val[k],bool)]
+    numbers=[]
+    for k in ('call_count','total_time','total_cputime'):
+        value=val.get(k)
+        if not isinstance(value,(int,float)) or isinstance(value,bool):continue
+        try:value=float(value)
+        except (OverflowError,ValueError):continue
+        if math.isfinite(value) and value>=0:numbers.append(value)
     return max(numbers) if numbers else None
 
 
@@ -284,25 +351,43 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
     key=account['account_key']
     # Do not silently save a Business Discovery response under another account.
     found_username=discovery.get('username')
-    if not isinstance(found_username,str) or found_username.casefold()!=account['username'].casefold():
+    if not isinstance(found_username,str) or not re.fullmatch(r'[A-Za-z0-9._]{1,30}',found_username):
         raise ValueError('account identity mismatch: username')
     found_id=discovery.get('id')
     if found_id is None or not str(found_id).isdigit():
         raise ValueError('missing numeric business discovery ID')
     if account['id'] is not None and str(found_id)!=str(account['id']):
         raise ValueError('account identity mismatch: ID')
+    if account['id'] is None and found_username.casefold()!=account['username'].casefold():
+        raise ValueError('account identity mismatch: username')
     old_ids={p['post_id'] for p in db.execute('SELECT post_id FROM posts WHERE account_key=?',(key,))}
     old_latest=account['latest_id']
-    after=((media.get('paging') or {}).get('cursors') or {}).get('after') if isinstance(media.get('paging'),dict) else None
+    paging=media.get('paging')
+    if paging is not None and not isinstance(paging,dict):
+        raise ValueError('invalid media paging object; completeness unknown')
+    cursors=paging.get('cursors') if paging is not None else None
+    if cursors is not None and not isinstance(cursors,dict):
+        raise ValueError('invalid paging cursors object; completeness unknown')
+    after=cursors.get('after') if cursors is not None else None
     if after is not None and (not isinstance(after,str) or not re.fullmatch(r'[A-Za-z0-9_=+/\-]{1,4096}',after)):
         raise ValueError('invalid paging cursor')
+    if paging is not None and paging.get('next') is not None:
+        if not isinstance(paging['next'],str) or not paging['next'] or not after:
+            raise ValueError('next page without usable cursor; completeness unknown')
     before=account['catchup_cursor'] if phase=='catchup' else account['backfill_cursor'] if phase=='history' else None
     if after and before and after==before:raise ValueError('unchanged paging cursor')
     if phase=='history' and before:
+        root=db.execute('SELECT MAX(rowid) FROM history_page_evidence WHERE account_key=? AND requested_cursor IS NULL',(key,)).fetchone()[0]
         seen_cursors={r[0] for r in db.execute(
-            'SELECT requested_cursor FROM history_page_evidence WHERE account_key=?',(key,)) if r[0]}
+            'SELECT requested_cursor FROM history_page_evidence WHERE account_key=? AND rowid>=?',(key,root or 0)) if r[0]}
         if before in seen_cursors or (after and after in seen_cursors):
             raise ValueError('history pagination cursor cycle detected')
+    if phase=='catchup' and before:
+        seen_cursors={r[0] for r in db.execute(
+            'SELECT requested_cursor FROM catchup_page_evidence WHERE account_key=? AND anchor=?',
+            (key,account['catchup_anchor'])) if r[0]}
+        if before in seen_cursors or (after and after in seen_cursors):
+            raise ValueError('catchup pagination cursor cycle detected')
     if phase=='front' and not old_latest and len(posts)==limit and not after and discovery.get('media_count',0)>limit:
         raise ValueError('full page but missing cursor: completeness unknown')
     oldest=account['oldest_time'];newest=account['newest_time'];new_post_count=0
@@ -327,19 +412,25 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
             if p.get('media_type')=='CAROUSEL_ALBUM':
                 child_obj=p.get('children')
                 child_rows=child_obj.get('data') if isinstance(child_obj,dict) else None
-                if child_rows is not None and not isinstance(child_rows,list):
-                    raise ValueError('invalid carousel children.data')
                 children=child_rows if isinstance(child_rows,list) else []
                 paging=child_obj.get('paging') if isinstance(child_obj,dict) else None
                 child_cursor=paging.get('cursors') if isinstance(paging,dict) else None
                 child_more=bool(child_cursor.get('after')) if isinstance(child_cursor,dict) else False
                 complete=bool(children) and not child_more and len(children)<50
+                child_ids=set()
                 for n,child in enumerate(children,1):
                     if not isinstance(child,dict) or not str(child.get('id') or '').isdigit():
-                        raise ValueError('missing carousel child id')
+                        complete=False;continue
+                    child_id=str(child['id'])
+                    if child_id in child_ids:
+                        complete=False;continue
+                    child_ids.add(child_id)
+                    owner=db.execute('SELECT post_id,account_key FROM post_media WHERE media_id=?',(child_id,)).fetchone()
+                    if owner and (owner['post_id']!=pid or owner['account_key']!=key):
+                        raise ValueError('carousel child ID belongs to another post; payload/account mismatch')
                     db.execute('INSERT OR IGNORE INTO post_media VALUES (?,?,?,?,?,?,?,?,?)',
-                        (str(child['id']),pid,key,'carousel_child',n,child.get('media_type'),child.get('media_url'),child.get('thumbnail_url'),run))
-                    record_fields(db,run,req,key,'media',child,child.get('media_type') or '',str(child['id']))
+                        (child_id,pid,key,'carousel_child',n,child.get('media_type'),child.get('media_url'),child.get('thumbnail_url'),run))
+                    record_fields(db,run,req,key,'media',child,child.get('media_type') or '',child_id)
                 saved=db.execute("SELECT COUNT(*) FROM post_media WHERE post_id=? AND media_role='carousel_child'",(pid,)).fetchone()[0]
                 previous=db.execute('SELECT coverage FROM carousel_status WHERE post_id=?',(pid,)).fetchone()
                 complete=complete or bool(previous and previous[0]=='complete')
@@ -374,6 +465,11 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         if phase=='front':
             if seen_ids:latest=seen_ids[0]
             if old_latest and old_latest not in seen_ids and after:
+                db.execute('INSERT INTO catchup_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',
+                           (req,key,old_latest,None,after,
+                            min(page_dates).isoformat() if len(page_dates)==len(posts) and page_dates else None,
+                            max(page_dates).isoformat() if len(page_dates)==len(posts) and page_dates else None,
+                            'front_gap',ts))
                 # Preserve the active gap; queue a newer gap separately.
                 if catch:
                     db.execute('INSERT OR IGNORE INTO catchup_jobs(account_key,cursor,anchor,created_at) VALUES (?,?,?,?)',
@@ -385,10 +481,23 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
             elif not old_latest:
                 back=after  # First page provides historical continuation.
                 if not after:done=1  # No older page in initial response.
+                ordered=(len(page_dates)==len(posts) and not any(
+                    page_dates[i]<page_dates[i+1] for i in range(len(page_dates)-1)))
+                db.execute('INSERT INTO history_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',
+                           (req,key,None,after,
+                            min(page_dates).isoformat() if ordered and page_dates else None,
+                            max(page_dates).isoformat() if ordered and page_dates else None,
+                            target.isoformat(),
+                            ('front_root' if after else 'front_terminal') if ordered else 'unknown_front_page',ts))
             # A front response cannot clear an unfinished prior catchup.
         elif phase=='catchup':
             if anchor not in seen_ids and not after:
                 raise ValueError('latest gap has no boundary; do not mark complete')
+            db.execute('INSERT INTO catchup_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',
+                       (req,key,anchor,before,after,
+                        min(page_dates).isoformat() if len(page_dates)==len(posts) and page_dates else None,
+                        max(page_dates).isoformat() if len(page_dates)==len(posts) and page_dates else None,
+                        'anchor_reached' if anchor in seen_ids else 'continuing',ts))
             if anchor in seen_ids:
                 next_gap=db.execute('SELECT * FROM catchup_jobs WHERE account_key=? ORDER BY job_id LIMIT 1',(key,)).fetchone()
                 if next_gap:
@@ -491,7 +600,22 @@ def process_lock(base):
 
 
 
-def active_slot(db, cooldown_minutes=65):
+def slot_ready_at(slot, cooldown_minutes=63, cycle_minutes=65):
+    """Common wait rule; never shorten a previously persisted ready_at."""
+    if slot is None or slot['status']=='active':return None
+    if cooldown_minutes<63 or cycle_minutes<0:
+        raise ValueError('cooldown must be at least 63 minutes; cycle must be nonnegative')
+    finished=parse_date(slot['finished_at']);started=parse_date(slot['started_at'])
+    saved=parse_date(slot['ready_at'])
+    if not finished or not started or (slot['ready_at'] and not saved):
+        raise ValueError('closed slot timestamps invalid; review before collection')
+    choices=[finished+timedelta(minutes=cooldown_minutes),
+             started+timedelta(minutes=cycle_minutes)]
+    if saved:choices.append(saved)
+    return max(choices)
+
+
+def active_slot(db, cooldown_minutes=63, cycle_minutes=65):
     """Resume partial 150-account slot; cool down only after slot closes.
 
     Adopt a prior pilot made by RAW v2.1 (before slots existed) if it is recent,
@@ -502,41 +626,53 @@ def active_slot(db, cooldown_minutes=65):
         old=db.execute('SELECT * FROM runs WHERE finished_at IS NOT NULL ORDER BY started_at DESC LIMIT 1').fetchone()
         recent=(old and old['finished_at'] and
                 (datetime.now(timezone.utc)-parse_date(old['finished_at'])).total_seconds()<70*60)
-        if recent and 0 < old['requests'] < 150:
+        if recent and 0 < old['requests']:
             with db:
                 cur=db.execute('INSERT INTO slots(started_at,status) VALUES (?,?)',(old['started_at'],'active'))
                 sid=cur.lastrowid
                 db.execute('INSERT OR IGNORE INTO slot_accounts(slot_id,account_key,request_id) '
                            'SELECT ?,account_key,request_id FROM request_log WHERE run_id=?',(sid,old['run_id']))
+                if old['requests']>=SLOT_ACCOUNT_LIMIT or old['status']=='paused':
+                    ready=slot_ready_at(dict(status='cooldown',started_at=old['started_at'],
+                        finished_at=old['finished_at'],ready_at=None),cooldown_minutes,cycle_minutes)
+                    db.execute('UPDATE slots SET finished_at=?,ready_at=?,status=?,reason=? WHERE slot_id=?',
+                        (old['finished_at'],ready.isoformat(),'cooldown','legacy_run_closed',sid))
+                    if datetime.now(timezone.utc)<ready:return None
+                    return active_slot(db,cooldown_minutes,cycle_minutes)
             return sid
     else:
         if prior['status']=='active':return prior['slot_id']
-        next_time=parse_date(prior['ready_at'])
+        next_time=slot_ready_at(prior,cooldown_minutes,cycle_minutes)
         if next_time and datetime.now(timezone.utc)<next_time:
-            print('SKIPPED: 65-minute post-completion cooldown; next start after '+prior['ready_at'])
+            print('SKIPPED: slot cooldown; next start after '+next_time.isoformat())
             return None
     with db:
         row=db.execute('INSERT INTO slots(started_at,status) VALUES (?,?)',(now(),'active'))
     return row.lastrowid
 
 
-def close_slot(db,sid,reason,cooldown_minutes=65):
+def close_slot(db,sid,reason,cooldown_minutes=63,cycle_minutes=65):
     finished=now()
-    ready=(parse_date(finished)+timedelta(minutes=cooldown_minutes)).isoformat()
+    slot=db.execute('SELECT * FROM slots WHERE slot_id=?',(sid,)).fetchone()
+    if not slot or slot['status']!='active':return
+    pending=dict(slot);pending.update(status='cooldown',finished_at=finished)
+    ready=slot_ready_at(pending,cooldown_minutes,cycle_minutes).isoformat()
     with db:
         db.execute('UPDATE slots SET finished_at=?,ready_at=?,status=?,reason=? WHERE slot_id=? AND status=?',
                    (finished,ready,'cooldown',reason,sid,'active'))
-    print(f'SLOT CLOSED: {reason}; next slot after {ready} (65min after finish)')
+    print(f'SLOT CLOSED: {reason}; next slot after {ready} (at least {cooldown_minutes}min after finish)')
 
 
-def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_minutes=65):
+def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_minutes=63):
     accounts,digest=load_accounts(args.source)
     if args.batch_size<1 or args.batch_size>10 or args.limit not in (4,5) or args.max_batches<1 or not 0<args.stop_usage<100:
         raise ValueError('batch-size 1..10, limit 4 or 5, max-batches>=1, 0<stop-usage<100 required')
     if not 1 <= args.window_days <= 31:raise ValueError('window-days 1..31 required')
     if args.history_days not in (365,730):raise ValueError('history-days must be 365 or 730')
+    cycle_minutes=getattr(args,'cycle_minutes',65)
+    if cooldown_minutes<63 or cycle_minutes<0:raise ValueError('cooldown must be at least 63 minutes; cycle must be nonnegative')
     if not args.live:
-        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit={args.limit}, {args.window_days}d logical windows, 150 unique accounts/slot, 65min post-finish cooldown; NO writes/API')
+        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit={args.limit}, {args.window_days}d logical windows, 150 unique accounts/slot, at least {cooldown_minutes}min after finish / {cycle_minutes}min start cadence; NO writes/API')
         return 0
     token,caller,version=load_env(args.env_file)
     base=Path(args.output_dir).resolve()
@@ -554,28 +690,35 @@ def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_min
             if unresolved:
                 raise ValueError('unresolved prior batch; audit/reconcile before another API request: '
                                  +str(tuple(unresolved)))
-            slot=active_slot(db,cooldown_minutes)
+            slot=active_slot(db,cooldown_minutes,cycle_minutes)
             if slot is None:return 0
             already={r[0] for r in db.execute('SELECT account_key FROM slot_accounts WHERE slot_id=?',(slot,))}
             remaining=SLOT_ACCOUNT_LIMIT-len(already)
             if remaining<=0:
-                close_slot(db,slot,'150_accounts_completed',cooldown_minutes)
+                close_slot(db,slot,'150_accounts_completed',cooldown_minutes,cycle_minutes)
                 return 0
             with db:db.execute('INSERT INTO runs(run_id,started_at,api_version,mode,status) VALUES (?,?,?,?,?)',
                                (run_id,start,version,args.mode,'started'))
             # Resume unfinished slot. Each account is queried at most once per slot.
-            selected=task_selector(db,294) if task_selector else select_tasks(db,args.mode,294)
+            selected=task_selector(db,294) if task_selector else select_tasks(db,args.mode,294,cutoff_days=args.history_days)
             tasks=[(phase,a) for phase,a in selected if a['account_key'] not in already][:remaining]
             rollover=False
             for b in range(args.max_batches):
                 if not tasks:break
+                if daily_day and datetime.now(timezone(timedelta(hours=9))).date().isoformat()!=daily_day:
+                    rollover=True;break
                 batch,tasks=tasks[:args.batch_size],tasks[args.batch_size:]
                 ops=[make_op(a,caller,phase,limit=args.limit,extended=args.extended_fields) for phase,a in batch]
                 t0=now()
                 plans=[{'account_key':a['account_key'],'ordinal':a['ordinal'],
+                        'request_id':f'{run_id}_{b:04}_{i:02}_{a["ordinal"]:03}_{phase}',
                         'phase':phase,'requested_cursor':a['catchup_cursor'] if phase=='catchup'
-                        else a['backfill_cursor'] if phase=='history' else None}
-                       for phase,a in batch]
+                        else a['backfill_cursor'] if phase=='history' else None,
+                        'options':{'limit':args.limit,'history_days':args.history_days,
+                                   'window_days':args.window_days,'extended_fields':args.extended_fields},
+                        'state':{k:a[k] for k in ('latest_id','backfill_cursor','backfill_done','catchup_cursor','catchup_anchor')},
+                        'daily_day':daily_day,'cooldown_minutes':cooldown_minutes,'cycle_minutes':cycle_minutes}
+                       for i,(phase,a) in enumerate(batch)]
                 with db:
                     db.execute("""INSERT INTO batch_attempts
                         (run_id,batch_no,slot_id,request_json,started_at,status)
@@ -598,7 +741,7 @@ def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_min
                 if batch_usage:max_seen=max(batch_usage+[max_seen or 0])
                 fatal=False
                 for i,((phase,a),entry) in enumerate(zip(batch,body)):
-                    req=f'{run_id}_{b:04}_{i:02}_{a["ordinal"]:03}_{phase}'
+                    req=plans[i]['request_id']
                     ts=now();code=int(entry.get('code') or 0) if isinstance(entry,dict) else 0
                     try:payload=json.loads(entry.get('body') or '{}') if isinstance(entry,dict) else {}
                     except (ValueError,TypeError):payload={}
@@ -645,7 +788,8 @@ def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_min
                             raise
                         except ValueError as exc:
                             error_code='invalid_payload';error_message=str(exc)[:300]
-                            if 'account identity mismatch' in str(exc) or 'missing numeric business discovery ID' in str(exc):
+                            if ('account identity mismatch' in str(exc) or
+                                'missing numeric business discovery ID' in str(exc) or 'belongs to another' in str(exc)):
                                 fatal=True
                                 permanent_halt=True
                             # Payload and request log roll back together.
@@ -659,12 +803,17 @@ def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_min
                         with db:
                             log_result('failed',0,False)
                     print(f'{a["account_key"]} {phase}: {status} HTTP={code} received={count} new={new} like-field diagnostics saved')
+                if not batch_usage:
+                    permanent_halt=True
+                batch_halted=fatal or not batch_usage or max_seen>=args.stop_usage
                 with db:
                     db.execute("""UPDATE batch_attempts SET status='complete'
                                   WHERE run_id=? AND batch_no=?""",(run_id,b))
-                if not batch_usage:
-                    permanent_halt=True
-                if fatal or not batch_usage or max_seen>=args.stop_usage:
+                    if batch_halted:
+                        # The journal may become complete only together with
+                        # the durable wait state. A crash cannot reopen quota.
+                        close_slot(db,slot,'api_halted',cooldown_minutes,cycle_minutes)
+                if batch_halted:
                     print(f'HALTED: stop flag or usage unavailable/at threshold; app_usage_max={max_seen}')
                     halted=True;break
                 if daily_day and datetime.now(timezone(timedelta(hours=9))).date().isoformat()!=daily_day:
@@ -674,7 +823,7 @@ def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_min
                                 (now(),'paused' if halted else 'closed',max_seen,run_id))
             used=db.execute('SELECT COUNT(*) FROM slot_accounts WHERE slot_id=?',(slot,)).fetchone()[0]
             if halted or used>=SLOT_ACCOUNT_LIMIT or (not tasks and not rollover):
-                close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=SLOT_ACCOUNT_LIMIT else 'no_eligible_accounts',cooldown_minutes)
+                close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=SLOT_ACCOUNT_LIMIT else 'no_eligible_accounts',cooldown_minutes,cycle_minutes)
             else:
                 print(f'SLOT OPEN: {used}/{SLOT_ACCOUNT_LIMIT} accounts processed at limit={args.limit}; may continue immediately.')
             output=export_run(db,base,run_id,args.source)
@@ -697,8 +846,8 @@ def main(argv=None):
     p.add_argument('--limit',type=int,default=DEFAULT_POST_LIMIT,choices=(4,5),help='Posts per account request; default 4. Existing 5-post data remain intact.')
     p.add_argument('--window-days',type=int,default=7,help='Logical client-side coverage; not API server filter')
     p.add_argument('--history-days',type=int,default=365)
-    p.add_argument('--cycle-minutes',type=int,default=70,help='Deprecated: previous start-to-start cooldown; slot now cools 65min after finish')
-    p.add_argument('--stop-usage',type=float,default=70)
+    p.add_argument('--cycle-minutes',type=int,default=65,help='Minimum start cadence; next start is max(finish + 63min, start + cycle-minutes, saved ready_at)')
+    p.add_argument('--stop-usage',type=float,default=85)
     p.add_argument('--extended-fields',action='store_true',help='Unverified profile fields; separate controlled trial only')
     a=p.parse_args(argv)
     try:return run(a)

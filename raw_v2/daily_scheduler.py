@@ -29,6 +29,21 @@ def today_kst():
     return datetime.now(KST).date().isoformat()
 
 
+def pending_front_accounts(accounts, states, policy='daily'):
+    pending=[]
+    for account in accounts:
+        if account['blocked']:
+            continue
+        if policy=='bootstrap-history' and account['latest_id']:
+            continue  # Bootstrap does not repeat an already observed head.
+        state=states.get(account['account_key'])
+        if state and (state['status'] in ('success','needs_review','excluded') or
+                      state['attempts']>=MAX_FRONT_ATTEMPTS):
+            continue
+        pending.append((state['attempts'] if state else 0,account['ordinal'],'front',account))
+    return pending
+
+
 def select_daily_tasks(db, day, max_tasks=294, policy='daily'):
     """Select exactly one stage at a time; do not backfill while front is pending.
 
@@ -38,20 +53,10 @@ def select_daily_tasks(db, day, max_tasks=294, policy='daily'):
     accounts=[dict(row) for row in db.execute('SELECT * FROM accounts ORDER BY ordinal')]
     states={row['account_key']:dict(row) for row in db.execute(
         'SELECT * FROM daily_account_state WHERE day_kst=?',(day,))}
-    front=[]
-    if policy in ('daily','daily-front','bootstrap-history'):
-        for account in accounts:
-            if account['blocked']:
-                continue
-            state=states.get(account['account_key'])
-            if policy=='bootstrap-history' and account['latest_id']:
-                continue  # No repeat latest snapshot on bootstrap day.
-            if state and (state['status'] in ('success','needs_review','excluded') or
-                          state['attempts'] >= MAX_FRONT_ATTEMPTS):
-                continue
-            attempts=state['attempts'] if state else 0
-            front.append((attempts,account['ordinal'],'front',account))
+    front=pending_front_accounts(accounts,states,policy)
     if front:
+        if policy=='history-only':
+            return []  # Caller reports unmet daily-front prerequisite; no API request.
         # Strict roster halves for daily; bootstrap prioritizes all never-seen accounts.
         if policy!='bootstrap-history':
             first=[item for item in front if item[1]<=150]
@@ -73,13 +78,10 @@ def select_daily_tasks(db, day, max_tasks=294, policy='daily'):
     if catchup:
         return catchup[:max_tasks]
 
-    proven={r[0] for r in db.execute(
-        """SELECT DISTINCT account_key FROM history_page_evidence
-           WHERE completion_basis IN ('cutoff_crossed','api_terminal')""")}
-    # Legacy backfill_done=1 with a cursor and no page evidence is NOT verified.
-    # Preserve the existing flag; allow forward cursor traversal to establish proof.
+    # A legacy done flag, including NULL cursor, is not completion proof.
+    # Preserve it and traverse from the saved cursor (or head) to establish evidence.
     history=[a for a in accounts if not a['blocked'] and a['latest_id']
-             and (not a['backfill_done'] or (a['backfill_cursor'] and a['account_key'] not in proven))
+             and (not a['backfill_done'] or not collector.history_completion_verified(db,a['account_key']))
              and not a['catchup_cursor'] and failures.get((a['account_key'],'history'),0)<MAX_FRONT_ATTEMPTS]
     history.sort(key=lambda a:(a['last_history'] or '',a['ordinal']))
     return [('history',a) for a in history[:max_tasks]]
@@ -102,15 +104,21 @@ def inspect_store(base, source, digest, policy='daily'):
                       AND date(finished_at,'+9 hours')=?
                     GROUP BY account_key""",(day,day))
             choices=select_daily_tasks(db,day,policy=policy)
+            accounts=[dict(row) for row in db.execute('SELECT * FROM accounts ORDER BY ordinal')]
+            states={row['account_key']:dict(row) for row in db.execute(
+                'SELECT * FROM daily_account_state WHERE day_kst=?',(day,))}
+            front_pending=len(pending_front_accounts(accounts,states,policy))
             success=db.execute(
                 "SELECT COUNT(*) FROM daily_account_state WHERE day_kst=? AND status='success'",(day,)).fetchone()[0]
-            failures=db.execute(
-                "SELECT COUNT(*) FROM daily_account_state WHERE day_kst=? AND status!='success'",(day,)).fetchone()[0]
+            failures=sum(1 for a in accounts if not a['blocked'] and
+                (state:=states.get(a['account_key'])) and state['status']!='success' and
+                (state['status'] in ('needs_review','excluded') or state['attempts']>=MAX_FRONT_ATTEMPTS))
             blocked=db.execute('SELECT COUNT(*) FROM accounts WHERE blocked=1').fetchone()[0]
             pending_gaps=db.execute("SELECT COUNT(*) FROM accounts WHERE catchup_cursor IS NOT NULL AND blocked=0").fetchone()[0]
             latest=db.execute('SELECT * FROM slots ORDER BY slot_id DESC LIMIT 1').fetchone()
-            ready=collector.parse_date(latest['ready_at']) if latest and latest['status']!='active' else None
-            return {'day':day,'tasks':choices,'stage':choices[0][0] if choices else 'done',
+            ready=collector.slot_ready_at(latest)
+            stage=choices[0][0] if choices else 'front_pending' if policy=='history-only' and front_pending else 'done'
+            return {'day':day,'tasks':choices,'stage':stage,'front_pending':front_pending,
                     'success':success,'exceptions':failures,'blocked':blocked,'pending_gaps':pending_gaps,
                     'ready':ready,'slot_status':latest['status'] if latest else None}
         finally:
@@ -139,7 +147,7 @@ def main(argv=None):
     rows,digest=collector.load_accounts(options.source)
     if not options.live:
         print('DRY RUN: policy='+options.policy+'; 294 accounts, 4 posts, batch 5,',
-              '150 unique accounts/slot, stop 85%, 65-minute post-finish cooldown.')
+              '150 unique accounts/slot, stop 85%, cooldown=max(finish+63min, start+65min).')
         print('NO database writes, credentials read, or Meta API calls.')
         return 0
 
@@ -169,7 +177,8 @@ def main(argv=None):
         limit=DAILY_LIMIT,window_days=7,history_days=365,stop_usage=STOP_USAGE,
         extended_fields=False,cycle_minutes=65)
     print('OHORA RAW policy:',options.policy)
-    print('Profile: 294 accounts, 4 posts, batch 5, up to 150 per slot, 85% usage, 65min after finish')
+    print('Profile: 294 accounts, 4 posts, batch 5, up to 150 per slot, 85% usage, '
+          'cooldown=max(finish+63min, start+65min)')
     print('No Windows scheduled task installed. Stop anytime with CTRL+C.')
     try:
         initial_day=today_kst()
@@ -180,12 +189,21 @@ def main(argv=None):
             snap=inspect_store(base,rows,digest,options.policy)
             print(f"[{snap['day']}] daily front success={snap['success']}/294, "
                   f"blocked={snap['blocked']}, other exceptions={snap['exceptions']}; stage={snap['stage']}")
+            if snap['stage']=='front_pending':
+                print(f"HISTORY REFUSED: {snap['front_pending']} daily-front accounts remain unattempted or retryable.")
+                print('SCHEDULER_RESULT_JSON '+json.dumps({
+                    'policy':options.policy,'run_status':'front_pending','day_kst':snap['day'],
+                    'front_success':snap['success'],'front_pending':snap['front_pending'],
+                    'blocked':snap['blocked'],'front_exceptions':snap['exceptions'],
+                    'next_stage':'daily-front'}))
+                return 4
             if snap['stage']=='done':
                 print(f"No currently eligible tasks; outstanding catchup gaps={snap['pending_gaps']}. "
                       'Deferred failures are retried on the next KST day. Exiting.')
                 print('SCHEDULER_RESULT_JSON '+json.dumps({
                     'policy':options.policy,'run_status':'done','day_kst':snap['day'],
                     'front_success':snap['success'],'blocked':snap['blocked'],
+                    'front_exceptions':snap['exceptions'],
                     'next_stage':'done','next_ready_at_utc':snap['ready'].isoformat() if snap['ready'] else None}))
                 return 0
             ready=snap['ready']
@@ -197,6 +215,7 @@ def main(argv=None):
                         print('SCHEDULER_RESULT_JSON '+json.dumps({
                             'policy':options.policy,'run_status':'cooldown','day_kst':snap['day'],
                             'front_success':snap['success'],'blocked':snap['blocked'],
+                            'front_exceptions':snap['exceptions'],
                             'next_stage':snap['stage'],'next_ready_at_utc':ready.isoformat()}))
                         return 0
                     while remaining>0:
@@ -206,14 +225,14 @@ def main(argv=None):
             selected_day=snap['day']
             result=collector.run(
                 args,task_selector=lambda db,n:select_daily_tasks(db,selected_day,n,options.policy),
-                daily_day=selected_day if options.policy in ('daily','daily-front','bootstrap-history') else None,
-                cooldown_minutes=65)
+                daily_day=selected_day,cooldown_minutes=63)
             after=inspect_store(base,rows,digest,options.policy)
             print(f"Run finished: status={result}; today's front={after['success']}/294; "
                   f"next stage={after['stage']}")
             print('SCHEDULER_RESULT_JSON '+json.dumps({
                 'policy':options.policy,'run_status':result,'day_kst':after['day'],
                 'front_success':after['success'],'blocked':after['blocked'],
+                'front_exceptions':after['exceptions'],
                 'next_stage':after['stage'],
                 'next_ready_at_utc':after['ready'].isoformat() if after['ready'] else None}))
             if result==3:
