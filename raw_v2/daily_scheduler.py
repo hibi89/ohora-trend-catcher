@@ -47,6 +47,9 @@ def select_daily_tasks(db, day, max_tasks=294):
         attempts=state['attempts'] if state else 0
         front.append((attempts,account['ordinal'],'front',account))
     if front:
+        # Explicit roster partition: complete 1..150 before selecting 151..294.
+        first=[item for item in front if item[1]<=150]
+        front=first if first else [item for item in front if item[1]>150]
         front.sort(key=lambda item:(item[0],item[1]))
         return [(phase,account) for _,__,phase,account in front[:max_tasks]]
 
@@ -65,6 +68,16 @@ def inspect_store(base, source, digest):
         db=collector.connect(Path(base)/'collection.sqlite',source,digest)
         try:
             day=today_kst()
+            # Adopt verified front observations already made earlier today by the
+            # legacy collector; no extra API requests, no old rows updated.
+            with db:
+                db.execute("""INSERT OR IGNORE INTO daily_account_state(
+                    day_kst,account_key,status,attempts,last_request_id,last_error,updated_at)
+                    SELECT ?,account_key,'success',1,MAX(request_id),NULL,MAX(finished_at)
+                    FROM request_log
+                    WHERE phase='front' AND status='success'
+                      AND date(finished_at,'+9 hours')=?
+                    GROUP BY account_key""",(day,day))
             choices=select_daily_tasks(db,day)
             success=db.execute(
                 "SELECT COUNT(*) FROM daily_account_state WHERE day_kst=? AND status='success'",(day,)).fetchone()[0]
@@ -109,7 +122,7 @@ def main(argv=None):
     base.mkdir(parents=True,exist_ok=True)
     args=argparse.Namespace(
         source=options.source,env_file=options.env_file,output_dir=base,
-        live=True,mode='front',batch_size=BATCH_SIZE,max_batches=MAX_BATCHES,
+        live=True,mode='daily',batch_size=BATCH_SIZE,max_batches=MAX_BATCHES,
         limit=DAILY_LIMIT,window_days=7,history_days=365,stop_usage=STOP_USAGE,
         extended_fields=False,cycle_minutes=63)
     print('OHORA daily-first collection: KST daily front -> catchup -> history')
