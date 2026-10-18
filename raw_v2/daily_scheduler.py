@@ -66,7 +66,7 @@ def select_daily_tasks(db, day, max_tasks=294):
         return catchup[:max_tasks]
 
     history=[a for a in accounts if not a['blocked'] and a['latest_id'] and not a['backfill_done']
-             and failures.get((a['account_key'],'history'),0)<MAX_FRONT_ATTEMPTS]
+             and not a['catchup_cursor'] and failures.get((a['account_key'],'history'),0)<MAX_FRONT_ATTEMPTS]
     history.sort(key=lambda a:(a['last_history'] or '',a['ordinal']))
     return [('history',a) for a in history[:max_tasks]]
 
@@ -93,10 +93,11 @@ def inspect_store(base, source, digest):
             failures=db.execute(
                 "SELECT COUNT(*) FROM daily_account_state WHERE day_kst=? AND status!='success'",(day,)).fetchone()[0]
             blocked=db.execute('SELECT COUNT(*) FROM accounts WHERE blocked=1').fetchone()[0]
+            pending_gaps=db.execute("SELECT COUNT(*) FROM accounts WHERE catchup_cursor IS NOT NULL AND blocked=0").fetchone()[0]
             latest=db.execute('SELECT * FROM slots ORDER BY slot_id DESC LIMIT 1').fetchone()
             ready=collector.parse_date(latest['ready_at']) if latest and latest['status']!='active' else None
             return {'day':day,'tasks':choices,'stage':choices[0][0] if choices else 'done',
-                    'success':success,'exceptions':failures,'blocked':blocked,
+                    'success':success,'exceptions':failures,'blocked':blocked,'pending_gaps':pending_gaps,
                     'ready':ready,'slot_status':latest['status'] if latest else None}
         finally:
             db.close()
@@ -143,7 +144,8 @@ def main(argv=None):
             print(f"[{snap['day']}] daily front success={snap['success']}/294, "
                   f"blocked={snap['blocked']}, other exceptions={snap['exceptions']}; stage={snap['stage']}")
             if snap['stage']=='done':
-                print('All currently eligible daily and backfill tasks finished; exiting.')
+                print(f"No currently eligible tasks; outstanding catchup gaps={snap['pending_gaps']}. "
+                      'Deferred failures are retried on the next KST day. Exiting.')
                 return 0
             ready=snap['ready']
             if ready is not None:
