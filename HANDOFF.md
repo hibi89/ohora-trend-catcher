@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — HANDOFF (2026-10-18 22:49 KST)
 
+## 2026-10-18 — Corrections after first live run (read first)
+
+- The user's intended unit is **150 accounts continuously × limit(5) per account, then 60-minute rest counted from the FINISH of that unit**. The earlier 70-minute timer was a start-to-start estimate only, assuming ~10 minutes to collect. The previous global 70-minute lock after just 5-account pilot was incorrect and has been replaced in `raw_v2/collector.py`.
+- The existing live pilot on user's local Windows: `20261018T143306Z_2840`, KR_001..005, 5/5 API success, 25 new posts; `verify.py` PASS; 6 missing `like_count` fields, all VIDEO/REELS, exact provider reason undetermined; `usage_max:0.0` is not proof of no quota expense.
+- New `slots`/`slot_accounts` tables handle partial continuation and per-slot unique account counting to 150. If last run from legacy v2.1 is recent, adopt its 5 accounts into current slot (145 remain); otherwise start a new quota slot after elapsed interval. Once 150 done or API halts, cool down **60 minutes after finished_at**. No external task scheduler installed. Per-account page/backfill checkpoints and existing data preserved.
+- Updated `raw_v2/run_70m_loop.ps1` defaults to MaxBatches 30, 60min sleep *after* completion; despite legacy filename it no longer has start-to-start 70m behavior. Default output is `%LOCALAPPDATA%\\OHORA_RAW_v2` (not OneDrive). GitHub Actions is now available at user's discretion, but not required.
+- Local synthetic **22/22 tests PASS** on Linux Python 3.13.5 (including 5→145 continuation and old pilot adoption). New Windows test run & first full live 150-account slot remain outstanding. Run local Windows offline unittest again after `git pull`, then explicit single-run CLI with `--max-batches 30` and inspect diagnostics before enabling repeated foreground loop. Do not commit tokens or RAW data.
+- Latest collector tested Git blob SHA `6e89ea7796aeea06c2f49a8bef4d5cc7459d88f1`; tests blob SHA `df4cf10248e331a91b87b48b02393b37dbf4d681`. Last collector fix commit `87742d9830372111ab04713aed8ee73cff79d4ed`.
+
 ## ① 목표·용도·확정 요구·기술
 - KDT 2차 OHORA Instagram Trend Catcher. Official 294 accounts KR100/US101/JP93; immutable source account keys; prospective 4-tab dashboard concept (raw explorer / weighted trend / AI assistant / collection observability), not developed here.
 - Newly approved collection intent: from most recent toward historical 1 year (ideally 2), five media items maximum per account API request, 7-day client-side logical periods, 70-minute cycles, resumable account+page checkpoints, time-stamped likes/comments/followers observations.
