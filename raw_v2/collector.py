@@ -319,22 +319,33 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
                 db.execute('INSERT OR IGNORE INTO posts(post_id,account_key,username,caption,timestamp,permalink,media_type,media_product_type,media_url,thumbnail_url,first_seen_run) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                     (pid,key,p.get('username'),p.get('caption'),p.get('timestamp'),p.get('permalink'),p.get('media_type'),p.get('media_product_type'),p.get('media_url'),p.get('thumbnail_url'),run))
                 new_post_count+=1
-                if p.get('media_type')=='CAROUSEL_ALBUM':
-                    children=p.get('children',{}).get('data',[]) if isinstance(p.get('children'),dict) else []
-                    if not isinstance(children,list):raise ValueError('bad carousel children')
-                    child_paging=p['children'].get('paging') or {}
-                    child_more=bool((child_paging.get('cursors') or {}).get('after')) if isinstance(child_paging,dict) else False
-                    db.execute('INSERT OR REPLACE INTO carousel_status VALUES (?,?,?,?,?,?)',
-                               (pid,key,len(children),'true' if child_more else 'unknown' if len(children)==50 else 'false',
-                                'partial' if child_more or len(children)==50 else 'complete',req))
-                    for n,child in enumerate(children,1):
-                        if not isinstance(child,dict) or not str(child.get('id') or '').isdigit():raise ValueError('missing carousel child id')
-                        db.execute('INSERT OR IGNORE INTO post_media VALUES (?,?,?,?,?,?,?,?,?)',
-                            (str(child['id']),pid,key,'carousel_child',n,child.get('media_type'),child.get('media_url'),child.get('thumbnail_url'),run))
-                        record_fields(db,run,req,key,'media',child,child.get('media_type') or '',str(child['id']))
-                else:
+            # Carousel children can arrive on a later re-observation.
+            if p.get('media_type')=='CAROUSEL_ALBUM':
+                child_obj=p.get('children')
+                child_rows=child_obj.get('data') if isinstance(child_obj,dict) else None
+                if child_rows is not None and not isinstance(child_rows,list):
+                    raise ValueError('invalid carousel children.data')
+                children=child_rows if isinstance(child_rows,list) else []
+                paging=child_obj.get('paging') if isinstance(child_obj,dict) else None
+                child_cursor=paging.get('cursors') if isinstance(paging,dict) else None
+                child_more=bool(child_cursor.get('after')) if isinstance(child_cursor,dict) else False
+                complete=bool(children) and not child_more and len(children)<50
+                for n,child in enumerate(children,1):
+                    if not isinstance(child,dict) or not str(child.get('id') or '').isdigit():
+                        raise ValueError('missing carousel child id')
                     db.execute('INSERT OR IGNORE INTO post_media VALUES (?,?,?,?,?,?,?,?,?)',
-                               (pid,pid,key,'single',1,p.get('media_type'),p.get('media_url'),p.get('thumbnail_url'),run))
+                        (str(child['id']),pid,key,'carousel_child',n,child.get('media_type'),child.get('media_url'),child.get('thumbnail_url'),run))
+                    record_fields(db,run,req,key,'media',child,child.get('media_type') or '',str(child['id']))
+                saved=db.execute("SELECT COUNT(*) FROM post_media WHERE post_id=? AND media_role='carousel_child'",(pid,)).fetchone()[0]
+                previous=db.execute('SELECT coverage FROM carousel_status WHERE post_id=?',(pid,)).fetchone()
+                complete=complete or bool(previous and previous[0]=='complete')
+                db.execute('INSERT OR REPLACE INTO carousel_status VALUES (?,?,?,?,?,?)',
+                           (pid,key,saved,
+                            'false' if complete else 'true' if child_more else 'unknown',
+                            'complete' if complete else 'partial',req))
+            elif pid not in old_ids:
+                db.execute('INSERT OR IGNORE INTO post_media VALUES (?,?,?,?,?,?,?,?,?)',
+                           (pid,pid,key,'single',1,p.get('media_type'),p.get('media_url'),p.get('thumbnail_url'),run))
             db.execute('INSERT OR IGNORE INTO post_observations(post_id,observed_at,run_id,like_count,comments_count,like_present,comments_present,request_id) VALUES (?,?,?,?,?,?,?,?)',
                        (pid,ts,run,p.get('like_count'),p.get('comments_count'),int('like_count' in p and p['like_count'] is not None),
                         int('comments_count' in p and p['comments_count'] is not None),req))
