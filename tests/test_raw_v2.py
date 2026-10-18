@@ -272,7 +272,7 @@ class Tests(unittest.TestCase):
 
     def test_4_post_mock_live_records_correct_requested_limit(self):
         env=self.dir/'local.env'
-        env.write_text('META_ACCESS_TOKEN=SECRET\\nMETA_IG_USER_ID=12345',encoding='utf-8')
+        env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345',encoding='utf-8')
         args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'limit4',live=True,mode='balanced',
                        batch_size=5,max_batches=1,limit=4,window_days=7,history_days=365,
                        cycle_minutes=70,stop_usage=70,extended_fields=False)
@@ -286,7 +286,8 @@ class Tests(unittest.TestCase):
         data=json.loads(manifest.read_text(encoding='utf-8'))
         self.assertEqual(data['row_count']['posts.csv'],20)
         csvpath=manifest.parent/'collection_log.csv'
-        self.assertEqual({r['requested_post_limit'] for r in csv.DictReader(csvpath.open(encoding='utf-8-sig',newline=''))},{'4'})
+        with csvpath.open(encoding='utf-8-sig',newline='') as fd:
+            self.assertEqual({r['requested_post_limit'] for r in csv.DictReader(fd)},{'4'})
         self.assertEqual(v.verify(args.output_dir)['checks'],'PASS')
 
 if __name__=='__main__':unittest.main()
