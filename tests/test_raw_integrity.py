@@ -55,6 +55,28 @@ class CompletenessTests(unittest.TestCase):
             col.insert_success(self.db,self.account(),'history',p,'R','bad',col.now(),365,limit=4)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM posts').fetchone()[0],0)
 
+    def test_nonadjacent_history_cursor_cycle_refused(self):
+        col.insert_success(self.db,self.account(),'front',make_page([1],after='CUR1'),
+                           'R1','r1',col.now(),365,limit=4)
+        col.insert_success(self.db,self.account(),'history',make_page([2],after='CUR2'),
+                           'R2','r2',col.now(),365,limit=4)
+        with self.assertRaisesRegex(ValueError,'cursor cycle'):
+            col.insert_success(self.db,self.account(),'history',make_page([3],after='CUR1'),
+                               'R3','r3',col.now(),365,limit=4)
+        self.assertEqual(self.account()['backfill_cursor'],'CUR2')
+
+    def test_cross_page_history_newer_timestamp_refused(self):
+        col.insert_success(self.db,self.account(),'front',make_page([1],after='CUR1'),
+                           'R1','r1',col.now(),365,limit=4)
+        first=make_page([2],after='CUR2')
+        first['business_discovery']['media']['data'][0]['timestamp']='2025-12-01T00:00:00+00:00'
+        col.insert_success(self.db,self.account(),'history',first,'R2','r2',col.now(),365,limit=4)
+        newer=make_page([3],after='CUR3')
+        newer['business_discovery']['media']['data'][0]['timestamp']='2026-10-01T00:00:00+00:00'
+        with self.assertRaisesRegex(ValueError,'chronology unverified'):
+            col.insert_success(self.db,self.account(),'history',newer,'R3','r3',col.now(),365,limit=4)
+        self.assertEqual(self.account()['backfill_cursor'],'CUR2')
+
     def test_missing_empty_children_partial_and_later_repair(self):
         p=make_page([1],after=None)
         entry=p['business_discovery']['media']['data'][0]
