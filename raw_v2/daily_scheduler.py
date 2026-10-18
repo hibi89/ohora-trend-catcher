@@ -124,6 +124,8 @@ def parse_args(argv=None):
     parser.add_argument('--output-dir',type=Path,required=True)
     parser.add_argument('--live',action='store_true',help='Opt in to real Meta API calls')
     parser.add_argument('--once',action='store_true',help='Execute at most one collection run, never sleep')
+    parser.add_argument('--max-batches',type=int,default=MAX_BATCHES,
+                        help='1 for 5-account live pilot; up to 30 for a 150-account slot')
     parser.add_argument('--policy',choices=('daily','bootstrap-history','daily-front','history-only'),
                         default='daily')
     parser.add_argument('--acknowledge-warnings',action='store_true',
@@ -133,6 +135,7 @@ def parse_args(argv=None):
 
 def main(argv=None):
     options=parse_args(argv)
+    if not 1<=options.max_batches<=30:raise ValueError('--max-batches must be 1..30')
     rows,digest=collector.load_accounts(options.source)
     if not options.live:
         print('DRY RUN: policy='+options.policy+'; 294 accounts, 4 posts, batch 5,',
@@ -162,7 +165,7 @@ def main(argv=None):
             return 4
     args=argparse.Namespace(
         source=options.source,env_file=options.env_file,output_dir=base,
-        live=True,mode='daily',batch_size=BATCH_SIZE,max_batches=MAX_BATCHES,
+        live=True,mode='daily',batch_size=BATCH_SIZE,max_batches=options.max_batches,
         limit=DAILY_LIMIT,window_days=7,history_days=365,stop_usage=STOP_USAGE,
         extended_fields=False,cycle_minutes=65)
     print('OHORA RAW policy:',options.policy)
