@@ -1,5 +1,7 @@
 # OHORA — Trend Catcher / KQ3 (294 Instagram accounts)
 
+> **최신 RAW v2.1 기준(2026-10-19):** [실행 안내](raw_v2/README.md), [검수 보고서](docs/RAW_V2_REVIEW_2026-10-19.md), [현재 상태](STATUS.md)를 따른다. 아래 날짜별 기존 수치/실행 정책은 과거 기록이다. 최신 정책은 4개/계정·배치5·슬롯150·85% 중단, 대기는 max(종료+63분, 시작+65분, 기존 ready_at). Windows 오프라인93/93 PASS. 실제 API 및 운영 DB 복구 미수행, 제한된 시험만 가능.
+
 Private project source mirror, prepared from the original locally collected ZIP on **2026-10-15**. This repository is **source code and requirements only**. Do not commit actual collection CSVs, source account list, access tokens, screenshots, or client media without deliberate review.
 
 ## Structure

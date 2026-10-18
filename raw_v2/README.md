@@ -1,148 +1,74 @@
-# OHORA RAW v2 — 독립 수집기 (Python 3.11+)
+# OHORA RAW v2.1 — 안전성 검수 후 실행 안내
 
-## 2026-10-19 최신 운영 정책 — DAILY-FIRST (아래 과거 기록보다 우선)
+최신 기준: 2026-10-19. `500523b1c18e11863c025c0418f84d6be00e80b4`의 기존 구현을 검수하고 확인된 잔여 결함만 수정했다. Windows Python 3.11 오프라인 회귀 검증이며 실제 Meta 호출·운영 DB 복구는 수행하지 않았다. 무인 대량 수집 승인 상태는 아니다.
 
-**권장 엔트리:** `raw_v2/daily_scheduler.py`. 기존 `collector.py`는 수집 엔진으로 계속 사용하며,
-**사용자 로컬 `collection.sqlite`와 수집·커서·관측 이력은 삭제하거나 초기화하지 않는다.**
+## 고정 운영 정책
 
-- **1순위** KST 오늘 공식 목록 1~150번의 최신 최대 4개, **2순위** 151~294번의 최신 최대 4개. 성공한 계정은 오늘 다시 최신 조회하지 않으며, 기존 수집기의 오늘 성공한 `front` 요청 로그도 반영한다. 한도/오류로 슬롯이 일찍 끝나면 미완료부터 재개한다.
-- **3순위** 전체 정상 대상 최신화 후 `catchup` 누락 구간 회복. **4순위** `backfill_cursor` 기준 과거 365일 미완료 계정 수집. 접근 불가/일일 재시도 소진 계정은 별도 예외로 보고하고, catchup/history 반복 실패는 계정별·일별 최대 2회 후 다음 날 재시도하며, 294/294 성공이라고 표시하지 않는다.
-- Graph 배치당 5 하위요청, 최대 150 **서로 다른** 계정/슬롯, Meta **X-App-Usage** 제공 수치 중 최댓값 85% 도달 또는 사용량 헤더 누락 시 후속 배치를 중단. 사용량은 요청 **후** 확인하므로 초과 가능하고, 63분 경과가 실제 API 한도 회복을 보증하지 않는다.
-- 슬롯 종료 `finished_at + 63분` 뒤 재개. **기존 `slots.ready_at`은 소급 변경하지 않는다.** 신규 스케줄러는 이 DB 시각 하나로 전경 대기한다.
-- DB에 `daily_account_state`·`catchup_jobs` 테이블을 호환 추가한다. 새 요청 ID에 `run_id`를 포함해 실행 간 충돌을 방지하고, 성공 게시물·관측·커서·로그·슬롯·일일 상태를 하나의 트랜잭션으로 기록한다. 이전부터 있던 catchup이 새로운 최신 조회 때문에 사라지지 않도록 대기열에 보관한다.
-- **검증 범위:** GitHub Actions Python 3.11 오프라인 38/38 PASS. 기존 Windows DB를 사용한 마이그레이션·Meta 실호출·실제 1년 완전성은 **미검증**이다. 별도 Windows 예약 작업·서비스는 설치하지 않았다.
+- 공식 로컬 294계정(KR100/US101/JP93), 인증 계정 1개, 게시물 4개/계정, Graph Batch 5개 하위요청, 슬롯당 최대 150개 서로 다른 계정.
+- 응답에서 제공된 유효한 X-App-Usage 수치 중 최댓값이 85% 이상이면 후속 배치를 중단한다. NaN·무한대·음수는 유효 수치가 아니다. 해당 배치 전체에서 유효 수치가 없으면 자동 반복을 중단한다. 응답 후 검사하므로 85% 이하 유지나 한도 회복을 보장하지 않는다.
+- 슬롯 종료 후 최소 63분, 자동 반복의 시작 간격 목표 65분: `next_start = max(finished_at + 63분, started_at + 65분, 기존 ready_at)`. 공통 `collector.slot_ready_at()`과 DB 상태로 판단한다. 기존 `ready_at`은 소급 덮어쓰거나 앞당기지 않는다. 부분 슬롯은 중복 계정을 제외하고 이어간다.
+- 인증·권한·계정 식별/소유권 충돌·사용량 근거 부재는 자동 반복 중단(수집기 코드 3). #4/사용량 임계값은 안전 중단(코드 2)과 쿨타임. 저장 실패는 전체 중단(코드 1). 미해결 배치가 있으면 다음 요청을 거절한다.
+- 특정 계정은 단계별 일일 최대 2회 후 예외로 분리한다. 접근 불가·재시도 소진은 성공 계정 수에 포함하지 않는다. 선택 필드 누락은 NULL/상태로 보존한다.
 
-### Windows PowerShell 실행
+## 완료와 복구 근거
+
+`backfill_done`은 과거 상태 플래그이며 완전성 증명이 아니다. `history_page_evidence`에서 최초 NULL 커서 페이지부터 모든 요청→응답 커서, 날짜 순서, 고정 기준일 도달 또는 API 종료, 최종 체크포인트를 검증한다. audit는 성공 요청·원본 JSON도 대조한다. catchup과 대기 gap이 남으면 전체 커버리지는 미검증이다.
+
+기존 완료 플래그는 일괄 초기화하지 않는다. 근거 없는 완료+NULL 커서도 영구 제외하지 않고 history의 첫 페이지부터 새 증거를 확보할 대상으로 선택한다. 기존 게시물·관측·과거 증거는 보존한다. 프런트의 오래된 고정 게시물 때문에 순서를 입증할 수 없으면 UNKNOWN/검토 상태로 남을 수 있다. oldest/newest만으로 1년 확보율을 산출하지 않는다.
+
+요청 전에 ID·옵션·커서/계정 상태·슬롯·일일 처리 여부를 저널에 기록하고, 전체 응답 원본을 저장한 다음 계정 단위 게시물·관측·커서·로그·슬롯·일일 상태를 원자적으로 커밋한다. 원격 호출을 정확히 한 번 실행했다고 주장하지 않는다. 원본 없는 미완료 요청은 UNKNOWN이며 자동 재호출하지 않는다.
+
+`recover.py`는 기본 읽기 전용 preview다. `ARCHIVE_PRESENT_UNVALIDATED`는 파일이 있다는 뜻이며 복구 가능 판정이 아니다. 명시적인 `--apply`는 별도 승인 대상이다. 코드상 별도 최신 백업과 원본 목록이 필요하며, 잠금 안에서 스키마·전체 저장값·요청 상태를 비교하고 메모리 복제본에서 전체 재생을 먼저 검증한다. 옵션 없는 구형 저널·상태 불일치·기존 export 충돌은 수동 검토로 차단한다. 기존 원본과 CSV/manifest를 덮어쓰지 않는다. 인증 오류 응답을 복구하면 성공분은 보존하되 `requires_review`로 후속 수집을 차단한다.
+
+## Windows: 백업 → 진단 → dry run → 사용자 수동 한 배치 → 사후 진단
+
+아래 명령은 저장소 루트에서 실행한다. `$src`는 공식 목록이며 수정·대체하지 않는다. 비밀 파일의 내용은 출력하지 않는다. 마지막 `--live` 명령은 사용자가 직접 실행하는 제한 시험이다.
 
 ```powershell
-git pull origin main
-python -m unittest discover -s tests -p 'test_*.py' -v
 $src = 'C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\2차 프로젝트 데이터\account_list.csv'
 $envFile = 'C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\2차 프로젝트 홍주님께 제공할 수집데이터\kq3_294_collection\.env.local'
 $out = Join-Path $env:LOCALAPPDATA 'OHORA_RAW_v2'
-Test-Path $src
-Test-Path $envFile
-python .\raw_v2\daily_scheduler.py --source $src --output-dir $out
-# 실수집을 시작하기로 결정한 경우에만 아래 명령을 직접 실행:
-python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-dir $out --live
+$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$backup = Join-Path $env:LOCALAPPDATA "OHORA_RAW_v2_backups\manual_$stamp"
+$report = Join-Path $env:LOCALAPPDATA "OHORA_RAW_v2_audit_$stamp"
+python .\tests\run_offline.py
+python .\raw_v2\backup.py --output-dir $out --backup-dir $backup
+# SQLite 스냅샷에 원본 JSON은 포함되지 않으므로 runs도 별도 보존한다.
+Copy-Item -LiteralPath (Join-Path $out 'runs') -Destination (Join-Path $backup 'runs') -Recurse
+python .\raw_v2\audit.py --output-dir $out --report-dir $report
+python .\raw_v2\recover.py --output-dir $out
+python .\raw_v2\daily_scheduler.py --source $src --output-dir $out --policy bootstrap-history
+# 보고서의 WARN 원인을 검토한 뒤, 사용자만 직접 실행:
+python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-dir $out --policy bootstrap-history --once --max-batches 1 --acknowledge-warnings --live
+python .\raw_v2\audit.py --output-dir $out --report-dir "${report}_after"
 ```
 
-- `--live` 없이 실행하면 공식 목록 검증 및 정책 출력만 하며 DB/Meta를 변경하지 않는다.
-- `--live`는 전경에서 **계속 동작**하며 63분 쿨타임 동안 대기한다. 창을 열어두고 PC가 켜져 있어야 하며, Ctrl+C로 안전하게 중단한다.
-- `--once --live`는 요청된 수집 실행을 최대 한 번 수행하고 대기하지 않는다. 사전에 API 사용량/인증 상태를 확인한다.
-- 최초 실수집 전 `collection.sqlite`를 **일관된 SQLite 백업**으로 저장할 것. 과거 이력의 실제 이상 여부는 로컬 DB로 별도 검사해야 한다.
-- 예전 `run_70m_loop.ps1`은 남겨둔 **legacy balanced 모드**이므로 일일 최신화 정책 운영에는 사용하지 않는다.
+audit는 `mode=ro`, `query_only`, 일관된 읽기 트랜잭션을 사용하고 마이그레이션하지 않는다. 보고서는 수집 폴더 밖에만 저장한다. DB가 없으면 UNKNOWN, 무결성/논리/관측 오류는 FAIL(종료 코드 2), 근거 없는 완료는 WARN이다. 스케줄러는 FAIL을 차단하고 WARN은 원인 검토 후 `--acknowledge-warnings`가 있어야 진행한다. 이 옵션은 실패를 해제하지 않는다.
 
+dry run은 `--live`가 없으며 공식 목록 검증·정책 안내만 한다. DB·인증 파일·API를 사용하지 않는다. 성공한 슬롯 두 개가 반드시 294/294를 뜻하지 않는다. 사용량 제한으로 더 일찍 멈출 수 있다.
 
----
-
-
-> 상태: 소스/오프라인 테스트 구현 완료. 실제 Meta 130계정 시도(기존 5 + 추가 125), 신규 변경 4개/계정은 Actions 오프라인 28/28 PASS·Windows/Meta 실수집 검증 전. 이 명령만으로 예약 실행이 설치되지 않음. 기존 `experiments/results/`, `kq3_294_collection/`을 덮어쓰지 않는다.
-
-## 원칙과 검증 범위
-
-- 공식 294개 계정(KR100/US101/JP93) `account_list.csv`만 입력. 단일 Meta 앱으로 작동 가능하나 호출 한도는 별도이며 294계정/회차가 보장되지 않는다.
-- 기본 `balanced`: 새 계정은 최근 4개(시험 기본값). 이후 *최신 재조회는 대략 하루에 한 번*, 나머지 회차는 기존 `after` 커서로 과거 4개씩 확장. 이미 저장된 최초 5개 데이터와 과거 커서는 재설정하지 않는다. 최근 페이지에서 기존 게시물을 재관측하면 `post_observations`에 매번 저장. 한 작업 단위(slot)는 최대 150개 **서로 다른 계정**(기본: 계정당 4개 게시물)이고, 150계정 처리 또는 API 안전중단 시 종료된 시점부터 60분 대기한다. 시험으로 일부만 실행했으면 같은 slot의 나머지 계정을 이어서 실행할 수 있다. 150+144=294계정이므로 한도에 걸리지 않는 이상 두 슬롯으로 한 번의 전체 순회가 가능하다. 4개의 Invalid user id는 별도 검토 대상으로 남긴다. 70분 시작 간격은 10분 안에 수집 완료됐을 때의 예상치이며 강제 API 리셋 시각이 아니다.
-- 날짜는 서버가 아니라 로컬에서 검사한다. `--window-days 7`은 과거 확보 날짜의 **논리적 주간 구간**을 나타낸다. 기준 날짜는 최초 수집 시각(기존 DB는 가장 오래된 run의 시작 시각)으로 고정해 365일 목표가 매 실행마다 미끄러지지 않게 한다. Meta Business Discovery에서 `since/until` 서버 필터가 작동한다는 가정은 하지 않는다. 오래된 게시물의 탐색 종료는 `--history-days 365`(또는 730) 기준으로 판정하지만 목록이 완전하다는 보장은 별도로 검증해야 한다.
-- 게시물 ID를 유일키로 두고 최초 응답의 caption 등을 보존한다. 이후 좋아요/댓글/계정 팔로워는 `post_observations` 및 `account_observations`로 매 회차 기록한다. 과거에 관측하지 않은 날의 값은 복원되지 않는다.
-- 기본 쿼리는 GitHub에서 이전에 사용한 Business Discovery 필드만 요청. `--extended-fields`는 미검증 프로필 필드를 추가하는 **별도 승인된 시험용** 옵션. `shortcode`, `view_count`는 현재 요청하지 않고 `not_tested`로 표기한다.
-- 캐러셀 children 첫 페이지를 별도 미디어로 저장. **다음 children 페이지가 있거나 50개가 반환되면 `carousel_status.coverage=partial`**로 기록하고 완전 확보라고 주장하지 않는다. 별도 children 후속 페이지 수집 기능은 미구현.
-- CSV 원문 공백/이모지/문자열 ID 보존. Excel에서 ID는 **텍스트 자료형으로 가져오기**. 프로필·게시물에 대해 응답에 없는 필드 NULL과 0은 구분한다.
-- API 전체 요청 실패, 내부 subrequest 실패, 필드 개별 미반환과 NULL을 구분한다. `like_missing_audit.csv`·`field_support.csv`는 **현상 진단**이며 필드 누락의 원인을 증명하는 자료는 아니다. 누락이 토큰/권한/미지원 때문인지 실제 소량 필드 분리 실험으로 확인해야 한다.
-
-
-## 2026-10-19 — 4개 × 150계정 운영 시험 설계
-
-- 변경 이유: 과거 `limit(15~25)` 시험은 사용자 측에서 이미 진행했고, 현재는 **294계정 전체 1회 순회에 필요한 150+144 구조**를 우선한다. `5→4`가 같은 API 하위요청 수에 대한 `total_time`을 줄이는지는 가설이며 실험으로 확인한다. 게시물 수를 4로 바꾸어도 API 서브요청 수는 줄지 않는다.
-- **첫 조회** `media.limit(4)` → `backfill_cursor` 저장; **다음 과거 조회** `media.limit(4).after(backfill_cursor)` → 과거 4개씩 이동. `front`와 `history`는 독립, `front` 재조회는 과거 커서를 덮어쓰지 않는다.
-- 예전 `limit(5)`로 수집된 630개는 그대로이고 재조회 시 게시물 ID는 중복 저장되지 않는다. 기존 DB 및 스키마 버전 `raw-v2.1` 호환; `config.backfill_anchor_utc`만 추가로 저장하는 additive migration. **로컬 SQLite를 삭제하거나 새 output-dir를 쓰지 말 것.**
-- 일부 계정의 게시물이 4개 미만이면 받은 것만 기록한다. 다음 커서가 있을 때만 과거를 이어간다. 날짜 구간은 메타 서버 요청 조건이 아닌 저장 후 로컬 분류다.
-- 150계정을 모두 처리하거나 API 사용률 70% 기준에 도달하면 slot을 닫는다. 마무리 후 60분 쿨다운 유지(시작~시작 70분은 수집 약 10분 전제의 운영 예상). 실제 요청이 150까지 완주한다는 보장은 없다.
-- 다음 초기화 뒤 명시적으로 실행하는 단발성 4×150 테스트:
+## 10월 19일과 20일 이후
 
 ```powershell
-python .\raw_v2\collector.py `
-  --source $src `
-  --env-file $envFile `
-  --output-dir "$env:LOCALAPPDATA\OHORA_RAW_v2" `
-  --mode balanced `
-  --limit 4 `
-  --batch-size 5 `
-  --max-batches 30 `
-  --stop-usage 70 `
-  --live
+# 2026-10-19: 한 번도 첫 페이지를 확보하지 못한 계정 → catchup → history
+python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-dir $out --policy bootstrap-history --once --acknowledge-warnings --live
+# 2026-10-20 이후: KST 당일 최신화. 미완료 계정부터 이어간다.
+python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-dir $out --policy daily-front --once --acknowledge-warnings --live
+# 당일 미시도/재시도 가능 대상이 없어진 후 catchup → history
+python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-dir $out --policy history-only --once --acknowledge-warnings --live
 ```
 
-- **GitHub Actions Python 3.11 합성 테스트 28/28 PASS**. Windows 테스트 재실행·Meta 실 4개 요청·실 과거 커서 역행은 아직 미검증. 반복 실행 스크립트는 `--limit 4`, 최소 시작 간격 70분과 종료 후 60분 대기를 모두 적용했으나 취침 중 자동 실행을 등록하거나 시작한 것은 아니다.
+`--once`는 수집 실행 최대 한 번이며 기본 최대 30배치다. 한 배치 시험에는 반드시 `--max-batches 1`을 함께 준다. 쿨타임 중 `--once`는 대기 없이 결과를 보고하고 종료한다. `--once`를 빼면 전경 반복하며 Ctrl+C로 중단한다. Windows 예약 작업/서비스와 n8n은 설치하지 않는다.
 
-## Windows PowerShell 1차 검증 (API 호출 없음)
+- `daily`(기존 daily-first): 오늘 최신화 → catchup → history.
+- `bootstrap-history`: 기존 관측을 오늘 성공으로 바꾸지 않는다. 시작한 KST 날짜가 끝나면 다음 배치 전에 종료한다.
+- `daily-front`: 당일 최신화만 수행한다. 정상 순서는 1~150, 151~294다.
+- `history-only`: 당일 최신화 미시도·재시도 가능 대상이 남으면 `front_pending`, 종료 코드 4로 차단한다. 접근 불가/검토/재시도 소진은 별도 예외다. 날짜가 바뀌면 처리 중 배치를 마친 후 새 날짜 조건을 다시 검사한다.
 
-```powershell
-# 기존 저장소의 root (git pull 이후)
-python -m unittest discover -s tests -p 'test_raw_v2.py' -v
-$src = '.\account_list.csv' # 기존 실제 294개 목록 위치로 조정
-Test-Path $src
-python .\raw_v2\collector.py --source $src --output-dir '.\raw_v2_results'
-```
+직접 수집기의 `balanced/front/history`, `--limit 5`, `--history-days 730`은 호환 지원한다. `raw_v2/run_70m_loop.ps1`은 legacy balanced용이며 공통 DB 쿨타임을 읽는다. 운영 권장 진입점은 `daily_scheduler.py`다.
 
-`Test-Path $src=False`이면 공식 원본을 안전하게 찾아 경로만 수정하되 원본을 GitHub에 올리지 않는다. 드라이런은 토큰을 읽지 않으며 Meta에 요청하지 않는다.
+## 검증 범위와 롤백
 
-## 현장 소량 호출 — **유효한 로컬 인증정보와 Meta 사용량을 확인한 후만**
+테스트 명령은 `python .\tests\run_offline.py`이며 외부 소켓 연결을 차단한다. 최신 통과 수와 로컬 데이터 진단 결과는 `STATUS.md`, 세부 검수 결과는 `docs/RAW_V2_REVIEW_2026-10-19.md`를 따른다. 기존 `verify.py`는 실행별 manifest SHA/CSV 검사로 보조 사용한다.
 
-```powershell
-$envFile = '.\kq3_294_collection\.env.local' # 실제 본인 로컬 인증파일만; 토큰 공유 금지
-Test-Path $envFile
-python .\raw_v2\collector.py --source $src --env-file $envFile --output-dir "$env:LOCALAPPDATA\OHORA_RAW_v2" --batch-size 5 --max-batches 1 --limit 4 --stop-usage 70 --live
-```
-
-첫 실 호출에 5계정이 참여하며, 계정당 최대 4개 게시물을 요청한다. 종료 코드 `2`는 일부 데이터 저장 후 API 사용량 또는 인증/응답 오류로 중단됐다는 의미다. 출력 `runs/<run_id>/run_manifest.json`, `field_support.csv`, `like_missing_audit.csv`, `collection_log.csv`, 원본 JSON을 확인하고 계속할지 판단한다. 앱 사용량 헤더가 빠지면 즉시 중단한다. 70%는 **요청 뒤** 평가하므로 선제 방어가 아니다. 단일 slot이 150계정에 도달하지 않았다면 재실행 시 즉시 이어받는다. API 중단·150계정 처리 후에는 종료 시각 기준 60분 쿨다운을 적용한다.
-
-확인 후 동일 명령에서 `--max-batches 1`만 `--max-batches 30`으로 변경하면 최대 150계정 slot의 잔여분을 이어 수집한다. **사용자가 요청한 다음 회차의 실험값은 `--limit 4 --max-batches 30`**이며 기본 API 한도 중단선은 70%다. 이미 수집한 계정만 계속 호출하거나 원본을 덮어쓰지 않는다. 실패한 Meta 110 계정은 `blocked=1`로 기록되며 수동 원인 검토 전 무의미하게 재시도하지 않는다.
-
-## 종료 후 60분 쿨다운 반복
-
-이 CLI는 **한 번 실행하면 종료**된다. 코드가 관리하는 한 slot의 최대 요청 대상은 서로 다른 150계정이며, 종료 후 60분 쿨다운만 강제한다. 일부만 실행한 slot은 즉시 이어서 실행 가능하다. 사용자의 Windows 작업 스케줄러 등 외부에서 **각 slot의 종료 이후 60분**을 고려해 호출해야 하며, 자동 작업은 아직 설치되지 않았다. 사용자 PC에서 일정·프로세스/전원·인증 파일 접근 권한을 확인하고 등록할 것. 동시에 두 프로세스를 실행하지 말 것(동일 출력 디렉터리에서 프로세스 잠금 구현).
-
-### 로컬 파일 레이아웃
-
-```
-raw_v2_results/                   # .gitignore 대상, 로컬에만 보관
-  collection.sqlite              # 누적 DB 및 재개 커서, 수정 금지
-  runs/<run_id>/
-    input_accounts.csv
-    accounts.csv                 # 이 run에서 응답된 계정
-    posts.csv                    # 이 run에서 새로 발견한 원본 게시물
-    post_media.csv               # 이 run에서 새로 발견한 구성 미디어
-    field_support.csv            # 필드별 returned/null/absent/not_tested 샘플 통계
-    like_missing_audit.csv       # 실제 like_count 미반환/NULL 관측 사례
-    collection_log.csv           # API 호출 단위 기록
-    run_manifest.json            # 전체 계정 상태/주간 범위/파일 SHA
-    raw/*.json                   # 토큰/secret 문자열 제거한 API 응답 본문
-```
-
-`collection.sqlite`를 복사/이동하기 전 프로세스를 종료하고, WAL/SHM 파일까지 일관되게 백업해야 한다. 출력 폴더를 바꾸면 누적 기록과 커서도 새로 시작한다. GitHub/배포 서비스에 원본을 올리지 않는다.
-
-## 완료 주장에 필요한 아직 남은 검증
-
-1. KR/US/JP, FEED/REELS/CAROUSEL 각각 유효 토큰 소량 실 조회 및 사용자명 매칭.
-2. Meta의 실제 중첩 `media.after` 커서가 2회 이상 재개되고 기존 포스트 ID를 건너뛰지 않는지 확인.
-3. `like_count` 누락 사례를 응답 JSON과 `media_type`, `media_product_type`, 토큰 권한, 필드별 단독 시험으로 분석. 인증 오류/필드 단독 미지원/서버측 미반환은 서로 구분.
-4. 권한이 허용되는 실제 게시물/이미지 조회. 이미지 **URL 저장과 이미지 파일 다운로드는 다름**.
-5. 정확한 7일 구간/1년 커버리지 및 `children` 추가 페이지 완전 수집 보장은 미검증.
-6. 70분 운영 안정성·Meta 사용률 회복 패턴은 장기간 관찰이 필요. 현재 원격에서 일회성 스케줄러 설치 없음.
-
-## 저장 후 읽기 전용 검증
-
-```powershell
-python .\raw_v2\verify.py --output-dir '.\raw_v2_results'
-```
-
-파일별 SHA와 CSV 행 수, SQLite 참조 무결성/중복/PRAGMA integrity_check를 실제로 재열어 확인한다. 스냅샷을 손상시키거나 API 요청을 하지 않는다. 검증에 성공해도 Meta API 필드 완전성까지 보장하는 것은 아니다.
-
-### 실험용 150계정 연속 수집 + 종료 후 60분 대기(로컬 명시 실행, 최대 10회)
-
-```powershell
-.\raw_v2\run_70m_loop.ps1 -Source $src -EnvFile $envFile -Cycles 10 -BatchSize 5 -MaxBatches 30 -OutputDir "$env:LOCALAPPDATA\OHORA_RAW_v2"
-```
-
-PowerShell 창이 열린 동안에만 실행된다. **Windows 예약 작업을 설치하거나 운영을 자동 개시하지 않는다.** `-MaxBatches 30`이면 한 slot 최대 150계정(기본 계정당 4개 요청)이며, 사용률이 70% 이상이거나 API 제한 오류면 더 일찍 중단한다. 반복 스크립트는 **종료 후 최소 60분**, **시작과 다음 시작 사이 최소 70분**을 모두 지킨다. 어느 간격도 실제 API 사용률 회복을 보장하지는 않는다. 사용자는 PowerShell에서 Ctrl+C로 중단할 수 있다.
+실제 Meta 커서·필드 지원·권한·한도 회복·1년 커버리지와 무인 장기 운영은 미검증이다. 코드 롤백은 이번 검수 커밋을 `git revert <검수 커밋 SHA>`로 되돌린다. DB·원본 JSON·관측·슬롯·백업은 삭제/교체하지 않는다. 추가 테이블은 그대로 두어도 구형 코드가 무시한다. 구형 코드에는 확인된 안전성 결함이 있으므로 롤백 후 live는 중지한다. 운영 DB 복구 적용은 별도 승인 전까지 실행하지 않는다.
