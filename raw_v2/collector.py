@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import hashlib
 import json
 import os
@@ -145,6 +146,16 @@ def connect(path, accounts, source_sha):
        raw_response_path TEXT,requested_fields TEXT,usage_json TEXT);
     CREATE TABLE IF NOT EXISTS field_observations(run_id TEXT,request_id TEXT,account_key TEXT,resource_type TEXT,
        media_type TEXT,field_name TEXT,status TEXT,item_id TEXT,PRIMARY KEY(request_id,resource_type,media_type,field_name,item_id));
+    CREATE TABLE IF NOT EXISTS daily_account_state(
+       day_kst TEXT NOT NULL,account_key TEXT NOT NULL REFERENCES accounts(account_key),
+       status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
+       last_request_id TEXT,last_error TEXT,updated_at TEXT NOT NULL,
+       PRIMARY KEY(day_kst,account_key));
+    CREATE TABLE IF NOT EXISTS catchup_jobs(
+       job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+       account_key TEXT NOT NULL REFERENCES accounts(account_key),
+       cursor TEXT NOT NULL,anchor TEXT NOT NULL,created_at TEXT NOT NULL,
+       UNIQUE(account_key,anchor));
     CREATE INDEX IF NOT EXISTS ix_posts_account ON posts(account_key);
     CREATE INDEX IF NOT EXISTS ix_obs_post ON post_observations(post_id,observed_at);
     ''')
@@ -234,8 +245,10 @@ def usage(headers):
     else:return None
     try: val=json.loads(headers.get('x-app-usage') or '{}')
     except (ValueError,TypeError):return None
-    x=val.get('total_time') if isinstance(val,dict) else None
-    return float(x) if isinstance(x,(int,float)) else None
+    if not isinstance(val,dict):return None
+    numbers=[float(val[k]) for k in ('call_count','total_time','total_cputime')
+             if isinstance(val.get(k),(int,float)) and not isinstance(val[k],bool)]
+    return max(numbers) if numbers else None
 
 
 def record_fields(db,run,req,key,kind,obj,media_type='',item_id='account',extended=False):
@@ -253,7 +266,7 @@ def parse_date(value):
     except (ValueError,TypeError):return None
 
 
-def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=False,window_days=7,limit=5):
+def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=False,window_days=7,limit=5,commit_hook=None):
     discovery=payload.get('business_discovery')
     if not isinstance(discovery,dict):raise ValueError('missing business_discovery')
     media=discovery.get('media')
@@ -316,19 +329,27 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         if phase=='front':
             if seen_ids:latest=seen_ids[0]
             if old_latest and old_latest not in seen_ids and after:
-                # A changed page size must not suppress front-gap recovery.
-                catch=after;anchor=old_latest
+                # Preserve the active gap; queue a newer gap separately.
+                if catch:
+                    db.execute('INSERT OR IGNORE INTO catchup_jobs(account_key,cursor,anchor,created_at) VALUES (?,?,?,?)',
+                               (key,after,old_latest,ts))
+                else:
+                    catch=after;anchor=old_latest
             elif old_latest and old_latest not in seen_ids and not after:
                 raise ValueError('front continuity unknown: previous latest ID missing and no cursor')
             elif not old_latest:
                 back=after  # First page provides historical continuation.
                 if not after:done=1  # No older page in initial response.
-            else:
-                catch=None;anchor=None
+            # A front response cannot clear an unfinished prior catchup.
         elif phase=='catchup':
             if anchor not in seen_ids and not after:
                 raise ValueError('latest gap has no boundary; do not mark complete')
-            if anchor in seen_ids:catch=None;anchor=None
+            if anchor in seen_ids:
+                next_gap=db.execute('SELECT * FROM catchup_jobs WHERE account_key=? ORDER BY job_id LIMIT 1',(key,)).fetchone()
+                if next_gap:
+                    catch=next_gap['cursor'];anchor=next_gap['anchor']
+                    db.execute('DELETE FROM catchup_jobs WHERE job_id=?',(next_gap['job_id'],))
+                else:catch=None;anchor=None
             else:catch=after
         else:
             back=after
@@ -340,8 +361,10 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         window_end=(observation_day+timedelta(days=1-bucket*window_days)).isoformat()
         window_start=(observation_day+timedelta(days=1-(bucket+1)*window_days)).isoformat()
         if oldest and parse_date(oldest) and parse_date(oldest)<=target:done=1
-        db.execute('UPDATE accounts SET id=?,ig_id=?,username=?,name=?,biography=?,website=?,profile_picture_url=?,followers_count=?,follows_count=?,media_count=?,collected_at=?,latest_id=?,oldest_time=?,newest_time=?,window_start=?,window_end=?,backfill_cursor=?,catchup_cursor=?,catchup_anchor=?,backfill_done=?,last_front=CASE WHEN ? IN (\'front\',\'catchup\') THEN ? ELSE last_front END,last_history=CASE WHEN ?=\'history\' THEN ? ELSE last_history END,attempts=attempts+1,last_attempt=?,last_error=NULL WHERE account_key=?',
+        db.execute('UPDATE accounts SET id=?,ig_id=?,username=?,name=?,biography=?,website=?,profile_picture_url=?,followers_count=?,follows_count=?,media_count=?,collected_at=?,latest_id=?,oldest_time=?,newest_time=?,window_start=?,window_end=?,backfill_cursor=?,catchup_cursor=?,catchup_anchor=?,backfill_done=?,last_front=CASE WHEN ?=\'front\' THEN ? ELSE last_front END,last_history=CASE WHEN ?=\'history\' THEN ? ELSE last_history END,attempts=attempts+1,last_attempt=?,last_error=NULL WHERE account_key=?',
                    (str(discovery['id']) if discovery.get('id') is not None else None,str(discovery['ig_id']) if discovery.get('ig_id') is not None else None,discovery.get('username') or account['username'],discovery.get('name'),discovery.get('biography'),discovery.get('website'),discovery.get('profile_picture_url'),discovery.get('followers_count'),discovery.get('follows_count'),discovery.get('media_count'),ts,latest,oldest,newest,window_start,window_end,back,catch,anchor,done,phase,ts,phase,ts,ts,key))
+        if commit_hook:
+            commit_hook(new_post_count,len(posts),bool(after))
     return new_post_count,len(posts),bool(after)
 
 
@@ -457,7 +480,7 @@ def close_slot(db,sid,reason,cooldown_minutes=63):
     print(f'SLOT CLOSED: {reason}; next slot after {ready} (63min after finish)')
 
 
-def run(args,client=request_batch):
+def run(args,client=request_batch,task_selector=None,daily_day=None):
     accounts,digest=load_accounts(args.source)
     if args.batch_size<1 or args.batch_size>10 or args.limit not in (4,5) or args.max_batches<1 or not 0<args.stop_usage<100:
         raise ValueError('batch-size 1..10, limit 4 or 5, max-batches>=1, 0<stop-usage<100 required')
@@ -486,7 +509,9 @@ def run(args,client=request_batch):
             with db:db.execute('INSERT INTO runs(run_id,started_at,api_version,mode,status) VALUES (?,?,?,?,?)',
                                (run_id,start,version,args.mode,'started'))
             # Resume unfinished slot. Each account is queried at most once per slot.
-            tasks=[(phase,a) for phase,a in select_tasks(db,args.mode,294) if a['account_key'] not in already][:remaining]
+            selected=task_selector(db,294) if task_selector else select_tasks(db,args.mode,294)
+            tasks=[(phase,a) for phase,a in selected if a['account_key'] not in already][:remaining]
+            rollover=False
             for b in range(args.max_batches):
                 if not tasks:break
                 batch,tasks=tasks[:args.batch_size],tasks[args.batch_size:]
@@ -504,7 +529,7 @@ def run(args,client=request_batch):
                 if batch_usage:max_seen=max(batch_usage+[max_seen or 0])
                 fatal=False
                 for i,((phase,a),entry) in enumerate(zip(batch,body)):
-                    req=f'{b:04}_{i:02}_{a["ordinal"]:03}_{phase}'
+                    req=f'{run_id}_{b:04}_{i:02}_{a["ordinal"]:03}_{phase}'
                     ts=now();code=int(entry.get('code') or 0) if isinstance(entry,dict) else 0
                     try:payload=json.loads(entry.get('body') or '{}') if isinstance(entry,dict) else {}
                     except (ValueError,TypeError):payload={}
@@ -514,35 +539,58 @@ def run(args,client=request_batch):
                     error_sub=str(err.get('error_subcode','')) if isinstance(err,dict) else ''
                     error_message=str(redact(err.get('message',''),token))[:300] if isinstance(err,dict) else ''
                     status='failed';count=0;new=0;has_next='unknown';reason='api_error' if code!=200 else 'invalid_payload'
-                    if code==200 and not err and isinstance(payload,dict):
-                        try:
-                            new,count,more=insert_success(db,a,phase,payload,run_id,req,ts,args.history_days,args.extended_fields,args.window_days,limit=args.limit)
-                            status='success';reason='page_saved';has_next='true' if more else 'false'
-                        except (ValueError,sqlite3.Error) as exc:
-                            error_code='invalid_payload';error_message=str(exc)[:300]
-                            # insert_success commits atomically; on failure don't advance cursor
-                    else:
-                        if error_code in STOP_ERRORS or code in (401,403,429):fatal=True
-                    with db:
-                        if status!='success':
-                            if code in (401,403,429):fatal=True
+                    def log_result(saved_status,saved_count,saved_more):
+                        saved_reason='page_saved' if saved_status=='success' else reason
+                        if saved_status!='success':
                             db.execute("UPDATE accounts SET attempts=attempts+1,last_attempt=?,last_error=?,blocked=CASE WHEN ? = '110' THEN 1 ELSE blocked END WHERE account_key=?",
                                        (ts,error_code,error_code,a['account_key']))
                         db.execute('INSERT INTO request_log(run_id,request_id,account_key,phase,started_at,finished_at,http_status,status,records_received,has_next_page,stop_reason,error_code,error_subcode,error_message,raw_response_path,requested_fields,usage_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                                   (run_id,req,a['account_key'],phase,t0,ts,code,status,count,has_next,reason,error_code,error_sub,error_message,
-                                    str(raw.relative_to(base)),BASE_PROFILE+(','+EXTRA_PROFILE if args.extended_fields else '')+','+MEDIA_FIELDS,json.dumps({'outer_total_time':outer_usage,'requested_post_limit':args.limit})))
+                                   (run_id,req,a['account_key'],phase,t0,ts,code,saved_status,saved_count,
+                                    'true' if saved_more else 'false' if saved_status=='success' else 'unknown',
+                                    saved_reason,error_code,error_sub,error_message,str(raw.relative_to(base)),
+                                    BASE_PROFILE+(','+EXTRA_PROFILE if args.extended_fields else '')+','+MEDIA_FIELDS,
+                                    json.dumps({'outer_usage':outer_usage,'observed_max':max_seen,'requested_post_limit':args.limit})))
                         db.execute('UPDATE runs SET requests=requests+1,successes=successes+?,failures=failures+? WHERE run_id=?',
-                                   (int(status=='success'),int(status!='success'),run_id))
+                                   (int(saved_status=='success'),int(saved_status!='success'),run_id))
                         db.execute('INSERT INTO slot_accounts(slot_id,account_key,request_id) VALUES (?,?,?)',
                                    (slot,a['account_key'],req))
+                        if daily_day and phase=='front':
+                            state='success' if saved_status=='success' else 'needs_review' if error_code=='110' else 'retry_pending'
+                            db.execute("""INSERT INTO daily_account_state
+                                (day_kst,account_key,status,attempts,last_request_id,last_error,updated_at)
+                                VALUES (?,?,?,?,?,?,?)
+                                ON CONFLICT(day_kst,account_key) DO UPDATE SET
+                                status=excluded.status,attempts=daily_account_state.attempts+1,
+                                last_request_id=excluded.last_request_id,last_error=excluded.last_error,
+                                updated_at=excluded.updated_at""",
+                                (daily_day,a['account_key'],state,1,req,error_code or None,ts))
+                    if code==200 and not err and isinstance(payload,dict):
+                        try:
+                            new,count,more=insert_success(
+                                db,a,phase,payload,run_id,req,ts,args.history_days,args.extended_fields,
+                                args.window_days,limit=args.limit,
+                                commit_hook=lambda nc,ic,hm: log_result('success',ic,hm))
+                            status='success';reason='page_saved';has_next='true' if more else 'false'
+                        except (ValueError,sqlite3.Error) as exc:
+                            error_code='invalid_payload';error_message=str(exc)[:300]
+                            # Payload and request log roll back together.
+                    else:
+                        if error_code in STOP_ERRORS or code in (401,403,429):fatal=True
+                    if status!='success':
+                        if code in (401,403,429):fatal=True
+                        with db:
+                            log_result('failed',0,False)
                     print(f'{a["account_key"]} {phase}: {status} HTTP={code} received={count} new={new} like-field diagnostics saved')
-                if fatal or max_seen is None or max_seen>=args.stop_usage:
-                    print(f'HALTED: stop flag or usage unavailable/at threshold; total_time_max={max_seen}')
+                if fatal or not batch_usage or max_seen>=args.stop_usage:
+                    print(f'HALTED: stop flag or usage unavailable/at threshold; app_usage_max={max_seen}')
                     halted=True;break
+                if daily_day and datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()!=daily_day:
+                    print('KST date changed; stopping after completed batch')
+                    rollover=True;break
             with db: db.execute('UPDATE runs SET finished_at=?,status=?,usage_max=? WHERE run_id=?',
                                 (now(),'paused' if halted else 'closed',max_seen,run_id))
             used=db.execute('SELECT COUNT(*) FROM slot_accounts WHERE slot_id=?',(slot,)).fetchone()[0]
-            if halted or used>=SLOT_ACCOUNT_LIMIT or not tasks:
+            if halted or used>=SLOT_ACCOUNT_LIMIT or (not tasks and not rollover):
                 close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=SLOT_ACCOUNT_LIMIT else 'no_eligible_accounts')
             else:
                 print(f'SLOT OPEN: {used}/{SLOT_ACCOUNT_LIMIT} accounts processed at limit={args.limit}; may continue immediately.')
