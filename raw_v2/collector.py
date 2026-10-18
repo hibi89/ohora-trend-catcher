@@ -39,7 +39,9 @@ POST_FIELDS = ('id','username','caption','timestamp','permalink','media_type',
                'shortcode','view_count')
 MEDIA_FIELDS_OUT = ('id','media_type','media_url','thumbnail_url')
 STOP_ERRORS = {'4','17','32','613','10','102','104','190','200'}
-SCHEMA_VERSION = 'raw-v2.1'
+SCHEMA_VERSION = 'raw-v2.1'  # compatible with existing 5-post DB and checkpoints
+DEFAULT_POST_LIMIT = 4
+SLOT_ACCOUNT_LIMIT = 150
 LOG_COLS = ('run_id,request_id,account_key,resource_type,parent_post_id,started_at,finished_at,'
             'api_version,requested_fields,requested_post_limit,requested_since,requested_until,'
             'page_index,attempt_no,http_status,status,records_received,has_next_page,stop_reason,'
@@ -158,7 +160,21 @@ def connect(path, accounts, source_sha):
             stored=[(x['account_key'],x['ordinal'],x['input_username'],x['country']) for x in db.execute('SELECT * FROM accounts ORDER BY ordinal')]
             expected=[(a['key'],a['ordinal'],a['input_username'],a['country']) for a in accounts]
             if stored!=expected: raise ValueError('official source list changed')
+    # Additive, compatible metadata: freeze the 365/730d backfill reference date.
+    # For an existing database anchor to its very first real collection run.
+    # This does not change the original roster or any saved media/cursors.
+    existing_run=db.execute('SELECT MIN(started_at) FROM runs').fetchone()[0]
+    anchor=existing_run or now()
+    with db:
+        db.execute('INSERT OR IGNORE INTO config(k,v) VALUES (?,?)',('backfill_anchor_utc',anchor))
     return db
+
+
+def fixed_history_cutoff(db, history_days, reference=None):
+    row=db.execute('SELECT v FROM config WHERE k=?',('backfill_anchor_utc',)).fetchone()
+    anchor=parse_date(row[0]) if row else None
+    anchor=anchor or parse_date(reference) or datetime.now(timezone.utc)
+    return anchor-timedelta(days=history_days)
 
 
 def make_op(account,caller,phase,limit=5,extended=False):
@@ -237,13 +253,13 @@ def parse_date(value):
     except (ValueError,TypeError):return None
 
 
-def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=False,window_days=7):
+def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=False,window_days=7,limit=5):
     discovery=payload.get('business_discovery')
     if not isinstance(discovery,dict):raise ValueError('missing business_discovery')
     media=discovery.get('media')
     if not isinstance(media,dict) or not isinstance(media.get('data'),list):raise ValueError('missing media.data')
     posts=media['data']
-    if len(posts)>5:raise ValueError('more than requested five posts')
+    if len(posts)>limit:raise ValueError('more posts than requested page limit')
     key=account['account_key']
     old_ids={p['post_id'] for p in db.execute('SELECT post_id FROM posts WHERE account_key=?',(key,))}
     old_latest=account['latest_id']
@@ -252,7 +268,7 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         raise ValueError('invalid paging cursor')
     before=account['catchup_cursor'] if phase=='catchup' else account['backfill_cursor'] if phase=='history' else None
     if after and before and after==before:raise ValueError('unchanged paging cursor')
-    if len(posts)==5 and not after and discovery.get('media_count',0)>5:
+    if len(posts)==limit and not after and discovery.get('media_count',0)>limit:
         raise ValueError('full page but missing cursor: completeness unknown')
     oldest=account['oldest_time'];newest=account['newest_time'];new_post_count=0
     seen_ids=[]
@@ -299,21 +315,24 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         done=account['backfill_done']
         if phase=='front':
             if seen_ids:latest=seen_ids[0]
-            if old_latest and old_latest not in seen_ids and len(posts)==5 and after:
+            if old_latest and old_latest not in seen_ids and after:
+                # A changed page size must not suppress front-gap recovery.
                 catch=after;anchor=old_latest
+            elif old_latest and old_latest not in seen_ids and not after:
+                raise ValueError('front continuity unknown: previous latest ID missing and no cursor')
             elif not old_latest:
                 back=after  # first page provides historical continuation
             else:
                 catch=None;anchor=None
         elif phase=='catchup':
-            if anchor not in seen_ids and (not after or len(posts)<5):
+            if anchor not in seen_ids and not after:
                 raise ValueError('latest gap has no boundary; do not mark complete')
             if anchor in seen_ids:catch=None;anchor=None
             else:catch=after
         else:
             back=after
-            if not after or len(posts)<5:done=1
-        target=(parse_date(ts) or datetime.now(timezone.utc))-timedelta(days=history_days)
+            if not after:done=1
+        target=fixed_history_cutoff(db,history_days,ts)
         observation_day=(parse_date(ts) or datetime.now(timezone.utc)).date()
         delta_days=max(0,(observation_day-(parse_date(oldest).date() if oldest and parse_date(oldest) else observation_day)).days)
         bucket=delta_days//window_days
@@ -345,7 +364,7 @@ def export_run(db,base,run,source):
       'accounts.csv':("SELECT ? AS run_id,a.account_key,a.input_username,a.input_profile_url,a.country AS source_country,a.id,a.ig_id,a.username,a.name,a.biography,a.website,a.profile_picture_url,a.followers_count,a.follows_count,a.media_count,a.collected_at FROM accounts a WHERE a.account_key IN (SELECT account_key FROM account_observations WHERE run_id=?) ORDER BY ordinal",(run,run)),
       'posts.csv':("SELECT p.first_seen_run AS run_id,p.account_key,(SELECT id FROM accounts a WHERE a.account_key=p.account_key) AS ig_user_id,p.post_id AS id,p.username,p.caption,p.timestamp,p.permalink,p.media_type,p.media_product_type,p.media_url,p.thumbnail_url,o.like_count,o.comments_count,'' AS shortcode,'' AS view_count,p.first_seen_run AS first_seen_run,o.observed_at AS collected_at FROM posts p LEFT JOIN post_observations o ON o.post_id=p.post_id AND o.run_id=p.first_seen_run WHERE p.first_seen_run=? ORDER BY p.account_key,p.timestamp DESC",(run,)),
       'post_media.csv':("SELECT first_seen_run AS run_id,account_key,post_id,media_id AS id,media_role,item_order,media_type,media_url,thumbnail_url,(SELECT MIN(o.observed_at) FROM post_observations o WHERE o.post_id=post_media.post_id AND o.run_id=post_media.first_seen_run) AS collected_at FROM post_media WHERE first_seen_run=? ORDER BY account_key,post_id,item_order",(run,)),
-      'collection_log.csv':("SELECT l.run_id,l.request_id,l.account_key,l.phase AS resource_type,'' AS parent_post_id,l.started_at,l.finished_at,r.api_version,l.requested_fields,5 AS requested_post_limit,'' AS requested_since,'' AS requested_until,1 AS page_index,1 AS attempt_no,l.http_status,l.status,l.records_received,l.has_next_page,l.stop_reason,l.error_code,l.error_subcode,l.error_message,l.raw_response_path FROM request_log l JOIN runs r ON r.run_id=l.run_id WHERE l.run_id=? ORDER BY l.request_id",(run,)),
+      'collection_log.csv':("SELECT l.run_id,l.request_id,l.account_key,l.phase AS resource_type,'' AS parent_post_id,l.started_at,l.finished_at,r.api_version,l.requested_fields,CAST(json_extract(l.usage_json,'$.requested_post_limit') AS INTEGER) AS requested_post_limit,'' AS requested_since,'' AS requested_until,1 AS page_index,1 AS attempt_no,l.http_status,l.status,l.records_received,l.has_next_page,l.stop_reason,l.error_code,l.error_subcode,l.error_message,l.raw_response_path FROM request_log l JOIN runs r ON r.run_id=l.run_id WHERE l.run_id=? ORDER BY l.request_id",(run,)),
       'like_missing_audit.csv':("SELECT o.post_id,p.account_key,p.media_type,p.media_product_type,p.timestamp AS post_timestamp,o.observed_at,o.request_id,CASE WHEN o.like_present=0 THEN 'missing_or_null' ELSE 'returned' END AS field_state FROM post_observations o JOIN posts p ON p.post_id=o.post_id WHERE o.run_id=? AND o.like_present=0 ORDER BY p.account_key,o.post_id",(run,)),
       'field_support.csv':("SELECT runs.api_version,resource_type,field_name,MAX(runs.started_at) AS checked_at,field_observations.status,COUNT(*) AS sample_count,'' AS error_code,media_type AS note FROM field_observations JOIN runs ON runs.run_id=field_observations.run_id WHERE field_observations.run_id=? GROUP BY resource_type,media_type,field_name,field_observations.status ORDER BY resource_type,field_name",(run,))}
     counts={}
@@ -439,12 +458,12 @@ def close_slot(db,sid,reason,cooldown_minutes=60):
 
 def run(args,client=request_batch):
     accounts,digest=load_accounts(args.source)
-    if args.batch_size<1 or args.batch_size>10 or args.limit!=5 or args.max_batches<1 or not 0<args.stop_usage<100:
-        raise ValueError('batch-size 1..10, limit 5, max-batches>=1, 0<stop-usage<100 required')
+    if args.batch_size<1 or args.batch_size>10 or args.limit not in (4,5) or args.max_batches<1 or not 0<args.stop_usage<100:
+        raise ValueError('batch-size 1..10, limit 4 or 5, max-batches>=1, 0<stop-usage<100 required')
     if not 1 <= args.window_days <= 31:raise ValueError('window-days 1..31 required')
     if args.history_days not in (365,730):raise ValueError('history-days must be 365 or 730')
     if not args.live:
-        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit=5, {args.window_days}d logical windows, 70min suggested cadence; NO writes/API')
+        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit={args.limit}, {args.window_days}d logical windows, 150 unique accounts/slot, 60min post-finish cooldown; NO writes/API')
         return 0
     token,caller,version=load_env(args.env_file)
     base=Path(args.output_dir).resolve()
@@ -459,7 +478,7 @@ def run(args,client=request_batch):
             slot=active_slot(db,60)
             if slot is None:return 0
             already={r[0] for r in db.execute('SELECT account_key FROM slot_accounts WHERE slot_id=?',(slot,))}
-            remaining=150-len(already)
+            remaining=SLOT_ACCOUNT_LIMIT-len(already)
             if remaining<=0:
                 close_slot(db,slot,'150_accounts_completed')
                 return 0
@@ -470,7 +489,7 @@ def run(args,client=request_batch):
             for b in range(args.max_batches):
                 if not tasks:break
                 batch,tasks=tasks[:args.batch_size],tasks[args.batch_size:]
-                ops=[make_op(a,caller,phase,extended=args.extended_fields) for phase,a in batch]
+                ops=[make_op(a,caller,phase,limit=args.limit,extended=args.extended_fields) for phase,a in batch]
                 t0=now()
                 try:http,body,headers=client(version,token,ops)
                 except (URLError,OSError,TimeoutError) as e:
@@ -496,7 +515,7 @@ def run(args,client=request_batch):
                     status='failed';count=0;new=0;has_next='unknown';reason='api_error' if code!=200 else 'invalid_payload'
                     if code==200 and not err and isinstance(payload,dict):
                         try:
-                            new,count,more=insert_success(db,a,phase,payload,run_id,req,ts,args.history_days,args.extended_fields,args.window_days)
+                            new,count,more=insert_success(db,a,phase,payload,run_id,req,ts,args.history_days,args.extended_fields,args.window_days,limit=args.limit)
                             status='success';reason='page_saved';has_next='true' if more else 'false'
                         except (ValueError,sqlite3.Error) as exc:
                             error_code='invalid_payload';error_message=str(exc)[:300]
@@ -510,7 +529,7 @@ def run(args,client=request_batch):
                                        (ts,error_code,error_code,a['account_key']))
                         db.execute('INSERT INTO request_log(run_id,request_id,account_key,phase,started_at,finished_at,http_status,status,records_received,has_next_page,stop_reason,error_code,error_subcode,error_message,raw_response_path,requested_fields,usage_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                                    (run_id,req,a['account_key'],phase,t0,ts,code,status,count,has_next,reason,error_code,error_sub,error_message,
-                                    str(raw.relative_to(base)),BASE_PROFILE+(','+EXTRA_PROFILE if args.extended_fields else '')+','+MEDIA_FIELDS,json.dumps({'outer_total_time':outer_usage})))
+                                    str(raw.relative_to(base)),BASE_PROFILE+(','+EXTRA_PROFILE if args.extended_fields else '')+','+MEDIA_FIELDS,json.dumps({'outer_total_time':outer_usage,'requested_post_limit':args.limit})))
                         db.execute('UPDATE runs SET requests=requests+1,successes=successes+?,failures=failures+? WHERE run_id=?',
                                    (int(status=='success'),int(status!='success'),run_id))
                         db.execute('INSERT INTO slot_accounts(slot_id,account_key,request_id) VALUES (?,?,?)',
@@ -522,10 +541,10 @@ def run(args,client=request_batch):
             with db: db.execute('UPDATE runs SET finished_at=?,status=?,usage_max=? WHERE run_id=?',
                                 (now(),'paused' if halted else 'closed',max_seen,run_id))
             used=db.execute('SELECT COUNT(*) FROM slot_accounts WHERE slot_id=?',(slot,)).fetchone()[0]
-            if halted or used>=150 or not tasks:
-                close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=150 else 'no_eligible_accounts')
+            if halted or used>=SLOT_ACCOUNT_LIMIT or not tasks:
+                close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=SLOT_ACCOUNT_LIMIT else 'no_eligible_accounts')
             else:
-                print(f'SLOT OPEN: {used}/150 accounts processed. May continue immediately; no cooldown yet.')
+                print(f'SLOT OPEN: {used}/{SLOT_ACCOUNT_LIMIT} accounts processed at limit={args.limit}; may continue immediately.')
             output=export_run(db,base,run_id,args.source)
             print('Run:',run_id,'new posts:',output['row_count']['posts.csv'],'cumulative:',output['cumulative_posts'])
             print('Saved:',base/'runs'/run_id)
@@ -543,7 +562,7 @@ def main(argv=None):
     p.add_argument('--mode',choices=('balanced','front','history'),default='balanced')
     p.add_argument('--batch-size',type=int,default=5)
     p.add_argument('--max-batches',type=int,default=1,help='Safest pilot default: one batch')
-    p.add_argument('--limit',type=int,default=5)
+    p.add_argument('--limit',type=int,default=DEFAULT_POST_LIMIT,choices=(4,5),help='Posts per account request; default 4. Existing 5-post data remain intact.')
     p.add_argument('--window-days',type=int,default=7,help='Logical client-side coverage; not API server filter')
     p.add_argument('--history-days',type=int,default=365)
     p.add_argument('--cycle-minutes',type=int,default=70,help='Deprecated: previous start-to-start cooldown; slot now cools 60min after finish')
