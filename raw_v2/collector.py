@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in OHORA RAW v2; independent of all legacy stores. Python 3.11+.
 
-A slot may span manual invocations: up to 150 distinct accounts then 63-minute cooldown.
+A slot may span manual invocations: up to 150 distinct accounts then 65-minute cooldown.
 No scheduler is installed. No requests without --live.
 The collector prioritizes unscanned accounts, writes an immutable sanitized API
 response per subrequest, and uses separate latest/catchup/history checkpoints.
@@ -481,7 +481,7 @@ def process_lock(base):
 
 
 
-def active_slot(db, cooldown_minutes=63):
+def active_slot(db, cooldown_minutes=65):
     """Resume partial 150-account slot; cool down only after slot closes.
 
     Adopt a prior pilot made by RAW v2.1 (before slots existed) if it is recent,
@@ -503,30 +503,30 @@ def active_slot(db, cooldown_minutes=63):
         if prior['status']=='active':return prior['slot_id']
         next_time=parse_date(prior['ready_at'])
         if next_time and datetime.now(timezone.utc)<next_time:
-            print('SKIPPED: 63-minute post-completion cooldown; next start after '+prior['ready_at'])
+            print('SKIPPED: 65-minute post-completion cooldown; next start after '+prior['ready_at'])
             return None
     with db:
         row=db.execute('INSERT INTO slots(started_at,status) VALUES (?,?)',(now(),'active'))
     return row.lastrowid
 
 
-def close_slot(db,sid,reason,cooldown_minutes=63):
+def close_slot(db,sid,reason,cooldown_minutes=65):
     finished=now()
     ready=(parse_date(finished)+timedelta(minutes=cooldown_minutes)).isoformat()
     with db:
         db.execute('UPDATE slots SET finished_at=?,ready_at=?,status=?,reason=? WHERE slot_id=? AND status=?',
                    (finished,ready,'cooldown',reason,sid,'active'))
-    print(f'SLOT CLOSED: {reason}; next slot after {ready} (63min after finish)')
+    print(f'SLOT CLOSED: {reason}; next slot after {ready} (65min after finish)')
 
 
-def run(args,client=request_batch,task_selector=None,daily_day=None):
+def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_minutes=65):
     accounts,digest=load_accounts(args.source)
     if args.batch_size<1 or args.batch_size>10 or args.limit not in (4,5) or args.max_batches<1 or not 0<args.stop_usage<100:
         raise ValueError('batch-size 1..10, limit 4 or 5, max-batches>=1, 0<stop-usage<100 required')
     if not 1 <= args.window_days <= 31:raise ValueError('window-days 1..31 required')
     if args.history_days not in (365,730):raise ValueError('history-days must be 365 or 730')
     if not args.live:
-        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit={args.limit}, {args.window_days}d logical windows, 150 unique accounts/slot, 63min post-finish cooldown; NO writes/API')
+        print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit={args.limit}, {args.window_days}d logical windows, 150 unique accounts/slot, 65min post-finish cooldown; NO writes/API')
         return 0
     token,caller,version=load_env(args.env_file)
     base=Path(args.output_dir).resolve()
@@ -536,7 +536,7 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
     with process_lock(base):
         db=connect(base/'collection.sqlite',accounts,digest)
         start=now();run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+str(os.getpid())+'_'+uuid.uuid4().hex[:8]
-        halted=False;max_seen=None
+        halted=False;max_seen=None;permanent_halt=False
         try:
             unresolved=db.execute("""SELECT run_id,batch_no,status FROM batch_attempts
                 WHERE status NOT IN ('complete','aborted_before_send')
@@ -544,12 +544,12 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
             if unresolved:
                 raise ValueError('unresolved prior batch; audit/reconcile before another API request: '
                                  +str(tuple(unresolved)))
-            slot=active_slot(db,63)
+            slot=active_slot(db,cooldown_minutes)
             if slot is None:return 0
             already={r[0] for r in db.execute('SELECT account_key FROM slot_accounts WHERE slot_id=?',(slot,))}
             remaining=SLOT_ACCOUNT_LIMIT-len(already)
             if remaining<=0:
-                close_slot(db,slot,'150_accounts_completed')
+                close_slot(db,slot,'150_accounts_completed',cooldown_minutes)
                 return 0
             with db:db.execute('INSERT INTO runs(run_id,started_at,api_version,mode,status) VALUES (?,?,?,?,?)',
                                (run_id,start,version,args.mode,'started'))
@@ -637,9 +637,13 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
                             error_code='invalid_payload';error_message=str(exc)[:300]
                             if 'account identity mismatch' in str(exc) or 'missing numeric business discovery ID' in str(exc):
                                 fatal=True
+                                permanent_halt=True
                             # Payload and request log roll back together.
                     else:
-                        if error_code in STOP_ERRORS or code in (401,403,429):fatal=True
+                        if error_code in STOP_ERRORS or code in (401,403,429):
+                            fatal=True
+                        if code in (401,403) or error_code in ('10','102','104','190','200'):
+                            permanent_halt=True
                     if status!='success':
                         if code in (401,403,429):fatal=True
                         with db:
@@ -648,6 +652,8 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
                 with db:
                     db.execute("""UPDATE batch_attempts SET status='complete'
                                   WHERE run_id=? AND batch_no=?""",(run_id,b))
+                if not batch_usage:
+                    permanent_halt=True
                 if fatal or not batch_usage or max_seen>=args.stop_usage:
                     print(f'HALTED: stop flag or usage unavailable/at threshold; app_usage_max={max_seen}')
                     halted=True;break
@@ -658,13 +664,13 @@ def run(args,client=request_batch,task_selector=None,daily_day=None):
                                 (now(),'paused' if halted else 'closed',max_seen,run_id))
             used=db.execute('SELECT COUNT(*) FROM slot_accounts WHERE slot_id=?',(slot,)).fetchone()[0]
             if halted or used>=SLOT_ACCOUNT_LIMIT or (not tasks and not rollover):
-                close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=SLOT_ACCOUNT_LIMIT else 'no_eligible_accounts')
+                close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=SLOT_ACCOUNT_LIMIT else 'no_eligible_accounts',cooldown_minutes)
             else:
                 print(f'SLOT OPEN: {used}/{SLOT_ACCOUNT_LIMIT} accounts processed at limit={args.limit}; may continue immediately.')
             output=export_run(db,base,run_id,args.source)
             print('Run:',run_id,'new posts:',output['row_count']['posts.csv'],'cumulative:',output['cumulative_posts'])
             print('Saved:',base/'runs'/run_id)
-            return 2 if halted else 0
+            return 3 if permanent_halt else 2 if halted else 0
         finally:
             db.close()
 
@@ -681,7 +687,7 @@ def main(argv=None):
     p.add_argument('--limit',type=int,default=DEFAULT_POST_LIMIT,choices=(4,5),help='Posts per account request; default 4. Existing 5-post data remain intact.')
     p.add_argument('--window-days',type=int,default=7,help='Logical client-side coverage; not API server filter')
     p.add_argument('--history-days',type=int,default=365)
-    p.add_argument('--cycle-minutes',type=int,default=70,help='Deprecated: previous start-to-start cooldown; slot now cools 63min after finish')
+    p.add_argument('--cycle-minutes',type=int,default=70,help='Deprecated: previous start-to-start cooldown; slot now cools 65min after finish')
     p.add_argument('--stop-usage',type=float,default=70)
     p.add_argument('--extended-fields',action='store_true',help='Unverified profile fields; separate controlled trial only')
     a=p.parse_args(argv)
