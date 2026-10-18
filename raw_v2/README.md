@@ -36,7 +36,7 @@ python .\raw_v2\collector.py `
   --live
 ```
 
-- **2026-10-18 GitHub Actions Python 3.11 합성 테스트 28/28 PASS**. Windows 테스트 재실행·Meta 실 4개 요청·실 과거 커서 역행은 아직 미검증. 반복 실행 스크립트도 `--limit 4`로 반영했으나 취침 중 자동 실행을 등록하거나 시작한 것은 아니다.
+- **GitHub Actions Python 3.11 합성 테스트 28/28 PASS**. Windows 테스트 재실행·Meta 실 4개 요청·실 과거 커서 역행은 아직 미검증. 반복 실행 스크립트는 `--limit 4`, 최소 시작 간격 70분과 종료 후 60분 대기를 모두 적용했으나 취침 중 자동 실행을 등록하거나 시작한 것은 아니다.
 
 ## Windows PowerShell 1차 검증 (API 호출 없음)
 
@@ -108,4 +108,4 @@ python .\raw_v2\verify.py --output-dir '.\raw_v2_results'
 .\raw_v2\run_70m_loop.ps1 -Source $src -EnvFile $envFile -Cycles 10 -BatchSize 5 -MaxBatches 30 -OutputDir "$env:LOCALAPPDATA\OHORA_RAW_v2"
 ```
 
-PowerShell 창이 열린 동안에만 실행된다. **Windows 예약 작업을 설치하거나 운영을 자동 개시하지 않는다.** `-MaxBatches 30`이면 한 slot 최대 150계정(기본 계정당 4개 요청)이며, 사용률이 70% 이상이거나 API 제한 오류면 더 일찍 중단한다. slot 완료 후 60분 대기한다. 첫 실행 후 70분은 수집 10분 이내 종료 시의 예상 시작 간격에 불과하다. 사용자는 PowerShell에서 Ctrl+C로 중단할 수 있다.
+PowerShell 창이 열린 동안에만 실행된다. **Windows 예약 작업을 설치하거나 운영을 자동 개시하지 않는다.** `-MaxBatches 30`이면 한 slot 최대 150계정(기본 계정당 4개 요청)이며, 사용률이 70% 이상이거나 API 제한 오류면 더 일찍 중단한다. 반복 스크립트는 **종료 후 최소 60분**, **시작과 다음 시작 사이 최소 70분**을 모두 지킨다. 어느 간격도 실제 API 사용률 회복을 보장하지는 않는다. 사용자는 PowerShell에서 Ctrl+C로 중단할 수 있다.
