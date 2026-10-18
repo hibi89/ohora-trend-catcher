@@ -1,5 +1,17 @@
 # OHORA Trend Catcher — HANDOFF (2026-10-18 22:49 KST)
 
+## 2026-10-19 — Important: Next trial is four posts × 150 accounts
+
+**User explicitly chose 4×150, not 5×150 or 25/50 large-page experiments.** 294 official accounts → 150+144 ideal per complete first account sweep, but limited by actual Meta quota. Current live local DB has 630 unique posts from 130 attempts (126 successful, 4 invalid-target). Never reset or overwrite it. User wants next API limit-window experiment **after actual cooldown**, not now. No background API calls or scheduled task created.
+
+- Collector CLI defaults `--limit 4` and allows `--limit 5` for compatibility/rollback; run request and response-length validation follow selected page size; account slot cap still 150, 60min cooldown from finish.
+- Maintains two independent paths: front latest & catchup vs history cursor. FRONT never overwrites established backfill cursor, and 4-post page rollover correctly resumes prior 5-post checkpoints. Page terminal/noncursor and one-page account guards improved.
+- `config.backfill_anchor_utc` is inserted additively in same `raw-v2.1` SQLite; for legacy DB equals `MIN(runs.started_at)`, for new DB initial connection timestamp. `--history-days 365` cutoff now pinned to that anchor. Existing posts/observations/slots/cursors unchanged.
+- New `collection_log.csv` requested_post_limit is dynamic from `request_log.usage_json` via SQLite JSON extract (no schema version change). Old run files remain untouched.
+- Loop script now defaults 4 posts, waits max(60m since prior finish, 70m since prior start), is foreground/manual only. No scheduler installed.
+- CI **28/28 Python 3.11 synthetic PASS**: run `39140956504` (push SHA `aa440d7e64511d9347b6ec7e8ccc246fb474b53e`). Windows tests and live new 4x150 API calls NOT VERIFIED. User must `git pull origin main` then test locally.
+- When next Meta usage window permits, run one test (do NOT auto-run unless user explicitly instructs): `python .\\raw_v2\\collector.py --source $src --env-file $envFile --output-dir "$env:LOCALAPPDATA\\OHORA_RAW_v2" --mode balanced --limit 4 --batch-size 5 --max-batches 30 --stop-usage 70 --live`. Compare usage_max, per-account posts, 4 error accounts; only later examine true history pages and actual quota recovery.
+
 ## 2026-10-18 — Corrections after first live run (read first)
 
 - The user's intended unit is **150 accounts continuously × limit(5) per account, then 60-minute rest counted from the FINISH of that unit**. The earlier 70-minute timer was a start-to-start estimate only, assuming ~10 minutes to collect. The previous global 70-minute lock after just 5-account pilot was incorrect and has been replaced in `raw_v2/collector.py`.
