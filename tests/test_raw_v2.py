@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from importlib.util import spec_from_file_location, module_from_spec
+from contextlib import closing
 
 SCRIPT=Path(__file__).resolve().parents[1]/'raw_v2'/'collector.py'
 VERIFY=Path(__file__).resolve().parents[1]/'raw_v2'/'verify.py'
@@ -141,7 +142,7 @@ class Tests(unittest.TestCase):
         def fake(v,t,ops):
             return 200,[{'code':400,'body':json.dumps({'error':{'code':4,'message':'limit'}})} for _ in ops],{'X-App-Usage':'{"total_time":92}'}
         self.assertEqual(m.run(args,fake),2)
-        with sqlite3.connect(args.output_dir/'collection.sqlite') as d:
+        with closing(sqlite3.connect(args.output_dir/'collection.sqlite')) as d:
             self.assertEqual(d.execute('SELECT count(*) FROM posts').fetchone()[0],0)
             self.assertEqual(d.execute('SELECT failures FROM runs').fetchone()[0],5)
     def test_bad_hash_detected_by_verifier(self):
