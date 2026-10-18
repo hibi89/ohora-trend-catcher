@@ -299,6 +299,11 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         raise ValueError('invalid paging cursor')
     before=account['catchup_cursor'] if phase=='catchup' else account['backfill_cursor'] if phase=='history' else None
     if after and before and after==before:raise ValueError('unchanged paging cursor')
+    if phase=='history' and before:
+        seen_cursors={r[0] for r in db.execute(
+            'SELECT requested_cursor FROM history_page_evidence WHERE account_key=?',(key,)) if r[0]}
+        if before in seen_cursors or (after and after in seen_cursors):
+            raise ValueError('history pagination cursor cycle detected')
     if phase=='front' and not old_latest and len(posts)==limit and not after and discovery.get('media_count',0)>limit:
         raise ValueError('full page but missing cursor: completeness unknown')
     oldest=account['oldest_time'];newest=account['newest_time'];new_post_count=0
@@ -359,6 +364,12 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
                 if newest is None or normalized>newest:newest=normalized
         if phase=='history' and any(page_dates[i]<page_dates[i+1] for i in range(len(page_dates)-1)):
             raise ValueError('history page timestamps not descending')
+        if phase=='history' and before and page_dates:
+            previous=db.execute(
+                'SELECT oldest_page_ts FROM history_page_evidence WHERE account_key=? AND response_cursor=? ORDER BY observed_at DESC LIMIT 1',
+                (key,before)).fetchone()
+            if previous and previous[0] and max(page_dates)>parse_date(previous[0]):
+                raise ValueError('history page overlaps earlier than expected; chronology unverified')
         latest=old_latest;back=account['backfill_cursor'];catch=account['catchup_cursor'];anchor=account['catchup_anchor']
         done=account['backfill_done']
         if phase=='front':
