@@ -102,9 +102,12 @@ class Tests(unittest.TestCase):
         self.assertEqual(m.run(args),0);self.assertFalse(args.output_dir.exists())
     def test_fake_live_one_batch_and_manifest(self):
         env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345\nMETA_GRAPH_VERSION=v26.0', encoding='utf-8')
+        calls=[0]
         def fake(version,token,ops):
             self.assertEqual(token,'SECRET');self.assertEqual(len(ops),5)
-            return 200,[{'code':200,'body':json.dumps(payload(range(i*5+1,i*5+6))),'headers':[]} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":3}'}
+            offset=calls[0]*25
+            calls[0]+=1
+            return 200,[{'code':200,'body':json.dumps(payload(range(offset+i*5+1,offset+i*5+6))),'headers':[]} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":3}'}
         args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'out',live=True,mode='balanced',batch_size=5,
                        max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
         self.assertEqual(m.run(args,fake),0)
@@ -114,7 +117,10 @@ class Tests(unittest.TestCase):
         self.assertEqual(manifest['row_count']['posts.csv'],25)
         self.assertFalse('SECRET' in ''.join(p.read_text(encoding='utf-8') for p in (runs[0]/'raw').iterdir()))
         self.assertEqual(v.verify(args.output_dir)['checks'],'PASS')
-        self.assertEqual(m.run(args,fake),0)  # 70m cooldown prevents requests
+        self.assertEqual(m.run(args,fake),0)  # Continue immediately after 5-account pilot
+        self.assertEqual(calls[0],2)
+        with closing(sqlite3.connect(args.output_dir/'collection.sqlite')) as d:
+            self.assertEqual(d.execute('SELECT COUNT(*) FROM slot_accounts').fetchone()[0],10)
     def test_seven_day_bucket_tracks_oldest(self):
         a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
         p=payload([1],after=None);p['business_discovery']['media']['data'][0]['timestamp']='2026-10-08T00:00:00+0000'
@@ -178,6 +184,48 @@ class Tests(unittest.TestCase):
         with (folder/'post_media.csv').open(encoding='utf-8-sig',newline='') as fp:
             self.assertIn('collected_at',next(csv.reader(fp)))
         self.assertEqual(v.verify(args.output_dir)['checks'],'PASS')
+    def test_adopt_existing_five_account_pilot_in_slot(self):
+        # Existing user's 5-account v2.1 pilot has no slots table rows yet.
+        with self.db:
+            self.db.execute("INSERT INTO runs(run_id,started_at,finished_at,api_version,mode,status,requests) VALUES (?,?,?,?,?,?,?)",
+                            ('legacy',m.now(),m.now(),'v26.0','balanced','closed',5))
+            for n in range(1,6):
+                self.db.execute("INSERT INTO request_log(run_id,request_id,account_key,phase) VALUES (?,?,?,?)",
+                                ('legacy',f'legacy-{n}',f'KR_{n:03}','front'))
+        sid=m.active_slot(self.db)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM slot_accounts WHERE slot_id=?',(sid,)).fetchone()[0],5)
+        sid2=m.active_slot(self.db)
+        self.assertEqual(sid,sid2)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM slots').fetchone()[0],1)
+
+    def test_full_150_slot_then_cooldown_and_144_next(self):
+        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345',encoding='utf-8')
+        args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'fullslot',live=True,mode='balanced',batch_size=5,
+                       max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
+        calls=[0]
+        def fake(v,t,ops):
+            offset=calls[0]*25
+            calls[0]+=1
+            return 200,[{'code':200,'body':json.dumps(payload(range(offset+i*5+1,offset+i*5+6)))} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":5}'}
+        self.assertEqual(m.run(args,fake),0)
+        args.max_batches=29
+        self.assertEqual(m.run(args,fake),0)
+        self.assertEqual(calls[0],30)
+        with closing(sqlite3.connect(args.output_dir/'collection.sqlite')) as d:
+            self.assertEqual(d.execute('SELECT COUNT(*) FROM slot_accounts').fetchone()[0],150)
+            self.assertEqual(d.execute('SELECT status FROM slots ORDER BY slot_id DESC LIMIT 1').fetchone()[0],'cooldown')
+        # This invocation is blocked only after slot completion, not after the pilot.
+        self.assertEqual(m.run(args,fake),0)
+        self.assertEqual(calls[0],30)
+        with closing(sqlite3.connect(args.output_dir/'collection.sqlite')) as d:
+            d.execute("UPDATE slots SET ready_at='2000-01-01T00:00:00+00:00'");d.commit()
+        args.max_batches=30
+        self.assertEqual(m.run(args,fake),0)
+        self.assertEqual(calls[0],60)  # 144 unscanned + 6 history accounts, up to 150
+        with closing(sqlite3.connect(args.output_dir/'collection.sqlite')) as d:
+            self.assertEqual(d.execute('SELECT status FROM slots ORDER BY slot_id DESC LIMIT 1').fetchone()[0],'cooldown')
+            self.assertEqual(d.execute('SELECT COUNT(*) FROM accounts WHERE latest_id IS NOT NULL').fetchone()[0],294)
+
     def test_outer_error_safe(self):
         self.assertEqual(m.usage({'X-App-Usage':'{"total_time":72}'}),72.0)
         self.assertIsNone(m.usage({}))
