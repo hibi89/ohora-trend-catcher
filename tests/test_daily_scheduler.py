@@ -47,7 +47,7 @@ class DailyTests(unittest.TestCase):
 
     def test_daily_front_order_and_retry_priority(self):
         tasks=sched.select_daily_tasks(self.db,'2026-10-19')
-        self.assertEqual(len(tasks),294)
+        self.assertEqual(len(tasks),150)
         self.assertEqual([a['ordinal'] for _,a in tasks[:3]],[1,2,3])
         with self.db:
             self.db.execute("""INSERT INTO daily_account_state
@@ -62,8 +62,33 @@ class DailyTests(unittest.TestCase):
         self.assertEqual(tasks[-1][1]['account_key'],'KR_002')
         self.assertNotIn('KR_001',[a['account_key'] for _,a in tasks])
         self.assertNotIn('KR_003',[a['account_key'] for _,a in tasks])
+        self.assertTrue(all(a['ordinal']<=150 for _,a in tasks))
         # A new KST day is an independent front cycle.
         self.assertEqual(sched.select_daily_tasks(self.db,'2026-10-20')[0][1]['account_key'],'KR_001')
+
+    def test_second_roster_cohort_only_after_first_completed(self):
+        with self.db:
+            self.db.executemany(
+                'INSERT INTO daily_account_state(day_kst,account_key,status,attempts,updated_at) VALUES (?,?,?,?,?)',
+                [('2026-10-19',a['account_key'],'success',1,c.now())
+                 for a in self.db.execute('SELECT account_key FROM accounts WHERE ordinal<=150')])
+        tasks=sched.select_daily_tasks(self.db,'2026-10-19')
+        self.assertEqual(len(tasks),144)
+        self.assertEqual((tasks[0][1]['ordinal'],tasks[-1][1]['ordinal']),(151,294))
+
+    def test_bootstrap_existing_front_observation_without_api(self):
+        day=sched.today_kst()
+        with self.db:
+            self.db.execute("""INSERT INTO request_log(run_id,request_id,account_key,phase,status,finished_at)
+                               VALUES (?,?,?,?,?,?)""",
+                            ('legacy','legacy_1','KR_001','front','success',c.now()))
+            self.db.execute("""INSERT INTO request_log(run_id,request_id,account_key,phase,status,finished_at)
+                               VALUES (?,?,?,?,?,?)""",
+                            ('legacy','legacy_2','KR_002','history','success',c.now()))
+        snap=sched.inspect_store(self.base/'store',self.accounts,self.digest)
+        self.assertEqual(snap['day'],day)
+        self.assertEqual(snap['success'],1)
+        self.assertEqual(sched.select_daily_tasks(self.db,day)[0][1]['account_key'],'KR_002')
 
     def test_stage_order_no_history_while_front_pending(self):
         a=self.account()
