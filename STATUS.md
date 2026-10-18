@@ -1,5 +1,14 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-18 — Planning-only long-term RAW/data asset vision (NO EXECUTION)
+
+- User's current direction: official 294 accounts (KR100/US101/JP93), each **latest 50 posts as the initial target** (up to 14,700 if accessible), then maintain new posts while independently extending historical coverage to 1 year and ideally 2 years. This is an **aspirational target, not a collected result**.
+- Future dashboard *concept*, not frozen screen specification: **tab 1** RAW explorer (period/sort/filter), **tab 2** weighted trend rankings, **tab 3** AI natural-language DB search/sort/tables/charts, **tab 4** collection coverage/attempt/success/failure/oldest-newest/status observability.
+- Recommended separation under discussion: front refresh, older cursor backfill, engagement/account metric observation history; immutable per-run RAW JSON/CSV + cumulative SQLite, separate derived analysis/AI. RAW fields and source distinctions follow user-provided 2026-10-18 proposal where verified.
+- **Saved design record only:** `docs/LONG_TERM_RAW_COLLECTION_VISION_2026-10-18.md`, linked from README. No implementation, unit tests, Meta live calls, scheduler activation, collection or data migration for this new plan. The document `OHORA_RAW_COLLECTION_EXECUTION(1).md` was supplied in chat and informed this discussion; it is *not* a separate executable approval. User explicitly asked to record the goals and pause for further discussion.
+- Existing `experiments/rolling_backfill.py` stops at 50 and lacks continuing newest-post synchronization; its current behavior and existing collection stores **unchanged**. Existing app B credential expiry, 2-app independent budget, Graph cursor/API field support, completeness and image URL retention are **unresolved**.
+- Next: listen to user's additional requirements; discuss architecture and approval boundaries first. **Do not start coding/API collection simply because this planning record is committed.**
+
 ## 2026-10-16 — Two-app five-post ninety-minute historical backfill coded
 
 - Updated decision: **5 posts per account × 150 account app A + 144 account app B**, 90-minute recurring **historical cursor backfill**, goal **50 unique posts/account** in ideal 10 cycles, not repeated newest-five scans. 900 minutes ≈ 15 hours of cycle cadence; for ten start ticks there are nine 90-min gaps (13.5h between first and last starts). Two ~9h working days possible only if 150/144 accounts fully processed each tick, valid media cursors/permissions and quota recovery.
