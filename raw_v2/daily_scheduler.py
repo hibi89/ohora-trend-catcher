@@ -53,11 +53,20 @@ def select_daily_tasks(db, day, max_tasks=294):
         front.sort(key=lambda item:(item[0],item[1]))
         return [(phase,account) for _,__,phase,account in front[:max_tasks]]
 
-    catchup=[('catchup',a) for a in accounts if not a['blocked'] and a['catchup_cursor']]
+    # Avoid an endlessly failing catchup/history account starving all other
+    # work. Retry it on the next KST day and keep its cursor unchanged.
+    failures={(r['account_key'],r['phase']):r['n'] for r in db.execute(
+        """SELECT account_key,phase,COUNT(*) AS n FROM request_log
+           WHERE status='failed' AND phase IN ('catchup','history')
+             AND date(finished_at,'+9 hours')=?
+           GROUP BY account_key,phase""",(day,))}
+    catchup=[('catchup',a) for a in accounts if not a['blocked'] and a['catchup_cursor']
+             and failures.get((a['account_key'],'catchup'),0)<MAX_FRONT_ATTEMPTS]
     if catchup:
         return catchup[:max_tasks]
 
-    history=[a for a in accounts if not a['blocked'] and a['latest_id'] and not a['backfill_done']]
+    history=[a for a in accounts if not a['blocked'] and a['latest_id'] and not a['backfill_done']
+             and failures.get((a['account_key'],'history'),0)<MAX_FRONT_ATTEMPTS]
     history.sort(key=lambda a:(a['last_history'] or '',a['ordinal']))
     return [('history',a) for a in history[:max_tasks]]
 
