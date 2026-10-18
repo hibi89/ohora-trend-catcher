@@ -1,0 +1,18 @@
+name: OHORA RAW v2 Offline Tests
+on:
+  push:
+    paths:
+      - 'raw_v2/**'
+      - 'tests/test_raw_v2.py'
+      - '.github/workflows/raw-v2-tests.yml'
+  workflow_dispatch:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Isolated no-network RAW v2 tests
+        run: python -m unittest discover -s tests -p 'test_raw_v2.py' -v
