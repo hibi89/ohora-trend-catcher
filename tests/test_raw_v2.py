@@ -270,6 +270,26 @@ class Tests(unittest.TestCase):
         self.assertEqual(a,b)
         self.assertEqual(a.isoformat(),'2025-10-18T14:33:06+00:00')
 
+    def test_full_last_history_page_is_complete_even_if_account_media_count_large(self):
+        a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        m.insert_success(self.db,a,'front',payload(range(1,5),after='C1'),
+                         'r1','req1',m.now(),365,limit=4)
+        a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        # A terminal page may happen to contain exactly four posts even though
+        # overall media_count is much larger. This is not a missing cursor error.
+        m.insert_success(self.db,a,'history',payload(range(5,9),after=None),
+                         'r2','req2',m.now(),365,limit=4)
+        result=self.db.execute("SELECT backfill_done,backfill_cursor FROM accounts WHERE account_key='KR_001'").fetchone()
+        self.assertEqual(tuple(result),(1,None))
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM posts').fetchone()[0],8)
+
+    def test_one_page_account_does_not_repeat_as_history(self):
+        a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        m.insert_success(self.db,a,'front',payload([1,2,3],after=None),
+                         'r1','req1',m.now(),365,limit=4)
+        result=self.db.execute("SELECT backfill_done,backfill_cursor FROM accounts WHERE account_key='KR_001'").fetchone()
+        self.assertEqual(tuple(result),(1,None))
+
     def test_4_post_mock_live_records_correct_requested_limit(self):
         env=self.dir/'local.env'
         env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345',encoding='utf-8')
