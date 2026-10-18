@@ -5,6 +5,7 @@ on:
       - 'raw_v2/**'
       - 'tests/test_raw_v2.py'
       - 'tests/test_daily_scheduler.py'
+      - 'tests/test_raw_integrity.py'
       - '.github/workflows/raw-v2-tests.yml'
   workflow_dispatch:
 jobs:
