@@ -398,6 +398,7 @@ def process_lock(base):
         fp.close()
 
 
+
 def active_slot(db, cooldown_minutes=60):
     """Resume partial 150-account slot; cool down only after slot closes.
 
