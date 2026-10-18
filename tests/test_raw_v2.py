@@ -230,4 +230,63 @@ class Tests(unittest.TestCase):
         self.assertEqual(m.usage({'X-App-Usage':'{"total_time":72}'}),72.0)
         self.assertIsNone(m.usage({}))
 
+    def test_4_post_limit_preserves_prior_five_and_both_cursors(self):
+        a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        m.insert_success(self.db,a,'front',payload(range(1,6),after='LEGACY_AFTER'),
+                         'old_run','old_req',m.now(),365)
+        before=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        self.assertEqual(before['backfill_cursor'],'LEGACY_AFTER')
+        self.assertIn('limit%284%29',m.make_op(before,'123','front',limit=4)['relative_url'])
+        self.assertIn('after%28LEGACY_AFTER%29',m.make_op(before,'123','history',limit=4)['relative_url'])
+        # New FRONT should not overwrite the historical checkpoint, even when the
+        # previous latest ID lies beyond a smaller four-item front page.
+        count=m.insert_success(self.db,before,'front',payload(range(6,10),after='FRONT_AFTER'),
+                               'new_run','new_req',m.now(),365,limit=4)
+        self.assertEqual(count,(4,4,True))
+        middle=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        self.assertEqual(middle['backfill_cursor'],'LEGACY_AFTER')
+        self.assertEqual(middle['catchup_cursor'],'FRONT_AFTER')
+        self.assertEqual(middle['catchup_anchor'],str(10**17+1))
+        # HISTORY 4-page continuation advances history only.
+        m.insert_success(self.db,middle,'history',payload(range(10,14),after='HISTORY_AFTER'),
+                         'hist_run','hist_req',m.now(),365,limit=4)
+        final=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        self.assertEqual(final['backfill_cursor'],'HISTORY_AFTER')
+        self.assertEqual(final['catchup_cursor'],'FRONT_AFTER')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM posts').fetchone()[0],13)
+
+    def test_4_post_page_enforces_actual_return_limit(self):
+        a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
+        with self.assertRaisesRegex(ValueError,'more posts than requested'):
+            m.insert_success(self.db,a,'front',payload(range(1,6)),'R1','r1',m.now(),365,limit=4)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM posts').fetchone()[0],0)
+
+    def test_fixed_history_cutoff_is_not_sliding(self):
+        with self.db:
+            self.db.execute("UPDATE config SET v=? WHERE k='backfill_anchor_utc'",
+                            ('2026-10-18T14:33:06+00:00',))
+        a=m.fixed_history_cutoff(self.db,365,'2030-01-01T00:00:00+00:00')
+        b=m.fixed_history_cutoff(self.db,365,'2040-01-01T00:00:00+00:00')
+        self.assertEqual(a,b)
+        self.assertEqual(a.isoformat(),'2025-10-18T14:33:06+00:00')
+
+    def test_4_post_mock_live_records_correct_requested_limit(self):
+        env=self.dir/'local.env'
+        env.write_text('META_ACCESS_TOKEN=SECRET\\nMETA_IG_USER_ID=12345',encoding='utf-8')
+        args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'limit4',live=True,mode='balanced',
+                       batch_size=5,max_batches=1,limit=4,window_days=7,history_days=365,
+                       cycle_minutes=70,stop_usage=70,extended_fields=False)
+        def fake(v,t,ops):
+            self.assertEqual(len(ops),5)
+            self.assertTrue(all('limit%284%29' in op['relative_url'] for op in ops))
+            return 200,[{'code':200,'body':json.dumps(payload(range(i*4+1,i*4+5)))}
+                        for i in range(5)],{'X-App-Usage':'{"total_time":5}'}
+        self.assertEqual(m.run(args,fake),0)
+        manifest=next((args.output_dir/'runs').iterdir())/'run_manifest.json'
+        data=json.loads(manifest.read_text(encoding='utf-8'))
+        self.assertEqual(data['row_count']['posts.csv'],20)
+        csvpath=manifest.parent/'collection_log.csv'
+        self.assertEqual({r['requested_post_limit'] for r in csv.DictReader(csvpath.open(encoding='utf-8-sig',newline=''))},{'4'})
+        self.assertEqual(v.verify(args.output_dir)['checks'],'PASS')
+
 if __name__=='__main__':unittest.main()
