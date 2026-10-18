@@ -268,7 +268,7 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         raise ValueError('invalid paging cursor')
     before=account['catchup_cursor'] if phase=='catchup' else account['backfill_cursor'] if phase=='history' else None
     if after and before and after==before:raise ValueError('unchanged paging cursor')
-    if len(posts)==limit and not after and discovery.get('media_count',0)>limit:
+    if phase=='front' and not old_latest and len(posts)==limit and not after and discovery.get('media_count',0)>limit:
         raise ValueError('full page but missing cursor: completeness unknown')
     oldest=account['oldest_time'];newest=account['newest_time'];new_post_count=0
     seen_ids=[]
@@ -321,7 +321,8 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
             elif old_latest and old_latest not in seen_ids and not after:
                 raise ValueError('front continuity unknown: previous latest ID missing and no cursor')
             elif not old_latest:
-                back=after  # first page provides historical continuation
+                back=after  # First page provides historical continuation.
+                if not after:done=1  # No older page in initial response.
             else:
                 catch=None;anchor=None
         elif phase=='catchup':
