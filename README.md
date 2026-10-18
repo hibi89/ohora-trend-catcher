@@ -1,5 +1,10 @@
 # OHORA — Trend Catcher / KQ3 (294 Instagram accounts)
 
+> **2026-10-19 최신 로컬 운영 기록:** 사용자가 Windows에서 10계정 History 실수집(10/10 HTTP 200, 신규 40) 및 직후 audit **PASS** 확인. 공식 294계정 중 성공 286·조회 실패 8, 누적 고유 게시물 1,330·관측 1,350, integrity/observation/coverage 0/0/0, 미해결 배치 0. **무인 운영 미승인, 실제 365일 전량 완전성 미검증.** GitHub 문서는 사용자 로컬 DB를 대신하지 않는다.
+>
+> **먼저 읽을 문서:** [전체 장애·해결 기록](docs/RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md) · [오류 분류/발견 시 대응 SOP](docs/RAW_V2_ERROR_HANDLING_RUNBOOK.md) · [향후 작업 및 인수 기준](docs/RAW_V2_NEXT_TASKS_AND_ACCEPTANCE.md) · [실행 가이드](raw_v2/README.md). 기존 날짜별 60/70분 또는 이전 게시물 개수는 당시의 과거 스냅샷이다.
+
+
 > **최신 RAW v2.1 기준(2026-10-19):** [실행 안내](raw_v2/README.md), [검수 보고서](docs/RAW_V2_REVIEW_2026-10-19.md), [현재 상태](STATUS.md)를 따른다. 아래 날짜별 기존 수치/실행 정책은 과거 기록이다. 최신 정책은 4개/계정·배치5·슬롯150·85% 중단, 대기는 max(종료+63분, 시작+65분, 기존 ready_at). Windows 오프라인93/93 PASS. 실제 API 및 운영 DB 복구 미수행, 제한된 시험만 가능.
 
 Private project source mirror, prepared from the original locally collected ZIP on **2026-10-15**. This repository is **source code and requirements only**. Do not commit actual collection CSVs, source account list, access tokens, screenshots, or client media without deliberate review.
