@@ -87,7 +87,29 @@ def select_daily_tasks(db, day, max_tasks=294, policy='daily'):
     return [('history',a) for a in history[:max_tasks]]
 
 
-def inspect_store(base, source, digest, policy='daily'):
+
+TARGETED_HISTORY_TEN = frozenset(['KR_055','KR_078','US_019','US_022','US_023','US_059','US_072','US_075','JP_055','JP_061'])
+
+
+def front_pending_guard(db, day):
+    accounts=[dict(r) for r in db.execute('SELECT * FROM accounts ORDER BY ordinal')]
+    states={r['account_key']:dict(r) for r in db.execute('SELECT * FROM daily_account_state WHERE day_kst=?',(day,))}
+    return len(pending_front_accounts(accounts,states,'history-only'))
+
+
+def targeted_history_tasks(db, day, targets):
+    if front_pending_guard(db,day):
+        return []
+    # Never bypass catchup priority or select a target with unresolved gaps.
+    if db.execute('SELECT COUNT(*) FROM accounts WHERE blocked=0 AND catchup_cursor IS NOT NULL').fetchone()[0]:
+        return []
+    choices=select_daily_tasks(db,day,policy='history-only')
+    eligible={a['account_key']:a for phase,a in choices if phase=='history'}
+    if any(k not in eligible for k in targets):
+        return []
+    return [('history',eligible[k]) for k in targets]
+
+def inspect_store(base, source, digest, policy='daily', targets=None):
     """Read scheduler status while holding the same cross-process lock as collector."""
     with collector.process_lock(base):
         db=collector.connect(Path(base)/'collection.sqlite',source,digest)
@@ -104,6 +126,10 @@ def inspect_store(base, source, digest, policy='daily'):
                       AND date(finished_at,'+9 hours')=?
                     GROUP BY account_key""",(day,day))
             choices=select_daily_tasks(db,day,policy=policy)
+            if targets is not None and not (policy=='history-only' and front_pending_guard(db,day)==0):
+                choices=[]
+            elif targets is not None:
+                choices=targeted_history_tasks(db,day,targets)
             accounts=[dict(row) for row in db.execute('SELECT * FROM accounts ORDER BY ordinal')]
             states={row['account_key']:dict(row) for row in db.execute(
                 'SELECT * FROM daily_account_state WHERE day_kst=?',(day,))}
@@ -139,6 +165,7 @@ def parse_args(argv=None):
     parser.add_argument('--acknowledge-warnings',action='store_true',
                         help='Proceed after inspecting a WARN-only read-only audit; FAIL is always blocked')
     parser.add_argument('--pilot-bypass-cooldown',action='store_true',help='One-time 5-account pilot only; preserve existing slot and cooldown records')
+    parser.add_argument('--target-legacy-ten',action='store_true',help='Only the ten fixed unverified legacy history accounts; exactly two batches')
     return parser.parse_args(argv)
 
 
@@ -147,8 +174,13 @@ def main(argv=None):
     if not 1<=options.max_batches<=30:raise ValueError('--max-batches must be 1..30')
     if options.pilot_bypass_cooldown and not (options.live and options.once and options.max_batches==1 and options.policy=='history-only'):
         raise ValueError('pilot bypass requires --live --once --max-batches 1 --policy history-only')
+    if options.target_legacy_ten and (options.policy!='history-only' or not options.once or options.max_batches!=2 or options.pilot_bypass_cooldown):
+        raise ValueError('targeted mode requires --policy history-only --once --max-batches 2 and no cooldown bypass')
     rows,digest=collector.load_accounts(options.source)
     if not options.live:
+        if options.target_legacy_ten:
+            print('TARGETED TEN DRY RUN: fixed account list',sorted(TARGETED_HISTORY_TEN))
+            print('Selection requires live DB inspection; dry run does not prove eligibility.')
         print('DRY RUN: policy='+options.policy+'; 294 accounts, 4 posts, batch 5,',
               '150 unique accounts/slot, stop 85%, cooldown=max(finish+63min, start+65min).')
         print('NO database writes, credentials read, or Meta API calls.')
@@ -189,7 +221,7 @@ def main(argv=None):
             if options.policy=='bootstrap-history' and today_kst()!=initial_day:
                 print('Bootstrap day ended; exit before the next KST daily-front cycle.')
                 return 0
-            snap=inspect_store(base,rows,digest,options.policy)
+            snap=inspect_store(base,rows,digest,options.policy,TARGETED_HISTORY_TEN if options.target_legacy_ten else None)
             print(f"[{snap['day']}] daily front success={snap['success']}/294, "
                   f"blocked={snap['blocked']}, other exceptions={snap['exceptions']}; stage={snap['stage']}")
             if snap['stage']=='front_pending':
@@ -209,6 +241,9 @@ def main(argv=None):
                     'front_exceptions':snap['exceptions'],
                     'next_stage':'done','next_ready_at_utc':snap['ready'].isoformat() if snap['ready'] else None}))
                 return 0
+            if options.target_legacy_ten and (len(snap['tasks'])!=10 or {a['account_key'] for phase,a in snap['tasks']}!=TARGETED_HISTORY_TEN or any(phase!='history' for phase,a in snap['tasks'])):
+                print('TARGETED HISTORY REFUSED: all ten targets must be eligible, with no pending front/catchup.')
+                return 4
             ready=snap['ready']
             if ready is not None:
                 remaining=(ready-datetime.now(ready.tzinfo)).total_seconds()
@@ -229,9 +264,9 @@ def main(argv=None):
                     continue
             selected_day=snap['day']
             result=collector.run(
-                args,task_selector=lambda db,n:select_daily_tasks(db,selected_day,n,options.policy),
+                args,task_selector=(lambda db,n:targeted_history_tasks(db,selected_day,TARGETED_HISTORY_TEN)[:n]) if options.target_legacy_ten else (lambda db,n:select_daily_tasks(db,selected_day,n,options.policy)),
                 daily_day=selected_day,cooldown_minutes=63)
-            after=inspect_store(base,rows,digest,options.policy)
+            after=inspect_store(base,rows,digest,options.policy,TARGETED_HISTORY_TEN if options.target_legacy_ten else None)
             print(f"Run finished: status={result}; today's front={after['success']}/294; "
                   f"next stage={after['stage']}")
             print('SCHEDULER_RESULT_JSON '+json.dumps({
