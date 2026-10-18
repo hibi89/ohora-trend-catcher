@@ -7,6 +7,7 @@ Use --live explicitly; CTRL+C stops the foreground loop.
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime
 from pathlib import Path
 import sqlite3
@@ -14,6 +15,7 @@ import time
 from zoneinfo import ZoneInfo
 
 import collector
+import audit as integrity_audit
 
 KST = ZoneInfo('Asia/Seoul')
 DAILY_LIMIT = 4
@@ -27,7 +29,7 @@ def today_kst():
     return datetime.now(KST).date().isoformat()
 
 
-def select_daily_tasks(db, day, max_tasks=294):
+def select_daily_tasks(db, day, max_tasks=294, policy='daily'):
     """Select exactly one stage at a time; do not backfill while front is pending.
 
     A failed account is retried after yet-unattempted accounts, max twice a day.
@@ -37,21 +39,27 @@ def select_daily_tasks(db, day, max_tasks=294):
     states={row['account_key']:dict(row) for row in db.execute(
         'SELECT * FROM daily_account_state WHERE day_kst=?',(day,))}
     front=[]
-    for account in accounts:
-        if account['blocked']:
-            continue
-        state=states.get(account['account_key'])
-        if state and (state['status'] in ('success','needs_review','excluded') or
-                      state['attempts'] >= MAX_FRONT_ATTEMPTS):
-            continue
-        attempts=state['attempts'] if state else 0
-        front.append((attempts,account['ordinal'],'front',account))
+    if policy in ('daily','daily-front','bootstrap-history'):
+        for account in accounts:
+            if account['blocked']:
+                continue
+            state=states.get(account['account_key'])
+            if policy=='bootstrap-history' and account['latest_id']:
+                continue  # No repeat latest snapshot on bootstrap day.
+            if state and (state['status'] in ('success','needs_review','excluded') or
+                          state['attempts'] >= MAX_FRONT_ATTEMPTS):
+                continue
+            attempts=state['attempts'] if state else 0
+            front.append((attempts,account['ordinal'],'front',account))
     if front:
-        # Explicit roster partition: complete 1..150 before selecting 151..294.
-        first=[item for item in front if item[1]<=150]
-        front=first if first else [item for item in front if item[1]>150]
+        # Strict roster halves for daily; bootstrap prioritizes all never-seen accounts.
+        if policy!='bootstrap-history':
+            first=[item for item in front if item[1]<=150]
+            front=first if first else [item for item in front if item[1]>150]
         front.sort(key=lambda item:(item[0],item[1]))
         return [(phase,account) for _,__,phase,account in front[:max_tasks]]
+    if policy=='daily-front':
+        return []
 
     # Avoid an endlessly failing catchup/history account starving all other
     # work. Retry it on the next KST day and keep its cursor unchanged.
@@ -71,7 +79,7 @@ def select_daily_tasks(db, day, max_tasks=294):
     return [('history',a) for a in history[:max_tasks]]
 
 
-def inspect_store(base, source, digest):
+def inspect_store(base, source, digest, policy='daily'):
     """Read scheduler status while holding the same cross-process lock as collector."""
     with collector.process_lock(base):
         db=collector.connect(Path(base)/'collection.sqlite',source,digest)
@@ -87,7 +95,7 @@ def inspect_store(base, source, digest):
                     WHERE phase='front' AND status='success'
                       AND date(finished_at,'+9 hours')=?
                     GROUP BY account_key""",(day,day))
-            choices=select_daily_tasks(db,day)
+            choices=select_daily_tasks(db,day,policy=policy)
             success=db.execute(
                 "SELECT COUNT(*) FROM daily_account_state WHERE day_kst=? AND status='success'",(day,)).fetchone()[0]
             failures=db.execute(
@@ -110,6 +118,10 @@ def parse_args(argv=None):
     parser.add_argument('--output-dir',type=Path,required=True)
     parser.add_argument('--live',action='store_true',help='Opt in to real Meta API calls')
     parser.add_argument('--once',action='store_true',help='Execute at most one collection run, never sleep')
+    parser.add_argument('--policy',choices=('daily','bootstrap-history','daily-front','history-only'),
+                        default='daily')
+    parser.add_argument('--acknowledge-warnings',action='store_true',
+                        help='Proceed after inspecting a WARN-only read-only audit; FAIL is always blocked')
     return parser.parse_args(argv)
 
 
@@ -117,8 +129,8 @@ def main(argv=None):
     options=parse_args(argv)
     rows,digest=collector.load_accounts(options.source)
     if not options.live:
-        print('DRY RUN: daily-front -> catchup -> history; 294 accounts, 4 posts, batch 5,',
-              '150 unique accounts/slot, stop 85%, 63-minute cooldown.')
+        print('DRY RUN: policy='+options.policy+'; 294 accounts, 4 posts, batch 5,',
+              '150 unique accounts/slot, stop 85%, 65-minute post-finish cooldown.')
         print('NO database writes, credentials read, or Meta API calls.')
         return 0
 
@@ -130,17 +142,30 @@ def main(argv=None):
     if base==collector.ROOT or base.is_relative_to(collector.ROOT/'kq3_294_collection') or base.is_relative_to(collector.ROOT/'experiments'):
         raise ValueError('Output must not overwrite legacy stores')
     base.mkdir(parents=True,exist_ok=True)
+    if (base/'collection.sqlite').is_file():
+        report=integrity_audit.audit(base)
+        print('Read-only preflight audit:',report['status'],report['findings'])
+        if report['status']=='FAIL':
+            print('COLLECTION REFUSED: integrity FAIL; run raw_v2/audit.py and investigate.')
+            return 4
+        if report['status']=='WARN' and not options.acknowledge_warnings:
+            print('COLLECTION REFUSED: review audit WARN first, then pass --acknowledge-warnings.')
+            return 4
     args=argparse.Namespace(
         source=options.source,env_file=options.env_file,output_dir=base,
         live=True,mode='daily',batch_size=BATCH_SIZE,max_batches=MAX_BATCHES,
         limit=DAILY_LIMIT,window_days=7,history_days=365,stop_usage=STOP_USAGE,
-        extended_fields=False,cycle_minutes=63)
-    print('OHORA daily-first collection: KST daily front -> catchup -> history')
-    print('Profile: 294 accounts, 4 posts, batch 5, up to 150 per slot, 85% usage, 63min after finish')
+        extended_fields=False,cycle_minutes=65)
+    print('OHORA RAW policy:',options.policy)
+    print('Profile: 294 accounts, 4 posts, batch 5, up to 150 per slot, 85% usage, 65min after finish')
     print('No Windows scheduled task installed. Stop anytime with CTRL+C.')
     try:
+        initial_day=today_kst()
         while True:
-            snap=inspect_store(base,rows,digest)
+            if options.policy=='bootstrap-history' and today_kst()!=initial_day:
+                print('Bootstrap day ended; exit before the next KST daily-front cycle.')
+                return 0
+            snap=inspect_store(base,rows,digest,options.policy)
             print(f"[{snap['day']}] daily front success={snap['success']}/294, "
                   f"blocked={snap['blocked']}, other exceptions={snap['exceptions']}; stage={snap['stage']}")
             if snap['stage']=='done':
@@ -159,11 +184,20 @@ def main(argv=None):
                     continue
             selected_day=snap['day']
             result=collector.run(
-                args,task_selector=lambda db,n:select_daily_tasks(db,selected_day,n),
-                daily_day=selected_day)
-            after=inspect_store(base,rows,digest)
+                args,task_selector=lambda db,n:select_daily_tasks(db,selected_day,n,options.policy),
+                daily_day=selected_day if options.policy in ('daily','daily-front') else None,
+                cooldown_minutes=65)
+            after=inspect_store(base,rows,digest,options.policy)
             print(f"Run finished: status={result}; today's front={after['success']}/294; "
                   f"next stage={after['stage']}")
+            print('SCHEDULER_RESULT_JSON '+json.dumps({
+                'policy':options.policy,'run_status':result,'day_kst':after['day'],
+                'front_success':after['success'],'blocked':after['blocked'],
+                'next_stage':after['stage'],
+                'next_ready_at_utc':after['ready'].isoformat() if after['ready'] else None}))
+            if result==3:
+                print('PERMANENT HALT: authentication, identity or usage evidence requires review.')
+                return 3
             if options.once:return result
             # A paused slot may be immediately continued. A closed slot is
             # handled by persisted ready_at on the next loop iteration.
