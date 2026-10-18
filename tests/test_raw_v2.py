@@ -1,5 +1,7 @@
 import csv
 import json
+from urllib.parse import unquote
+import re
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -32,6 +34,15 @@ def post(n,likes_marker='value'):
 def payload(ids,after='NEXT',followers=200):
     return {'business_discovery':{'id':'987654321','username':'kr_nail_1','followers_count':followers,'media_count':100,
         'media':{'data':[post(n) for n in ids],'paging':{'cursors':{'after':after}} if after else {}}}}
+
+
+def owner_payload(p, op):
+    """Synthetic Business Discovery must match the requested account."""
+    text=unquote(op['relative_url'])
+    match=re.search(r'business_discovery.username\\(([^)]+)\\)',text)
+    if not match:raise AssertionError('Missing Business Discovery username')
+    p['business_discovery']['username']=match.group(1)
+    return p
 
 
 class Tests(unittest.TestCase):
@@ -107,7 +118,7 @@ class Tests(unittest.TestCase):
             self.assertEqual(token,'SECRET');self.assertEqual(len(ops),5)
             offset=calls[0]*25
             calls[0]+=1
-            return 200,[{'code':200,'body':json.dumps(payload(range(offset+i*5+1,offset+i*5+6))),'headers':[]} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":3}'}
+            return 200,[{'code':200,'body':json.dumps(owner_payload(payload(range(offset+i*5+1,offset+i*5+6)),ops[i])),'headers':[]} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":3}'}
         args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'out',live=True,mode='balanced',batch_size=5,
                        max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
         self.assertEqual(m.run(args,fake),0)
@@ -132,8 +143,10 @@ class Tests(unittest.TestCase):
         a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
         b=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_002'").fetchone())
         m.insert_success(self.db,a,'front',payload([1],after=None),'R1','a',m.now(),365)
+        other=payload([1],after=None)
+        other['business_discovery']['username']=b['username']
         with self.assertRaisesRegex(ValueError,'another account'):
-            m.insert_success(self.db,b,'front',payload([1],after=None),'R1','b',m.now(),365)
+            m.insert_success(self.db,b,'front',other,'R1','b',m.now(),365)
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM post_observations').fetchone()[0],1)
     def test_carousel_more_children_is_partial(self):
         a=dict(self.db.execute("SELECT * FROM accounts WHERE account_key='KR_001'").fetchone())
@@ -206,7 +219,7 @@ class Tests(unittest.TestCase):
         def fake(v,t,ops):
             offset=calls[0]*25
             calls[0]+=1
-            return 200,[{'code':200,'body':json.dumps(payload(range(offset+i*5+1,offset+i*5+6)))} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":5}'}
+            return 200,[{'code':200,'body':json.dumps(owner_payload(payload(range(offset+i*5+1,offset+i*5+6)),ops[i]))} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":5}'}
         self.assertEqual(m.run(args,fake),0)
         args.max_batches=29
         self.assertEqual(m.run(args,fake),0)
@@ -299,7 +312,7 @@ class Tests(unittest.TestCase):
         def fake(v,t,ops):
             self.assertEqual(len(ops),5)
             self.assertTrue(all('limit%284%29' in op['relative_url'] for op in ops))
-            return 200,[{'code':200,'body':json.dumps(payload(range(i*4+1,i*4+5)))}
+            return 200,[{'code':200,'body':json.dumps(owner_payload(payload(range(i*4+1,i*4+5)),ops[i]))}
                         for i in range(5)],{'X-App-Usage':'{"total_time":5}'}
         self.assertEqual(m.run(args,fake),0)
         manifest=next((args.output_dir/'runs').iterdir())/'run_manifest.json'
