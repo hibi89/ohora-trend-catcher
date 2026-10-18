@@ -1,3 +1,7 @@
+> **2026-10-19 최신 로컬 운영 기록:** 사용자가 Windows에서 10계정 History 실수집(10/10 HTTP 200, 신규 40) 및 직후 audit **PASS** 확인. 공식 294계정 중 성공 286·조회 실패 8, 누적 고유 게시물 1,330·관측 1,350, integrity/observation/coverage 0/0/0, 미해결 배치 0. **무인 운영 미승인, 실제 365일 전량 완전성 미검증.** GitHub 문서는 사용자 로컬 DB를 대신하지 않는다.
+>
+> **먼저 읽을 문서:** [전체 장애·해결 기록](docs/RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md) · [오류 분류/발견 시 대응 SOP](docs/RAW_V2_ERROR_HANDLING_RUNBOOK.md) · [향후 작업 및 인수 기준](docs/RAW_V2_NEXT_TASKS_AND_ACCEPTANCE.md) · [실행 가이드](raw_v2/README.md). 기존 날짜별 60/70분 또는 이전 게시물 개수는 당시의 과거 스냅샷이다.
+
 ## 2026-10-19 RAW v2.1 검수 완료 — 아래 과거 기록보다 우선
 
 - 기준 HEAD `500523b1c18e11863c025c0418f84d6be00e80b4`, 시작 브랜치 main, 미커밋 변경 없음. 검수 브랜치 `codex/raw-v2-safety-review`에서 확인된 잔여 결함만 수정.
