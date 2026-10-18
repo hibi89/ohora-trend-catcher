@@ -76,3 +76,11 @@ python .\raw_v2\verify.py --output-dir '.\raw_v2_results'
 ```
 
 파일별 SHA와 CSV 행 수, SQLite 참조 무결성/중복/PRAGMA integrity_check를 실제로 재열어 확인한다. 스냅샷을 손상시키거나 API 요청을 하지 않는다. 검증에 성공해도 Meta API 필드 완전성까지 보장하는 것은 아니다.
+
+### 실험용 70분 전면 실행(로컬 명시 실행, 최대 10회)
+
+```powershell
+.\raw_v2\run_70m_loop.ps1 -Source $src -EnvFile $envFile -Cycles 10 -BatchSize 5 -MaxBatches 1
+```
+
+PowerShell 창이 열린 동안에만 실행된다. **Windows 예약 작업을 설치하거나 운영을 자동 개시하지 않는다.** `-MaxBatches 1`은 전체 294계정이 아니라 기본적으로 **한 회차 최대 5계정**만 처리하므로, 294계정을 빠르게 훑으려면 앱 사용률 실측 후에만 상향한다. 각 회차의 시작에서 70분이 지날 때까지 대기한다. 사용자는 PowerShell에서 Ctrl+C로 중단할 수 있다.
