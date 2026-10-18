@@ -14,7 +14,7 @@ $py = Join-Path $PSScriptRoot 'collector.py'
 for ($i = 1; $i -le $Cycles; $i++) {
   Write-Host "OHORA RAW v2 slot $i of $Cycles start $((Get-Date).ToString('s'))"
   & python $py --source $Source --env-file $EnvFile --output-dir $OutputDir `
-    --mode balanced --limit 5 --window-days 7 --history-days 365 `
+    --mode balanced --limit 4 --window-days 7 --history-days 365 `
     --batch-size $BatchSize --max-batches $MaxBatches --stop-usage 70 --live
   $code = $LASTEXITCODE
   if ($code -notin @(0,2)) { throw "Collector failed with exit code $code. Loop stopped." }
