@@ -4,6 +4,7 @@ on:
     paths:
       - 'raw_v2/**'
       - 'tests/test_raw_v2.py'
+      - 'tests/test_daily_scheduler.py'
       - '.github/workflows/raw-v2-tests.yml'
   workflow_dispatch:
 jobs:
@@ -15,4 +16,4 @@ jobs:
         with:
           python-version: '3.11'
       - name: Isolated no-network RAW v2 tests
-        run: python -m unittest discover -s tests -p 'test_raw_v2.py' -v
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
