@@ -1,5 +1,16 @@
 # OHORA Trend Catcher — current implementation status
 
+## 2026-10-18 — RAW v2 implementation, offline verified; Meta live not yet tested
+
+- **Current approved direction:** 294 official accounts, account/page resume, 7-day client-side logical periods, maximum 5 media per account API page, 70-minute minimum start interval, 365 days (option 730) historical coverage, repeated likes/comments/followers observations.
+- **Implemented**: raw_v2/collector.py, raw_v2/verify.py, raw_v2/run_70m_loop.ps1, raw_v2/README.md, docs/RAW_V2_SCHEMA.md, docs/OHORA_RAW_COLLECTION_EXECUTION.md (uploaded source retained), tests/test_raw_v2.py, .github/workflows/raw-v2-tests.yml. Added new-data ignore rule and README links; legacy collectors and databases untouched.
+- **API cost design**: requesting both current and historical pages every cycle may double subrequests; chosen default uses at most one page per account per pass, first/newly due latest approximately every 24 hours, otherwise historical cursor. This trades per-cycle new post count for API budget. It is not guaranteed to deliver 5 unique posts every 70 minutes.
+- **Data and diagnosis**: separate SQLite, run-scoped sanitized JSON/CSV/hash manifest, id-based post dedupe, immutable first-seen content, historical observations of counts, original source copy, status of incomplete carousels, field returned/null/absent/not_tested, like_missing_audit. Missing likes from a successful response remain an unresolved provider cause until controlled live test.
+- **Locally verified:** Linux Python (3.11+ stdlib) 19/19 synthetic unit tests PASS, py_compile collector/verify/tests PASS. Tested mocked batches/errors, missing/zero values, long IDs, Korean/unicode, repeat measurements, pagination catchup, safe quota stop, DB checksum/foreign keys, per-process lock.
+- **Not verified:** real Meta token/permission/API field support, nested cursor across two real pages, independent quota, Windows PowerShell loop, GitHub Actions run status, actual missing-like root cause. No real API requests, image file downloads, Windows schedule activation or Vercel deploy.
+- **Known limitations:** children extra pagination is logged partial, but not fully fetched. The 7-day range is a client-side grouping, not an assumed Meta since/until server filter. Real 1-year completeness cannot be asserted from the current data.
+- **Next**: on user's Windows, pull main, offline tests, no-network dry run, check source and secure token paths, perform one approved max-batches=1 / batch-size=5 live pilot with quota headroom. Inspect field_support.csv, like_missing_audit.csv, raw JSON, manifest and verifier before increasing budget or starting user-opted 70-minute loop.
+
 ## 2026-10-18 — Planning-only long-term RAW/data asset vision (NO EXECUTION)
 
 - User's current direction: official 294 accounts (KR100/US101/JP93), each **latest 50 posts as the initial target** (up to 14,700 if accessible), then maintain new posts while independently extending historical coverage to 1 year and ideally 2 years. This is an **aspirational target, not a collected result**.
