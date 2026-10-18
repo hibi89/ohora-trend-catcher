@@ -190,7 +190,7 @@ def main(argv=None):
             selected_day=snap['day']
             result=collector.run(
                 args,task_selector=lambda db,n:select_daily_tasks(db,selected_day,n,options.policy),
-                daily_day=selected_day if options.policy in ('daily','daily-front') else None,
+                daily_day=selected_day if options.policy in ('daily','daily-front','bootstrap-history') else None,
                 cooldown_minutes=65)
             after=inspect_store(base,rows,digest,options.policy)
             print(f"Run finished: status={result}; today's front={after['success']}/294; "
