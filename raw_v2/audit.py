@@ -61,6 +61,9 @@ def audit(folder, report_dir=None):
             ('UNLINKED_POST','SELECT COUNT(*) FROM posts p LEFT JOIN accounts a ON a.account_key=p.account_key WHERE a.account_key IS NULL'),
             ('UNLINKED_MEDIA','SELECT COUNT(*) FROM post_media m LEFT JOIN posts p ON m.post_id=p.post_id WHERE p.post_id IS NULL'),
             ('UNLINKED_POST_OBS','SELECT COUNT(*) FROM post_observations o LEFT JOIN posts p ON o.post_id=p.post_id WHERE p.post_id IS NULL'),
+            ('POST_OBS_WITHOUT_REQUEST','SELECT COUNT(*) FROM post_observations o LEFT JOIN request_log l ON o.request_id=l.request_id WHERE l.request_id IS NULL'),
+            ('ACCOUNT_OBS_WITHOUT_REQUEST','SELECT COUNT(*) FROM account_observations o LEFT JOIN request_log l ON o.request_id=l.request_id WHERE l.request_id IS NULL'),
+            ('FIELD_OBS_WITHOUT_REQUEST','SELECT COUNT(*) FROM field_observations o LEFT JOIN request_log l ON o.request_id=l.request_id WHERE l.request_id IS NULL'),
             ('POST_OBS_WRONG_RUN','SELECT COUNT(*) FROM post_observations o JOIN request_log l ON o.request_id=l.request_id WHERE o.run_id!=l.run_id'),
             ('POST_OBS_WRONG_ACCOUNT','SELECT COUNT(*) FROM post_observations o JOIN request_log l ON o.request_id=l.request_id JOIN posts p ON o.post_id=p.post_id WHERE l.account_key!=p.account_key'),
             ('ACCOUNT_OBS_WRONG_RUN','SELECT COUNT(*) FROM account_observations o JOIN request_log l ON o.request_id=l.request_id WHERE o.run_id!=l.run_id'),
@@ -152,9 +155,10 @@ def audit(folder, report_dir=None):
                         "SELECT completion_basis FROM history_page_evidence WHERE account_key=? AND completion_basis!='continuing'",(key,))]
                 complete=bool(a['backfill_done'])
                 unresolved=bool(a['catchup_cursor']) or bool(gaps)
-                if complete and not basis and a['backfill_cursor']:
+                if complete and not basis:
                     add(coverage,'WARN','UNVERIFIED_LEGACY_COMPLETION',
-                        'backfill_done=1 with cursor still present; prior completion may be premature',key)
+                        'backfill_done=1 without verified history-page evidence; cursor_present='
+                        +str(bool(a['backfill_cursor'])),key)
                 if complete and unresolved:
                     add(coverage,'WARN','COMPLETION_WITH_GAPS',
                         'history flag set but catchup remains; full coverage not verified',key)
