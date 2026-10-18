@@ -14,7 +14,7 @@ def backup_store(output_dir,backup_dir):
     if destination==source.parent or destination.is_relative_to(source.parent):
         raise ValueError('Save backups OUTSIDE the live output directory')
     destination.mkdir(parents=True,exist_ok=True)
-    timestamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    timestamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     target=destination/('collection_'+timestamp+'.sqlite')
     if target.exists():raise ValueError('Backup already exists; no overwrite')
     src=sqlite3.connect(source.as_uri()+'?mode=ro',uri=True)
