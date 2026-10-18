@@ -12,7 +12,7 @@
 - raw_v2/verify.py offline read-only SHA/row-count/SQLite-integrity checker; run_70m_loop.ps1 bounded foreground opt-in Windows runner. Add tests/test_raw_v2.py and CI workflow. Original user instructions preserved at docs/OHORA_RAW_COLLECTION_EXECUTION.md.
 
 ## ③ 테스트 명령·결과/미검증
-- PASS: Linux Python 3.11+ local python -m unittest discover -s tests -p test_raw_v2.py -v => 19/19 OK; py_compile all three Python files OK; no real Meta HTTP.
+- PASS: Linux Python 3.11+ local python -m unittest discover -s tests -p test_raw_v2.py -v => 20/20 OK; py_compile all three Python files OK; no real Meta HTTP.
 - Fake client proves 5 subrequests mocked success, repeat likes changes, missing/null/0/not_tested, 7-day bucket metadata, carousel partial, checksum tamper failure, account blocked/tested errors, safe post-request 70% stop, 70-minute cooldown and lock.
 - NOT VERIFIED: Windows PowerShell runner/test, Meta live field support/rate/cursor/like root cause, 1/2 year completeness, CI workflow actual run status. None of this should be called production-successful.
 
@@ -41,7 +41,7 @@
 - This implementation uses network solely in opt-in --live runs; no media image binary downloads or external AI requests.
 
 ## ⑨ 우선순위·절차·완료 기준·승인 사항
-1. GitHub pull main, test 19/19 on Windows (API free) and dry run source roster. Inspect that the source path and token file exist, without printing secrets.
+1. GitHub pull main, test 20/20 on Windows (API free) and dry run source roster. Inspect that the source path and token file exist, without printing secrets.
 2. Check Meta dashboard quota and caller professional account permissions. Pilot --live with batch size5/max-batches1 only. Inspect raw payload, field_support, like_missing audit, usage header, exact missing-field cases and verify.py.
 3. Test two different cycles / nesting after cursor without skipping or refreshing old data incorrectly; scrutinize Reel/carousel like_count absence and field-specific controlled probes; do not assert causal diagnosis before controlled evidence.
 4. Only after pilot success set a bounded 70m loop on user's PC and adjust MaxBatches by observed total_time; hourly recovery is not guaranteed. Track date coverage, per-account count, blocked states and archive results locally.
