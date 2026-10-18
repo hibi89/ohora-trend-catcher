@@ -461,7 +461,7 @@ def run(args,client=request_batch):
                                        (ts,error_code,error_code,a['account_key']))
                         db.execute('INSERT INTO request_log(run_id,request_id,account_key,phase,started_at,finished_at,http_status,status,records_received,has_next_page,stop_reason,error_code,error_subcode,error_message,raw_response_path,requested_fields,usage_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                                    (run_id,req,a['account_key'],phase,t0,ts,code,status,count,has_next,reason,error_code,error_sub,error_message,
-                                    str(raw.relative_to(base)),BASE_PROFILE+','+MEDIA_FIELDS,json.dumps({'outer_total_time':outer_usage})))
+                                    str(raw.relative_to(base)),BASE_PROFILE+(','+EXTRA_PROFILE if args.extended_fields else '')+','+MEDIA_FIELDS,json.dumps({'outer_total_time':outer_usage})))
                         db.execute('UPDATE runs SET requests=requests+1,successes=successes+?,failures=failures+? WHERE run_id=?',
                                    (int(status=='success'),int(status!='success'),run_id))
                     print(f'{a["account_key"]} {phase}: {status} HTTP={code} received={count} new={new} like-field diagnostics saved')
