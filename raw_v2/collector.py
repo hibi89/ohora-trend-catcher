@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Opt-in OHORA RAW v2; independent of all legacy stores. Python 3.11+.
 
-A cycle is ONE manual invocation. No scheduler is installed. No requests without --live.
+A slot may span manual invocations: up to 150 distinct accounts then 60-minute cooldown.
+No scheduler is installed. No requests without --live.
 The collector prioritizes unscanned accounts, writes an immutable sanitized API
 response per subrequest, and uses separate latest/catchup/history checkpoints.
 """
@@ -19,6 +20,7 @@ import sys
 import subprocess
 import tempfile
 import time
+import uuid
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -127,6 +129,11 @@ def connect(path, accounts, source_sha):
     CREATE TABLE IF NOT EXISTS account_observations(id INTEGER PRIMARY KEY,account_key TEXT NOT NULL,
        observed_at TEXT NOT NULL,run_id TEXT NOT NULL,followers_count INTEGER,follows_count INTEGER,
        media_count INTEGER,request_id TEXT NOT NULL,UNIQUE(account_key,request_id));
+    CREATE TABLE IF NOT EXISTS slots(slot_id INTEGER PRIMARY KEY AUTOINCREMENT,started_at TEXT NOT NULL,
+       finished_at TEXT,ready_at TEXT,status TEXT NOT NULL,reason TEXT);
+    CREATE TABLE IF NOT EXISTS slot_accounts(slot_id INTEGER NOT NULL REFERENCES slots(slot_id),
+       account_key TEXT NOT NULL REFERENCES accounts(account_key),request_id TEXT NOT NULL,
+       PRIMARY KEY(slot_id,account_key));
     CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY,started_at TEXT,finished_at TEXT,api_version TEXT,mode TEXT,
        status TEXT,requests INTEGER DEFAULT 0,successes INTEGER DEFAULT 0,failures INTEGER DEFAULT 0,
        usage_max REAL);
@@ -391,11 +398,49 @@ def process_lock(base):
         fp.close()
 
 
+def active_slot(db, cooldown_minutes=60):
+    """Resume partial 150-account slot; cool down only after slot closes.
+
+    Adopt a prior pilot made by RAW v2.1 (before slots existed) if it is recent,
+    preventing the first five real requests from being counted twice.
+    """
+    prior=db.execute('SELECT * FROM slots ORDER BY slot_id DESC LIMIT 1').fetchone()
+    if not prior:
+        old=db.execute('SELECT * FROM runs WHERE finished_at IS NOT NULL ORDER BY started_at DESC LIMIT 1').fetchone()
+        recent=(old and old['finished_at'] and
+                (datetime.now(timezone.utc)-parse_date(old['finished_at'])).total_seconds()<70*60)
+        if recent and 0 < old['requests'] < 150:
+            with db:
+                cur=db.execute('INSERT INTO slots(started_at,status) VALUES (?,?)',(old['started_at'],'active'))
+                sid=cur.lastrowid
+                db.execute('INSERT OR IGNORE INTO slot_accounts(slot_id,account_key,request_id) '
+                           'SELECT ?,account_key,request_id FROM request_log WHERE run_id=?',(sid,old['run_id']))
+            return sid
+    else:
+        if prior['status']=='active':return prior['slot_id']
+        next_time=parse_date(prior['ready_at'])
+        if next_time and datetime.now(timezone.utc)<next_time:
+            print('SKIPPED: 60-minute post-completion cooldown; next start after '+prior['ready_at'])
+            return None
+    with db:
+        row=db.execute('INSERT INTO slots(started_at,status) VALUES (?,?)',(now(),'active'))
+    return row.lastrowid
+
+
+def close_slot(db,sid,reason,cooldown_minutes=60):
+    finished=now()
+    ready=(parse_date(finished)+timedelta(minutes=cooldown_minutes)).isoformat()
+    with db:
+        db.execute('UPDATE slots SET finished_at=?,ready_at=?,status=?,reason=? WHERE slot_id=? AND status=?',
+                   (finished,ready,'cooldown',reason,sid,'active'))
+    print(f'SLOT CLOSED: {reason}; next slot after {ready} (60min after finish)')
+
+
 def run(args,client=request_batch):
     accounts,digest=load_accounts(args.source)
     if args.batch_size<1 or args.batch_size>10 or args.limit!=5 or args.max_batches<1 or not 0<args.stop_usage<100:
         raise ValueError('batch-size 1..10, limit 5, max-batches>=1, 0<stop-usage<100 required')
-    if not 1 <= args.window_days <= 31 or args.cycle_minutes < 60:raise ValueError('window-days 1..31 and cooldown >=60 minutes')
+    if not 1 <= args.window_days <= 31:raise ValueError('window-days 1..31 required')
     if args.history_days not in (365,730):raise ValueError('history-days must be 365 or 730')
     if not args.live:
         print(f'DRY RUN: official {len(accounts)} accounts; {args.mode}, limit=5, {args.window_days}d logical windows, 70min suggested cadence; NO writes/API')
@@ -407,17 +452,20 @@ def run(args,client=request_batch):
     base.mkdir(parents=True,exist_ok=True)
     with process_lock(base):
         db=connect(base/'collection.sqlite',accounts,digest)
-        start=now();run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+str(os.getpid())
+        start=now();run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+str(os.getpid())+'_'+uuid.uuid4().hex[:8]
         halted=False;max_seen=None
         try:
-            prior=db.execute('SELECT started_at FROM runs ORDER BY started_at DESC LIMIT 1').fetchone()
-            if prior and (datetime.now(timezone.utc)-parse_date(prior[0])).total_seconds()<args.cycle_minutes*60:
-                print('SKIPPED: minimum cycle cooldown not elapsed; original data unchanged')
+            slot=active_slot(db,60)
+            if slot is None:return 0
+            already={r[0] for r in db.execute('SELECT account_key FROM slot_accounts WHERE slot_id=?',(slot,))}
+            remaining=150-len(already)
+            if remaining<=0:
+                close_slot(db,slot,'150_accounts_completed')
                 return 0
             with db:db.execute('INSERT INTO runs(run_id,started_at,api_version,mode,status) VALUES (?,?,?,?,?)',
                                (run_id,start,version,args.mode,'started'))
-            # Two-stage queue: per-account phase priority, capped in batches; unvisited account work persists.
-            tasks=select_tasks(db,args.mode,294)
+            # Resume unfinished slot. Each account is queried at most once per slot.
+            tasks=[(phase,a) for phase,a in select_tasks(db,args.mode,294) if a['account_key'] not in already][:remaining]
             for b in range(args.max_batches):
                 if not tasks:break
                 batch,tasks=tasks[:args.batch_size],tasks[args.batch_size:]
@@ -464,12 +512,19 @@ def run(args,client=request_batch):
                                     str(raw.relative_to(base)),BASE_PROFILE+(','+EXTRA_PROFILE if args.extended_fields else '')+','+MEDIA_FIELDS,json.dumps({'outer_total_time':outer_usage})))
                         db.execute('UPDATE runs SET requests=requests+1,successes=successes+?,failures=failures+? WHERE run_id=?',
                                    (int(status=='success'),int(status!='success'),run_id))
+                        db.execute('INSERT INTO slot_accounts(slot_id,account_key,request_id) VALUES (?,?,?)',
+                                   (slot,a['account_key'],req))
                     print(f'{a["account_key"]} {phase}: {status} HTTP={code} received={count} new={new} like-field diagnostics saved')
                 if fatal or max_seen is None or max_seen>=args.stop_usage:
                     print(f'HALTED: stop flag or usage unavailable/at threshold; total_time_max={max_seen}')
                     halted=True;break
             with db: db.execute('UPDATE runs SET finished_at=?,status=?,usage_max=? WHERE run_id=?',
                                 (now(),'paused' if halted else 'closed',max_seen,run_id))
+            used=db.execute('SELECT COUNT(*) FROM slot_accounts WHERE slot_id=?',(slot,)).fetchone()[0]
+            if halted or used>=150 or not tasks:
+                close_slot(db,slot,'api_halted' if halted else '150_accounts_completed' if used>=150 else 'no_eligible_accounts')
+            else:
+                print(f'SLOT OPEN: {used}/150 accounts processed. May continue immediately; no cooldown yet.')
             output=export_run(db,base,run_id,args.source)
             print('Run:',run_id,'new posts:',output['row_count']['posts.csv'],'cumulative:',output['cumulative_posts'])
             print('Saved:',base/'runs'/run_id)
@@ -490,7 +545,7 @@ def main(argv=None):
     p.add_argument('--limit',type=int,default=5)
     p.add_argument('--window-days',type=int,default=7,help='Logical client-side coverage; not API server filter')
     p.add_argument('--history-days',type=int,default=365)
-    p.add_argument('--cycle-minutes',type=int,default=70)
+    p.add_argument('--cycle-minutes',type=int,default=70,help='Deprecated: previous start-to-start cooldown; slot now cools 60min after finish')
     p.add_argument('--stop-usage',type=float,default=70)
     p.add_argument('--extended-fields',action='store_true',help='Unverified profile fields; separate controlled trial only')
     a=p.parse_args(argv)
