@@ -121,6 +121,21 @@ class DailyTests(unittest.TestCase):
         c.insert_success(self.db,self.account(),'catchup',make_page(range(5,9),after='PAGE3'),'R5','r5',t,365,limit=4)
         self.assertIsNone(self.account()['catchup_cursor'])
 
+    def test_deferred_catchup_never_becomes_history_for_same_account(self):
+        day='2026-10-19'
+        with self.db:
+            self.db.executemany(
+                "INSERT INTO daily_account_state(day_kst,account_key,status,attempts,updated_at) VALUES (?,?,?,?,?)",
+                [(day,r['account_key'],'success',1,c.now()) for r in self.db.execute('SELECT account_key FROM accounts')])
+            self.db.execute("UPDATE accounts SET catchup_cursor='OLD_GAP',catchup_anchor='ANCHOR',latest_id='123',backfill_cursor='OLDER' WHERE account_key='KR_001'")
+            for n in (1,2):
+                self.db.execute(
+                    "INSERT INTO request_log(run_id,request_id,account_key,phase,status,finished_at) VALUES (?,?,?,?,?,?)",
+                    ('R',f'failed_catchup_{n}','KR_001','catchup','failed','2026-10-18T16:10:00+00:00'))
+        tasks=sched.select_daily_tasks(self.db,day)
+        self.assertNotIn('KR_001',[a['account_key'] for _,a in tasks])
+        self.assertIsNone(self.account()['last_history'])
+
     def test_insert_hook_rolls_back_all_post_updates(self):
         def fail(*_):raise ValueError('simulate logging failure')
         with self.assertRaisesRegex(ValueError,'logging failure'):
