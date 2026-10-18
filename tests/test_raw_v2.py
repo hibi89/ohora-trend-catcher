@@ -42,7 +42,7 @@ class Tests(unittest.TestCase):
         self.addCleanup(self.db.close)
     def test_roster_294_and_tamper(self):
         self.assertEqual((len(self.rows),self.rows[-1]['key']),(294,'JP_093'))
-        with self.src.open('a') as f:f.write('bogus')
+        with self.src.open('a', encoding='utf-8') as f:f.write('bogus')
         with self.assertRaises(ValueError):m.load_accounts(self.src)
     def test_db_hash_immutability(self):
         with self.assertRaises(ValueError):m.connect(self.dir/'new_db'/'collection.sqlite',self.rows,'different')
@@ -93,14 +93,14 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM posts').fetchone()[0],0)
     def test_raw_redaction(self):
         original={'paging':{'next':'https://graph.facebook.com/path?access_token=SECRET&after=XYZ'},'caption':'안녕 😀','auth':'SECRET','access_token':'SECRET'}
-        path=m.persist_response(self.dir,'RUN','r1',original,'SECRET');stored=path.read_text()
+        path=m.persist_response(self.dir,'RUN','r1',original,'SECRET');stored=path.read_text(encoding='utf-8')
         self.assertNotIn('SECRET',stored);self.assertIn('안녕 😀',stored)
     def test_offline_dryrun_no_write(self):
         args=Namespace(source=self.src,env_file=None,output_dir=self.dir/'untouched',live=False,mode='balanced',batch_size=5,
                        max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
         self.assertEqual(m.run(args),0);self.assertFalse(args.output_dir.exists())
     def test_fake_live_one_batch_and_manifest(self):
-        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345\nMETA_GRAPH_VERSION=v26.0')
+        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345\nMETA_GRAPH_VERSION=v26.0', encoding='utf-8')
         def fake(version,token,ops):
             self.assertEqual(token,'SECRET');self.assertEqual(len(ops),5)
             return 200,[{'code':200,'body':json.dumps(payload(range(i*5+1,i*5+6))),'headers':[]} for i,_ in enumerate(ops)],{'X-App-Usage':'{"total_time":3}'}
@@ -108,10 +108,10 @@ class Tests(unittest.TestCase):
                        max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
         self.assertEqual(m.run(args,fake),0)
         runs=list((args.output_dir/'runs').iterdir());self.assertEqual(len(runs),1)
-        manifest=json.loads((runs[0]/'run_manifest.json').read_text())
+        manifest=json.loads((runs[0]/'run_manifest.json').read_text(encoding='utf-8'))
         self.assertEqual(manifest['run']['successes'],5)
         self.assertEqual(manifest['row_count']['posts.csv'],25)
-        self.assertFalse('SECRET' in ''.join(p.read_text() for p in (runs[0]/'raw').iterdir()))
+        self.assertFalse('SECRET' in ''.join(p.read_text(encoding='utf-8') for p in (runs[0]/'raw').iterdir()))
         self.assertEqual(v.verify(args.output_dir)['checks'],'PASS')
         self.assertEqual(m.run(args,fake),0)  # 70m cooldown prevents requests
     def test_seven_day_bucket_tracks_oldest(self):
@@ -135,7 +135,7 @@ class Tests(unittest.TestCase):
         m.insert_success(self.db,a,'front',p,'R1','r1',m.now(),365)
         self.assertEqual(self.db.execute('SELECT coverage FROM carousel_status').fetchone()[0],'partial')
     def test_rate_limit_halts_without_cursor_advance(self):
-        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345')
+        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345', encoding='utf-8')
         args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'quota',live=True,mode='balanced',batch_size=5,
                        max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
         def fake(v,t,ops):
@@ -145,12 +145,12 @@ class Tests(unittest.TestCase):
             self.assertEqual(d.execute('SELECT count(*) FROM posts').fetchone()[0],0)
             self.assertEqual(d.execute('SELECT failures FROM runs').fetchone()[0],5)
     def test_bad_hash_detected_by_verifier(self):
-        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345')
+        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345', encoding='utf-8')
         args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'forcheck',live=True,mode='balanced',batch_size=1,
                        max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
         def fake(version,token,ops):return 200,[{'code':200,'body':json.dumps(payload([1],after=None))}],{'X-App-Usage':'{"total_time":3}'}
         self.assertEqual(m.run(args,fake),0)
-        run=next((args.output_dir/'runs').iterdir()); (run/'posts.csv').write_text('corrupted')
+        run=next((args.output_dir/'runs').iterdir()); (run/'posts.csv').write_text('corrupted', encoding='utf-8')
         with self.assertRaisesRegex(ValueError,'SHA mismatch'):v.verify(args.output_dir)
     def test_one_process_lock(self):
         base=self.dir/'concurrent';base.mkdir()
@@ -164,7 +164,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(vals['like_count'],'returned')
         self.assertEqual(vals['view_count'],'not_tested')
     def test_csv_optional_fields_headers_are_present(self):
-        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345')
+        env=self.dir/'local.env';env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345', encoding='utf-8')
         args=Namespace(source=self.src,env_file=env,output_dir=self.dir/'headers',live=True,mode='balanced',batch_size=1,
                        max_batches=1,limit=5,window_days=7,history_days=365,cycle_minutes=70,stop_usage=70,extended_fields=False)
         def fake(v,t,ops):return 200,[{'code':200,'body':json.dumps(payload([1],after=None))}],{'X-App-Usage':'{"total_time":2}'}
