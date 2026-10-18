@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 import hashlib
 import json
 import os
@@ -668,7 +667,7 @@ def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_min
                 if fatal or not batch_usage or max_seen>=args.stop_usage:
                     print(f'HALTED: stop flag or usage unavailable/at threshold; app_usage_max={max_seen}')
                     halted=True;break
-                if daily_day and datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()!=daily_day:
+                if daily_day and datetime.now(timezone(timedelta(hours=9))).date().isoformat()!=daily_day:
                     print('KST date changed; stopping after completed batch')
                     rollover=True;break
             with db: db.execute('UPDATE runs SET finished_at=?,status=?,usage_max=? WHERE run_id=?',
