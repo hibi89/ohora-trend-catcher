@@ -8,16 +8,15 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import sqlite3
 import time
-from zoneinfo import ZoneInfo
 
 import collector
 import audit as integrity_audit
 
-KST = ZoneInfo('Asia/Seoul')
+KST = timezone(timedelta(hours=9))  # 2026 Korea Standard Time; no tzdata needed on Windows.
 DAILY_LIMIT = 4
 BATCH_SIZE = 5
 MAX_BATCHES = 30
