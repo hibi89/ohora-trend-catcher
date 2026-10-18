@@ -151,6 +151,15 @@ def connect(path, accounts, source_sha):
        status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
        last_request_id TEXT,last_error TEXT,updated_at TEXT NOT NULL,
        PRIMARY KEY(day_kst,account_key));
+    CREATE TABLE IF NOT EXISTS history_page_evidence(
+       request_id TEXT PRIMARY KEY,account_key TEXT NOT NULL REFERENCES accounts(account_key),
+       requested_cursor TEXT,response_cursor TEXT,oldest_page_ts TEXT,newest_page_ts TEXT,
+       cutoff_ts TEXT,completion_basis TEXT,observed_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS batch_attempts(
+       run_id TEXT NOT NULL,batch_no INTEGER NOT NULL,slot_id INTEGER NOT NULL,
+       request_json TEXT NOT NULL,started_at TEXT NOT NULL,
+       status TEXT NOT NULL DEFAULT 'prepared',response_path TEXT,
+       PRIMARY KEY(run_id,batch_no));
     CREATE TABLE IF NOT EXISTS catchup_jobs(
        job_id INTEGER PRIMARY KEY AUTOINCREMENT,
        account_key TEXT NOT NULL REFERENCES accounts(account_key),
@@ -274,6 +283,15 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
     posts=media['data']
     if len(posts)>limit:raise ValueError('more posts than requested page limit')
     key=account['account_key']
+    # Do not silently save a Business Discovery response under another account.
+    found_username=discovery.get('username')
+    if not isinstance(found_username,str) or found_username.casefold()!=account['username'].casefold():
+        raise ValueError('account identity mismatch: username')
+    found_id=discovery.get('id')
+    if found_id is None or not str(found_id).isdigit():
+        raise ValueError('missing numeric business discovery ID')
+    if account['id'] is not None and str(found_id)!=str(account['id']):
+        raise ValueError('account identity mismatch: ID')
     old_ids={p['post_id'] for p in db.execute('SELECT post_id FROM posts WHERE account_key=?',(key,))}
     old_latest=account['latest_id']
     after=((media.get('paging') or {}).get('cursors') or {}).get('after') if isinstance(media.get('paging'),dict) else None
@@ -285,6 +303,8 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
         raise ValueError('full page but missing cursor: completeness unknown')
     oldest=account['oldest_time'];newest=account['newest_time'];new_post_count=0
     seen_ids=[]
+    page_dates=[]
+    target=fixed_history_cutoff(db,history_days,ts)
     with db:
         record_fields(db,run,req,key,'account',discovery,extended=extended)
         db.execute('INSERT OR IGNORE INTO account_observations(account_key,observed_at,run_id,followers_count,follows_count,media_count,request_id) VALUES (?,?,?,?,?,?,?)',
@@ -320,10 +340,14 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
                         int('comments_count' in p and p['comments_count'] is not None),req))
             record_fields(db,run,req,key,'posts',p,p.get('media_type') or '',pid)
             dt=parse_date(p.get('timestamp'))
+            if phase=='history' and not dt:raise ValueError('history page missing post timestamp')
             if dt:
+                page_dates.append(dt)
                 normalized=dt.isoformat()
                 if oldest is None or normalized<oldest:oldest=normalized
                 if newest is None or normalized>newest:newest=normalized
+        if phase=='history' and any(page_dates[i]<page_dates[i+1] for i in range(len(page_dates)-1)):
+            raise ValueError('history page timestamps not descending')
         latest=old_latest;back=account['backfill_cursor'];catch=account['catchup_cursor'];anchor=account['catchup_anchor']
         done=account['backfill_done']
         if phase=='front':
@@ -353,14 +377,18 @@ def insert_success(db,account,phase,payload,run,req,ts,history_days,extended=Fal
             else:catch=after
         else:
             back=after
-            if not after:done=1
-        target=fixed_history_cutoff(db,history_days,ts)
+            # A page has to be requested as history before it can end backfill.
+            crossed=bool(page_dates and min(page_dates)<=target)
+            done=int(not after or crossed)
+            db.execute('INSERT INTO history_page_evidence VALUES (?,?,?,?,?,?,?,?,?)',
+                       (req,key,before,after,min(page_dates).isoformat() if page_dates else None,
+                        max(page_dates).isoformat() if page_dates else None,target.isoformat(),
+                        'cutoff_crossed' if crossed else 'api_terminal' if not after else 'continuing',ts))
         observation_day=(parse_date(ts) or datetime.now(timezone.utc)).date()
         delta_days=max(0,(observation_day-(parse_date(oldest).date() if oldest and parse_date(oldest) else observation_day)).days)
         bucket=delta_days//window_days
         window_end=(observation_day+timedelta(days=1-bucket*window_days)).isoformat()
         window_start=(observation_day+timedelta(days=1-(bucket+1)*window_days)).isoformat()
-        if oldest and parse_date(oldest) and parse_date(oldest)<=target:done=1
         db.execute('UPDATE accounts SET id=?,ig_id=?,username=?,name=?,biography=?,website=?,profile_picture_url=?,followers_count=?,follows_count=?,media_count=?,collected_at=?,latest_id=?,oldest_time=?,newest_time=?,window_start=?,window_end=?,backfill_cursor=?,catchup_cursor=?,catchup_anchor=?,backfill_done=?,last_front=CASE WHEN ?=\'front\' THEN ? ELSE last_front END,last_history=CASE WHEN ?=\'history\' THEN ? ELSE last_history END,attempts=attempts+1,last_attempt=?,last_error=NULL WHERE account_key=?',
                    (str(discovery['id']) if discovery.get('id') is not None else None,str(discovery['ig_id']) if discovery.get('ig_id') is not None else None,discovery.get('username') or account['username'],discovery.get('name'),discovery.get('biography'),discovery.get('website'),discovery.get('profile_picture_url'),discovery.get('followers_count'),discovery.get('follows_count'),discovery.get('media_count'),ts,latest,oldest,newest,window_start,window_end,back,catch,anchor,done,phase,ts,phase,ts,ts,key))
         if commit_hook:
