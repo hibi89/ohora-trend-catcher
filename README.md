@@ -22,10 +22,10 @@ Private project source mirror, prepared from the original locally collected ZIP 
 
 ## 2026-10-18: 신규 독립 OHORA RAW v2 실험 수집기
 
-- **[실행 및 안전 가이드](raw_v2/README.md)** / [Python 수집기](raw_v2/collector.py) / [원본 검증기](raw_v2/verify.py) / [19개 오프라인 테스트](tests/test_raw_v2.py) / [스키마·누락 진단](docs/RAW_V2_SCHEMA.md)
+- **[실행 및 안전 가이드](raw_v2/README.md)** / [Python 수집기](raw_v2/collector.py) / [원본 검증기](raw_v2/verify.py) / [20개 오프라인 테스트](tests/test_raw_v2.py) / [스키마·누락 진단](docs/RAW_V2_SCHEMA.md)
 - [사용자 2026-10-18 RAW 요청 원본](docs/OHORA_RAW_COLLECTION_EXECUTION.md), [장기 누적 목표](docs/LONG_TERM_RAW_COLLECTION_VISION_2026-10-18.md)
 - 공식 294계정, 계정당 조회 최대 5개, 70분 최소 실행 간격, 7일 논리 창, 1년(선택 2년) 이력 목표. 최신 조회·과거 커서·누락 연결과 반복 likes/comments/followers 관측을 분리해 기록한다.
-- **실 API 수집/Windows 스케줄링 미실행**. 주어진 별도 로컬 출력 경로와 유효한 본인 토큰이 있어야 함. 기존 2026-10-16 데이터와 코드는 건드리지 않음. Linux/Python 3.11+ 합성/가짜 API 테스트 19/19 PASS, Windows/Meta 실응답 미검증.
+- **실 API 수집/Windows 스케줄링 미실행**. 주어진 별도 로컬 출력 경로와 유효한 본인 토큰이 있어야 함. 기존 2026-10-16 데이터와 코드는 건드리지 않음. Linux/Python 3.11+ 합성/가짜 API 테스트 20/20 PASS, Windows/Meta 실응답 미검증.
 - 좋아요 누락은 successful response의 null/absent와 API 실패를 구분하며, 실제 근본 원인은 검증 전 미확정. 자동 재분석·이미지 원본 다운로드·Vercel 배포 없음.
 
 ## Local setup / using `git pull`
