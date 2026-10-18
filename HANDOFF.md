@@ -1,5 +1,44 @@
 # OHORA Trend Catcher — HANDOFF (2026-10-18 22:49 KST)
 
+> **최신 기준(2026-10-19):** 아래 장의 이전 60분·70%·70분 시작 간격 등은 과거 기록이며 새 daily-first 정책은 다음 최신 항목을 따른다.
+
+## 2026-10-19 최신 운영 정책 — DAILY-FIRST (아래 과거 기록보다 우선)
+
+**권장 엔트리:** `raw_v2/daily_scheduler.py`. 기존 `collector.py`는 수집 엔진으로 계속 사용하며,
+**사용자 로컬 `collection.sqlite`와 수집·커서·관측 이력은 삭제하거나 초기화하지 않는다.**
+
+- **1순위** KST 오늘 공식 목록 1~150번의 최신 최대 4개, **2순위** 151~294번의 최신 최대 4개. 성공한 계정은 오늘 다시 최신 조회하지 않으며, 기존 수집기의 오늘 성공한 `front` 요청 로그도 반영한다. 한도/오류로 슬롯이 일찍 끝나면 미완료부터 재개한다.
+- **3순위** 전체 정상 대상 최신화 후 `catchup` 누락 구간 회복. **4순위** `backfill_cursor` 기준 과거 365일 미완료 계정 수집. 접근 불가/일일 재시도 소진 계정은 별도 예외로 보고하고, 294/294 성공이라고 표시하지 않는다.
+- Graph 배치당 5 하위요청, 최대 150 **서로 다른** 계정/슬롯, Meta **X-App-Usage** 제공 수치 중 최댓값 85% 도달 또는 사용량 헤더 누락 시 후속 배치를 중단. 사용량은 요청 **후** 확인하므로 초과 가능하고, 63분 경과가 실제 API 한도 회복을 보증하지 않는다.
+- 슬롯 종료 `finished_at + 63분` 뒤 재개. **기존 `slots.ready_at`은 소급 변경하지 않는다.** 신규 스케줄러는 이 DB 시각 하나로 전경 대기한다.
+- DB에 `daily_account_state`·`catchup_jobs` 테이블을 호환 추가한다. 새 요청 ID에 `run_id`를 포함해 실행 간 충돌을 방지하고, 성공 게시물·관측·커서·로그·슬롯·일일 상태를 하나의 트랜잭션으로 기록한다. 이전부터 있던 catchup이 새로운 최신 조회 때문에 사라지지 않도록 대기열에 보관한다.
+- **검증 범위:** GitHub Actions Python 3.11 오프라인 37/37 PASS. 기존 Windows DB를 사용한 마이그레이션·Meta 실호출·실제 1년 완전성은 **미검증**이다. 별도 Windows 예약 작업·서비스는 설치하지 않았다.
+
+### Windows PowerShell 실행
+
+```powershell
+git pull origin main
+python -m unittest discover -s tests -p 'test_*.py' -v
+$src = 'C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\2차 프로젝트 데이터\account_list.csv'
+$envFile = 'C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\2차 프로젝트 홍주님께 제공할 수집데이터\kq3_294_collection\.env.local'
+$out = Join-Path $env:LOCALAPPDATA 'OHORA_RAW_v2'
+Test-Path $src
+Test-Path $envFile
+python .\raw_v2\daily_scheduler.py --source $src --output-dir $out
+# 실수집을 시작하기로 결정한 경우에만 아래 명령을 직접 실행:
+python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-dir $out --live
+```
+
+- `--live` 없이 실행하면 공식 목록 검증 및 정책 출력만 하며 DB/Meta를 변경하지 않는다.
+- `--live`는 전경에서 **계속 동작**하며 63분 쿨타임 동안 대기한다. 창을 열어두고 PC가 켜져 있어야 하며, Ctrl+C로 안전하게 중단한다.
+- `--once --live`는 요청된 수집 실행을 최대 한 번 수행하고 대기하지 않는다. 사전에 API 사용량/인증 상태를 확인한다.
+- 최초 실수집 전 `collection.sqlite`를 **일관된 SQLite 백업**으로 저장할 것. 과거 이력의 실제 이상 여부는 로컬 DB로 별도 검사해야 한다.
+- 예전 `run_70m_loop.ps1`은 남겨둔 **legacy balanced 모드**이므로 일일 최신화 정책 운영에는 사용하지 않는다.
+
+
+---
+
+
 ## 2026-10-19 — Important: Next trial is four posts × 150 accounts
 
 **User explicitly chose 4×150, not 5×150 or 25/50 large-page experiments.** 294 official accounts → 150+144 ideal per complete first account sweep, but limited by actual Meta quota. Current live local DB has 630 unique posts from 130 attempts (126 successful, 4 invalid-target). Never reset or overwrite it. User wants next API limit-window experiment **after actual cooldown**, not now. No background API calls or scheduled task created.
