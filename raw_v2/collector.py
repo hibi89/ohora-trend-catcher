@@ -615,7 +615,7 @@ def slot_ready_at(slot, cooldown_minutes=63, cycle_minutes=65):
     return max(choices)
 
 
-def active_slot(db, cooldown_minutes=63, cycle_minutes=65):
+def active_slot(db, cooldown_minutes=63, cycle_minutes=65, pilot_bypass=False):
     """Resume partial 150-account slot; cool down only after slot closes.
 
     Adopt a prior pilot made by RAW v2.1 (before slots existed) if it is recent,
@@ -643,7 +643,7 @@ def active_slot(db, cooldown_minutes=63, cycle_minutes=65):
     else:
         if prior['status']=='active':return prior['slot_id']
         next_time=slot_ready_at(prior,cooldown_minutes,cycle_minutes)
-        if next_time and datetime.now(timezone.utc)<next_time:
+        if next_time and datetime.now(timezone.utc)<next_time and not pilot_bypass:
             print('SKIPPED: slot cooldown; next start after '+next_time.isoformat())
             return None
     with db:
@@ -690,7 +690,7 @@ def run(args,client=request_batch,task_selector=None,daily_day=None,cooldown_min
             if unresolved:
                 raise ValueError('unresolved prior batch; audit/reconcile before another API request: '
                                  +str(tuple(unresolved)))
-            slot=active_slot(db,cooldown_minutes,cycle_minutes)
+            slot=active_slot(db,cooldown_minutes,cycle_minutes, pilot_bypass=getattr(args,'pilot_bypass',False))
             if slot is None:return 0
             already={r[0] for r in db.execute('SELECT account_key FROM slot_accounts WHERE slot_id=?',(slot,))}
             remaining=SLOT_ACCOUNT_LIMIT-len(already)
