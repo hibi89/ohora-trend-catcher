@@ -112,7 +112,7 @@ class DailyTests(unittest.TestCase):
 
     def test_two_runs_same_post_two_days_unique_request_ids(self):
         env=self.base/'secret.env'
-        env.write_text('META_ACCESS_TOKEN=SECRET\\nMETA_IG_USER_ID=12345',encoding='utf-8')
+        env.write_text('META_ACCESS_TOKEN=SECRET\nMETA_IG_USER_ID=12345',encoding='utf-8')
         out=self.base/'out'
         args=Namespace(source=self.source,env_file=env,output_dir=out,live=True,mode='front',
                        batch_size=1,max_batches=1,limit=4,window_days=7,history_days=365,
