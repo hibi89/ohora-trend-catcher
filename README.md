@@ -15,6 +15,11 @@ Private project source mirror, prepared from the original locally collected ZIP 
 - `docs/INCREMENTAL_V1_ARCHITECTURE.md`: latest-5/backfill-5/90-minute schedule planned but not yet implemented.
 - **[docs/V1_DELIVERY_ROADMAP.md](docs/V1_DELIVERY_ROADMAP.md)**: **confirmed V1 settings**, implementation stages P0–P6, acceptance checks, Gemini vision and separate weekly GPT-6.1 Sol API roles.
 
+## 2026-10-18: 장기 RAW 수집·4탭 대시보드 목표 (기록만, 실행 금지)
+
+- [**장기 데이터 자산 구축 목표·3개 수집 작업·4탭 구상·미검증 사항**](docs/LONG_TERM_RAW_COLLECTION_VISION_2026-10-18.md)
+- 계정당 최근 50개(294계정 최대 14,700개)를 초기 목표로, 최신 동기화·과거 1~2년 확장·참여 지표 재관측을 분리하는 **논의 중인 설계**. 기존 수집기·스케줄러에는 아직 구현되지 않았음. 현재 API 호출·개발 실행·데이터 병합·배포는 승인되지 않음.
+
 ## Local setup / using `git pull`
 
 The collection code expects its original folder structure with a **local-only official** `account_list.csv` in this repository root. Do not replace or change that CSV after the original collector state is initialized; its SHA256 is stored in `manifest.json`. Copy the source file from the user's existing archive locally — it is ignored by Git.
