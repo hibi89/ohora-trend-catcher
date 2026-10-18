@@ -51,6 +51,12 @@ def recover(base, source, backup, apply=False):
     with sqlite3.connect(backup.as_uri()+'?mode=ro',uri=True) as check:
         if check.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
             raise ValueError('Backup failed integrity check')
+        with sqlite3.connect((base/'collection.sqlite').as_uri()+'?mode=ro',uri=True) as live:
+            for table in ('posts','post_observations','request_log','batch_attempts'):
+                copied=check.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]
+                current=live.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]
+                if copied!=current:
+                    raise ValueError('Backup is not a current snapshot: '+table)
     accounts,digest=col.load_accounts(source)
     count=0
     with col.process_lock(base):
