@@ -15,6 +15,7 @@ import time
 
 import collector
 import audit as integrity_audit
+import backup as snapshots
 
 KST = timezone(timedelta(hours=9))  # 2026 Korea Standard Time; no tzdata needed on Windows.
 DAILY_LIMIT = 4
@@ -148,6 +149,9 @@ def main(argv=None):
         raise ValueError('Output must not overwrite legacy stores')
     base.mkdir(parents=True,exist_ok=True)
     if (base/'collection.sqlite').is_file():
+        with collector.process_lock(base):
+            path=snapshots.backup_store(base,base.parent/'OHORA_RAW_v2_backups')
+        print('Preflight backup verified:',path)
         report=integrity_audit.audit(base)
         print('Read-only preflight audit:',report['status'],report['findings'])
         if report['status']=='FAIL':
@@ -176,13 +180,22 @@ def main(argv=None):
             if snap['stage']=='done':
                 print(f"No currently eligible tasks; outstanding catchup gaps={snap['pending_gaps']}. "
                       'Deferred failures are retried on the next KST day. Exiting.')
+                print('SCHEDULER_RESULT_JSON '+json.dumps({
+                    'policy':options.policy,'run_status':'done','day_kst':snap['day'],
+                    'front_success':snap['success'],'blocked':snap['blocked'],
+                    'next_stage':'done','next_ready_at_utc':snap['ready'].isoformat() if snap['ready'] else None}))
                 return 0
             ready=snap['ready']
             if ready is not None:
                 remaining=(ready-datetime.now(ready.tzinfo)).total_seconds()
                 if remaining>0:
                     print(f'Cooling down until {ready.isoformat()} UTC; {int(remaining)+1}s remaining')
-                    if options.once:return 0
+                    if options.once:
+                        print('SCHEDULER_RESULT_JSON '+json.dumps({
+                            'policy':options.policy,'run_status':'cooldown','day_kst':snap['day'],
+                            'front_success':snap['success'],'blocked':snap['blocked'],
+                            'next_stage':snap['stage'],'next_ready_at_utc':ready.isoformat()}))
+                        return 0
                     while remaining>0:
                         time.sleep(min(30,max(1,remaining)))
                         remaining=(ready-datetime.now(ready.tzinfo)).total_seconds()
