@@ -177,6 +177,40 @@ class DailyTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT COUNT(*) FROM posts').fetchone()[0],1)
         self.assertEqual(called[0],2)
 
+    def test_bootstrap_only_fills_missing_head_then_history(self):
+        c.insert_success(self.db,self.account(),'front',make_page([1],after='OLDER'),
+                         'R1','r1',c.now(),365,limit=4)
+        tasks=sched.select_daily_tasks(self.db,'2026-10-19',policy='bootstrap-history')
+        self.assertEqual(tasks[0][1]['account_key'],'KR_002')
+        self.assertTrue(all(phase=='front' and not a['latest_id'] for phase,a in tasks))
+
+    def test_history_only_never_spends_calls_on_latest(self):
+        c.insert_success(self.db,self.account(),'front',make_page([1],after='OLDER'),
+                         'R1','r1',c.now(),365,limit=4)
+        tasks=sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only')
+        self.assertEqual(tasks[0][0],'history')
+        self.assertEqual(tasks[0][1]['account_key'],'KR_001')
+
+    def test_daily_front_policy_never_enters_history(self):
+        c.insert_success(self.db,self.account(),'front',make_page([1],after='OLDER'),
+                         'R1','r1',c.now(),365,limit=4)
+        with self.db:
+            self.db.executemany(
+                "INSERT INTO daily_account_state(day_kst,account_key,status,attempts,updated_at) VALUES (?,?,?,?,?)",
+                [('2026-10-19',a['account_key'],'success',1,c.now())
+                 for a in self.db.execute('SELECT account_key FROM accounts')])
+        self.assertEqual(sched.select_daily_tasks(self.db,'2026-10-19',policy='daily-front'),[])
+        self.assertEqual(sched.select_daily_tasks(self.db,'2026-10-19',policy='daily')[0][0],'history')
+
+    def test_legacy_done_flag_with_cursor_remains_history_eligible(self):
+        c.insert_success(self.db,self.account(),'front',make_page([1],after='OLDER'),
+                         'R1','r1',c.now(),365,limit=4)
+        with self.db:
+            self.db.execute("UPDATE accounts SET backfill_done=1 WHERE account_key='KR_001'")
+        tasks=sched.select_daily_tasks(self.db,'2026-10-19',policy='history-only')
+        self.assertEqual(tasks[0][1]['account_key'],'KR_001')
+        self.assertEqual(self.account()['backfill_done'],1)  # old data not cleared
+
     def test_daily_dryrun_does_not_touch_db(self):
         result=sched.main(['--source',str(self.source),'--output-dir',str(self.base/'missing')])
         self.assertEqual(result,0)
