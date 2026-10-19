@@ -610,7 +610,8 @@ def capture_from_response(
                         frozenset(("like_count", "comments_count")))
                     for post in normalized_posts})
     except (ValueError, TypeError, KeyError) as exc:
-        category = ("usage_limit" if "Usage limit" in str(exc) else\n                    "usage_missing" if "Usage" in str(exc) else "invalid_response")
+        category = ("usage_limit" if "Usage limit" in str(exc) else
+                    "usage_missing" if "Usage" in str(exc) else "invalid_response")
         raise ContractError(CONTRACT_VERSION, category, CATEGORY_SCOPE[category],
                             "Response rejected by capture validation",
                             request.request_id) from exc
