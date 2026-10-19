@@ -46,3 +46,8 @@
 ## 오프라인 증거 검증 API
 
 `evaluate_live_readiness({"G0": False, "G1": False, "G2": False, "G3": False, "G4": False, "G5": False, "G6": False})`는 승인 여부와 무관하게 실행 권한을 부여하지 않는 **진단 함수**다. 모든 게이트가 `True`여도 별도의 사용자 승인과 실제 API 권한 검증이 필요하다. `tests/test_three_api_live_readiness.py` 및 Three API CI가 누락·변조·truthy 문자열·임의 추가 필드·민감 입력 비반향을 검사한다. 기존 collector/transport에 자동 연결하지 않는다.
+
+
+### 2026-10-19 fail-closed mapping 보강
+
+The evaluator snapshots a Mapping once. If enumeration or value retrieval raises, the input is treated as invalid; every gate remains blocked, and input values are not echoed. Offline regression coverage now includes a stateful Mapping and a Mapping that raises during iteration/access. This does not grant runtime authorization or connect the evaluator to any Meta/RAW execution path. GitHub Actions #39256533261 passed 30 suites / 332 tests, including Python 3.11 compilation, for code commit 26410e665d7a73607abd427772a1cb13d1cd706f.
