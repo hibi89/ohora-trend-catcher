@@ -314,6 +314,7 @@ class CaptureRecord:
     response_http_status: int = 200
     response_received_at: datetime | None = None
     usage_metrics: Mapping[str, int] | None = None
+    post_field_status: Mapping[str, Mapping[str, FieldStatus]] | None = None
 
     def __post_init__(self) -> None:
         if self.contract_version != CONTRACT_VERSION or self.request.contract_version != CONTRACT_VERSION:
@@ -342,7 +343,12 @@ class CaptureRecord:
             raise ValueError("Post count inconsistency")
         if len(self.carousel_completeness) != len(self.normalized_posts):
             raise ValueError("Incomplete per-post carousel evidence")
+        if self.post_field_status is None or set(self.post_field_status) != {
+                p.get("id") for p in self.normalized_posts}:
+            raise ValueError("Per-post field states are required")
         for post in self.normalized_posts:
+            validate_field_status(post, self.post_field_status[post["id"]],
+                                  frozenset(("like_count", "comments_count")))
             if not isinstance(post, Mapping) or not isinstance(post.get("id"), str):
                 raise ValueError("Invalid normalized post")
             id_ = post["id"]
@@ -531,7 +537,12 @@ def capture_from_response(
                 account_observation, states, carousel_completeness,
                 cursor_state, response.received_at,
                 response_http_status=response.http_status,
-                response_received_at=response.received_at, usage_metrics=metrics)
+                response_received_at=response.received_at, usage_metrics=metrics,
+                post_field_status={
+                    post["id"]: field_status_for(post,
+                        frozenset(("like_count", "comments_count")),
+                        frozenset(("like_count", "comments_count")))
+                    for post in normalized_posts})
     except (ValueError, TypeError, KeyError) as exc:
         category = "usage_missing" if "usage" in str(exc).lower() else "invalid_response"
         raise ContractError(CONTRACT_VERSION, category, CATEGORY_SCOPE[category],
