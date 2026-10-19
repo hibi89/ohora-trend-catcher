@@ -1,3 +1,9 @@
+> **2026-10-19 — p6 HTTP 오프라인 사전검증 구현 (후속):**
+> - [`three_api_http_preflight.py`](../raw_v2/three_api_http_preflight.py): `RequestSpec`+A/B/C `CredentialReference`+숫자형 IG User ID+Graph 버전(기본 `v26.0`, 기존 collector 기본값)을 검증해 **토큰 없는 GET URL/fields 쿼리 명세** 생성. `repr`/상태 정보에서는 커서·사용자 ID·환경변수명을 노출하지 않으며, 임의로 만든 가짜 `RequestSpec` 입력은 재검증한다. `OfflineFixtureTransport`는 데이터 전용 합성 응답 저장소로 HTTP 기능이 없다.
+> - [`test_three_api_http_preflight.py`](../tests/test_three_api_http_preflight.py) 신규 **11개** 포함, 인증 참조 7개 + 요청 명세 5개까지 격리 로컬 **23/23 PASS** (Python 3.13). 기존 Windows **68/68 PASS**는 이전 스냅샷 기준. 전체 현재 **91개 테스트**의 CI 실행 성공 여부는 별도 확인 필요.
+> - **미구현:** 토큰값/환경변수 로딩, 실제 HTTP 클라이언트, Meta API 호출, A/B/C 토큰·쿼터 독립성 검증, 운영 RAW DB 연동. `unsigned_parts()`는 실제 전송용 인증 헤더가 없는 순수 명세이며 전송 가능 상태가 아니다.
+> - **실행 금지:** 승인 전 Meta live 요청, 기존 `collection.sqlite` 접근·변경. 인증 토큰/환경파일 업로드·로그·커밋 금지.
+
 > **2026-10-19 p6 정책 보강:** `estimated_time_to_regain_access`를 사용률에서 제외하고 HTTP 2xx라도 Meta `error` 본문이면 저장 없이 레인 중단. `tests/test_three_api_policy_hardening.py` 2개 추가, CI 연결. **기존 Windows 66/66 PASS, 신규 포함 68개는 아직 재검증 전.** 실제 Meta API/토큰/운영 DB 미사용. 실수집 전 HTTP 클라이언트·인증 분리·API 헤더 실제 검증·쿼터 공유 여부 확인 필수.
 
 > **2026-10-19 p6 통합:** `raw_v2/three_api_offline_runner.py`의 `envelope_fixture=True` 모드에서 A/B/C lease→모의 HTTP 응답→사용량 85% 사전 게이트→Meta 정규화→원자적 staging→검증 커서 인계까지 연결. `tests/test_three_api_envelope_runner.py` 4개 신규 및 CI 추가. **직전 56/56 Windows PASS**, 이후 신규 6+4개를 포함한 **66개 테스트는 재검증 전**. 실제 Meta API/운영 DB/토큰 미사용. 주의: 기존 `meta_fixture=False, envelope_fixture=False`는 오프라인 회귀용으로 사용량 헤더 게이트 없이 합성 데이터 저장하므로 실제 수집 경로로 절대 사용 금지.
