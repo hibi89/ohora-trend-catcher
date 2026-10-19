@@ -47,3 +47,16 @@ def validate_job_request(job, request, evidence):
     if cursor != required or spec_cursor != required:
         raise AdapterGuardError("Request cursor differs from durable evidence")
     return True
+
+
+def execute_guarded(job, request, evidence, executor):
+    """Explicit one-request bridge; never leases, retries, or commits page evidence.
+
+    The executor must be a ThreeApiContractExecutor-compatible object.
+    Its durable intent logic determines whether an existing request may be
+    recovered from capture; this bridge never authorizes resending it.
+    """
+    validate_job_request(job, request, evidence)
+    if not callable(getattr(executor, "execute", None)):
+        raise AdapterGuardError("Invalid contract executor")
+    return executor.execute(request)
