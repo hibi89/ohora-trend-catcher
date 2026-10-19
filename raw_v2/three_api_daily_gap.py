@@ -270,8 +270,7 @@ class DailyGapLedger:
                     reviews.append({"account_key":account,"phase":"needs_review",
                                     "gap_day":blocked["day"]})
                 else:
-                    catchups.append({"account_key":account,"phase":"catchup",
-                                     "gap_day":unfinished[0]["day"]})
+                    catchups.append(self._pending_gap_action(account, unfinished[0]["day"]))
             elif s["status"] == "needs_review":
                 reviews.append({"account_key":account,"phase":"needs_review","gap_day":day})
             elif s["status"] == "bootstrap_history":
