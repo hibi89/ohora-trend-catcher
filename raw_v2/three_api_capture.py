@@ -52,7 +52,7 @@ class CaptureJournal:
 
     def save_intent(self, request):
         canonical, digest_fn, safe = _contract()
-        safe(request)
+        safe(canonical(request))
         data = canonical(request)
         digest = digest_fn(request)
         return self._write(
@@ -63,7 +63,7 @@ class CaptureJournal:
 
     def save_capture(self, record):
         canonical, digest_fn, safe = _contract()
-        safe(record)
+        safe(canonical(record))
         data = canonical(record)
         digest = digest_fn(record)
         with self._db:
@@ -72,8 +72,8 @@ class CaptureJournal:
                 (record.request.request_id,)).fetchone()
             if intent is None:
                 raise ValueError("Capture requires durable intent")
-            if intent[0] != digest_fn(record.request):
-                raise ValueError("Capture request differs from intent")
+            if intent[0] != digest_fn(record.request) or intent[1] not in ("pending", "captured"):
+                raise ValueError("Capture request differs from intent or is unresolved")
             existing = self._db.execute(
                 "SELECT digest FROM captures WHERE capture_id=? OR request_id=?",
                 (record.capture_id,record.request.request_id)).fetchone()
@@ -86,6 +86,17 @@ class CaptureJournal:
             self._db.execute("UPDATE intents SET outcome='captured' WHERE request_id=?",
                              (record.request.request_id,))
         return digest
+
+    def reconcile_request(self, request_id, resolution):
+        if resolution not in ("failed_no_retry", "manual_retry_approved"):
+            raise ValueError("Explicit reconciliation decision required")
+        with self._db:
+            row = self._db.execute(
+                "SELECT outcome FROM intents WHERE request_id=?", (request_id,)).fetchone()
+            if row is None or row[0] != "unknown":
+                raise ValueError("Only unknown outcomes may be reconciled")
+            self._db.execute("UPDATE intents SET outcome=? WHERE request_id=?",
+                             (resolution, request_id))
 
     def list_pending_capture_bytes(self, run_id):
         return [row[0] for row in self._db.execute(
