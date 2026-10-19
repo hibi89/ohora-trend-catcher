@@ -188,6 +188,46 @@ class JobRequestBindingTests(unittest.TestCase):
             journal.close()
             db.close()
 
+    def test_verified_capture_cursor_unlocks_second_page(self):
+        journal = CaptureJournal(str(self.root / "capture.sqlite"))
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        db.executescript(SCHEMA)
+        db.execute("INSERT INTO accounts VALUES(?)", ("KR_001",))
+        base = make_response(self.request)
+        payload = dict(base.payload)
+        business = dict(payload["business_discovery"])
+        media = dict(business["media"])
+        media["paging"] = {
+            "next": "https://graph.facebook.com/next",
+            "cursors": {"after": "cursor2"},
+        }
+        business["media"] = media
+        payload["business_discovery"] = business
+        response = replace(base, payload=payload, next_cursor="cursor2")
+        transport = FakeTransport(response)
+        executor = ThreeApiContractExecutor(
+            transport, journal, ContractRawWriter(db),
+            clock=lambda: self.start)
+        try:
+            execute_guarded(
+                self.job, self.request, self.evidence, executor,
+                bindings=self.bindings, now=self.start)
+            result = self.bindings.commit_captured_page(
+                self.job, self.request, self.evidence, journal,
+                ContractRawWriter(db), now=self.start)
+            self.assertFalse(result["terminal"])
+            self.assertEqual(result["next_cursor"], "cursor2")
+            self.assertEqual(self.evidence.required_cursor(1, 2), "cursor2")
+            second = self.coordinator.lease("C", now=self.start)
+            self.assertIsNotNone(second)
+            self.assertEqual(
+                (second["account_ordinal"], second["page"], second["lane"]),
+                (1, 2, "C"))
+            self.assertEqual(transport.calls, 1)
+        finally:
+            journal.close()
+            db.close()
+
     def test_lease_must_be_live_before_reservation(self):
         with self.assertRaises(JobBindingError):
             self.bindings.reserve(
