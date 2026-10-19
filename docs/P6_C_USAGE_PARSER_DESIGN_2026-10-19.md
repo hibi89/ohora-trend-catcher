@@ -31,3 +31,15 @@ Do **not** make A transport return a success envelope until a reviewed adapter i
 
 ## Freeze gates
 A/C agree exact numeric evidence schema; lead approves >=85 policy and missing-header behavior; B adapter remains separately reviewed; run offline contract and usage suites; explicit separate authorization required for any future live execution.
+
+## A branch follow-up review (after lead's parallel instruction)
+
+Observed A `raw_v2/three_api_transport.py` now includes `parse_meta_usage(headers)` and still **fails closed after successful JSON parse** because C's typed translation is not approved. Do not interpret this as integrated success.
+
+**Compatibility issues to resolve before freeze:**
+- A's new `parse_meta_usage` is a second JSON parser, not a wrapper around the existing `three_api_usage.parse_usage`. Its nested business handling selects the first entry only for a one-element list; the existing parser traverses all supported nested entries. Multi-entry business responses therefore diverge. Prefer the existing parser as the shared validator rather than freezing two implementations.
+- Both existing coordinator and A use **>=85%** halt. Keep this threshold consistent in the contract and tests; never reinterpret as >85%.
+- C's current `CaptureRecord.usage_metrics` accepts only nonnegative **int** values and C `safe_usage_metrics` reads synthetic header keys. A's parser can return **float**. Proposed adapter must define one explicit, safe conversion (e.g., ceiling of the validated maximum) or a reviewed typed percentage before `capture_from_response`. No fabricated Meta header keys should be exposed as actual evidence.
+- A `MetaTransport.send` still cannot return a successful `ResponseEnvelope` until identity/cursor and header conversion are reviewed. Keep fail-closed and avoid changing A-owned files from C.
+
+**Evidence:** A's current transport source inspected on `feature/p6-a-meta-transport-20261019`; no combined A/C integration test run. This section is review feedback, not implementation approval.
