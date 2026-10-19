@@ -446,3 +446,12 @@ Updated: 2026-10-15 KST
 
 ## Next step
 User: `git pull origin main`, run the full collector dry run then its explicit `--live` command locally, and share sanitized logs / summary. Assistant: review quota progression and exact stop point, decide whether to retain 10-subrequest batches or optimize further based on real 294-run evidence.
+
+
+## P6 최신 작업 상태 (2026-10-19, 별도 Draft PR #6 브랜치)
+- 작업 브랜치: `codex/p6-readiness-hardening-20261019`. main 병합/실 Meta 호출/운영 DB 변경 없음.
+- p6 단일 요청 계약 런타임과 PageEvidenceStore는 기존 구현 재사용. 294×3=882개 job 계획, 4개/페이지, 3페이지/계정, A/B/C 2회전 목표.
+- 최근 코드 변경: coordinator의 page2/3 phase를 history에서 catchup으로 변경하여 RequestEnvelope의 history 차단과 충돌 해소; 해당 회귀 테스트와 daily projection/RAW projection fixture 정합성 수정.
+- 최신 코드 커밋: `5a8e41f48e44fb1c67084da1744b4e62137b4a49`. 이 SHA의 CI는 이 기록 시점 **미확인**. 직전 `cb974e1` CI는 P6 C Contract PASS, Three API 및 P6 Runtime Integration FAIL(동일 RAW projection fixture의 CHECK constraint 오류, 총 492 tests 중 1 error).
+- 미완료: coordinator lease ↔ RequestEnvelope ↔ contract executor ↔ durable RAW receipt ↔ PageEvidenceStore를 묶는 오프라인 통합 어댑터, 만료 lease의 outcome reconciliation, DB 간 장애 복구 검증, 운영 Meta E2E.
+- 검증 주의: 과거 489 PASS 기록을 최신 492 테스트 전체 통과로 오인하지 말 것. 새로운 SHA의 CI 결과를 먼저 확인.
