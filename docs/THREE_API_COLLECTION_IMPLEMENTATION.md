@@ -1,3 +1,9 @@
+
+## 2026-10-19 atomic offline staging milestone
+- `PageEvidenceStore.commit_staged_page()` now writes up to four normalized post payloads to `staging_posts` **in the same coordinator SQLite transaction** as page cursor evidence and job completion. It rejects duplicate/invalid post IDs, oversized pages, invalid cursor edges and stale leases; failures roll back staged rows and job status.
+- Added five synthetic staging tests to `tests/test_three_api_evidence.py`; existing CI test discovery pattern includes them. **These tests have not yet been rerun or verified on Windows/GitHub Actions.**
+- `staging_posts` is an isolated proof-of-concept schema, **not** RAW v2 production data storage. There is still no Meta live-call adapter, token validation, durable cross-run snapshot anchoring, or production migration approval. No real API calls or production DB writes were made.
+
 # Three-API collection — implementation gate (2026-10-19)
 
 ## Status
