@@ -174,19 +174,20 @@ def sanitize_meta_response(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def safe_usage_metrics(headers: Mapping[str, str]) -> dict[str, int]:
-    """Keep only parsed numeric usage, not header names or header bodies."""
-    if not isinstance(headers, Mapping):
-        raise ValueError("Usage headers missing")
-    result: dict[str, int] = {}
-    for name in ("x-app-usage-call-count", "x-business-use-case-usage-call-count"):
-        if name in headers:
-            value = headers[name]
-            if not isinstance(value, str) or not value.isdecimal():
-                raise ValueError("Unparseable usage metric")
-            result[name.removeprefix("x-").replace("-", "_")] = int(value)
-    if not result:
-        raise ValueError("Usage evidence missing")
-    return result
+    """Persist only validated numeric Meta quota evidence; never raw headers.
+
+    Delegate actual Meta JSON parsing to the existing offline quota validator.
+    Ceiling avoids understating fractional utilization.
+    """
+    from math import ceil
+    from three_api_usage import parse_usage
+
+    value = parse_usage(headers)
+    if value is None:
+        raise ValueError("Usage evidence missing or unparseable")
+    if value >= 85:
+        raise ValueError("Usage limit reached")
+    return {"max_usage_percent": ceil(value)}
 
 
 def validate_field_status(values: Mapping[str, Any], states: Mapping[str, str],
@@ -609,7 +610,7 @@ def capture_from_response(
                         frozenset(("like_count", "comments_count")))
                     for post in normalized_posts})
     except (ValueError, TypeError, KeyError) as exc:
-        category = "usage_missing" if "usage" in str(exc).lower() else "invalid_response"
+        category = ("usage_limit" if "Usage limit" in str(exc) else\n                    "usage_missing" if "Usage" in str(exc) else "invalid_response")
         raise ContractError(CONTRACT_VERSION, category, CATEGORY_SCOPE[category],
                             "Response rejected by capture validation",
                             request.request_id) from exc
