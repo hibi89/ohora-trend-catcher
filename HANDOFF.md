@@ -327,3 +327,10 @@ python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-di
 - Read-only `dispatch_diagnostics` reports per-lane done, bound recovery, unbound and lease states. `dispatch_ready_diagnostics` separately counts jobs eligible under predecessor, cursor proof, lease expiry, binding and lane cooldown rules. These counts are not successful Meta requests.
 - New offline regressions exercise concurrent fresh/recovery leasing, repeated expiry, persisted binding across restart and halted lanes. No live Meta API, token, production DB, scheduler, `main` merge or Draft PR promotion.
 - **Still required before production:** reviewed real Meta dispatch wiring, bounded real-credential pilot, Windows end-to-end validation, quota observation, operational rollback/recovery checks, and explicit user approval. Never treat offline success as production acceptance.
+
+
+### P6 verified recovery-only lease checkpoint (2026-10-20)
+- Verified code SHA `9606d321cfd04de09959f7ceb2cdfa0ce5c9bedd`: GitHub Actions **Three API offline tests / P6 C Contract Offline / P6 Runtime Integration Offline all SUCCESS**.
+- `Coordinator.lease_for_recovery` now selects **only durably bound** jobs via `lease_bound_for_recovery`; it never consumes an unbound job awaiting its first dispatch. `lease_for_dispatch` excludes bound jobs. Legacy `lease` remains compatible with existing offline fixtures.
+- Offline regression covers recovery-only leasing, absence of bindings, conflicting filters, and lane usage 85% halt / 65-minute cooldown / explicit verified reset before recovery. No automatic retries, live Meta calls, credentials, production DB writes, scheduler or main merge.
+- **Next:** finish static integration review and Windows isolated preflight; operational Meta pilot and production readiness remain unverified and require separate approval.
