@@ -9,6 +9,7 @@
 
 ## Latest verified and pending
 - **Latest verified code commit: `633865f3ca2708d5574ebe74c022c03edeb918dd`.** GitHub Actions `P6 Runtime Integration Offline` run **39341896412**, `Three API offline tests` run **39341896447**, `P6 C Contract Offline` run **39341896554**: all **SUCCESS**.
+- **Final QA log inspection (2026-10-20):** Runtime Integration Offline job 118365200716 reports **Ran 529 tests** (success); Three API offline job 118365200646 success; C Contract job 118365201783 reports **Ran 22 tests** (success). These are overlapping workflow suites, **not** 529+22 unique tests. All on GitHub-hosted Ubuntu; Windows and live Meta remain unverified. GitHub Actions logs also warn that Node.js 20-targeted checkout/setup-python actions are forced onto Node.js 24; warning is not a test failure.
 - Tests use synthetic/injected fixtures and blocked sockets on GitHub-hosted **Ubuntu/Python 3.11**, **not Windows validation**, and do not establish real Meta connectivity or production quality.
 - `Coordinator.lease_for_dispatch` excludes durably bound jobs; `lease_for_recovery` selects only bound jobs. `JobRequestBindingStore.dispatch_once` atomically binds original request before any HTTP; expired/ambiguous attempts are never automatically resent. `commit_captured_page` reconstructs page proof from original durable capture and verifies RAW receipt. `dispatch_ready_diagnostics` and `recovery_ready_diagnostics` are read-only; no scheduler.
 - `G0–G6` evaluator reports evidence only, **never runtime authorization**, even if all flags are true.
