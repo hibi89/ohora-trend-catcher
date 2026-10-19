@@ -1,4 +1,4 @@
-> **2026-10-19 실제 사용자 로컬 실수집 이후 운영 기록:** History 10계정 10/10 HTTP 200·40개 신규, 현재 누적 게시물 1,330/관측 1,350, audit PASS(무결성/관측/커버리지 0/0/0), 8계정 Meta 110 차단, 무인 운영 미승인. 아래 기존 검수 안내 중 “실제 Meta 호출 미수행” 문구는 **당시 검수 작업 자체**에 대한 설명이며, 이후 사용자 PC에서 실제 수집을 실행했다.
+> **2026-10-19 사용률 로그 개선:** `daily_scheduler.py`는 각 상태 조회 및 수집 종료 후 `META API USAGE (last run observed maximum): N%; STOP THRESHOLD: 85%`를 표시한다. 값은 `runs.usage_max`에 저장된 **마지막 실행 관측 최대치**로, 실시간 Meta 잔여 할당량은 아니다. 기존 DB 쿨타임 `ready_at`·커서·API 요청 정책은 변경하지 않는다. 현재 실행 중인 프로세스에는 적용되지 않으므로 쿨타임 대기 중 Ctrl+C로 종료 후 `git pull --ff-only origin main` 및 기존 실행 명령으로 재시작한다.\n\n> **2026-10-19 실제 사용자 로컬 실수집 이후 운영 기록:** History 10계정 10/10 HTTP 200·40개 신규, 현재 누적 게시물 1,330/관측 1,350, audit PASS(무결성/관측/커버리지 0/0/0), 8계정 Meta 110 차단, 무인 운영 미승인. 아래 기존 검수 안내 중 “실제 Meta 호출 미수행” 문구는 **당시 검수 작업 자체**에 대한 설명이며, 이후 사용자 PC에서 실제 수집을 실행했다.
 >
 > **운영 문서:** [전체 트러블슈팅](../docs/RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md) · [오류 SOP](../docs/RAW_V2_ERROR_HANDLING_RUNBOOK.md) · [향후 과제/인수 기준](../docs/RAW_V2_NEXT_TASKS_AND_ACCEPTANCE.md)
 
