@@ -143,6 +143,23 @@ class Coordinator:
             self.db.execute("ROLLBACK")
             raise
 
+    def lease_for_dispatch(self, lane, now=None):
+        """Lease only never-bound work; safe candidate for first-time dispatch.
+
+        The caller must still use JobRequestBindingStore.dispatch_once to
+        reserve a request BEFORE any transport attempt. This method alone
+        never authorizes HTTP.
+        """
+        return self.lease(lane, now=now, skip_bound=True)
+
+    def lease_for_recovery(self, lane, now=None):
+        """Lease pending/expired work, including bound work, for reconciliation.
+
+        The caller MUST NOT dispatch HTTP using this lease; recovery must
+        use the immutable stored capture and original request binding.
+        """
+        return self.lease(lane, now=now, skip_bound=False)
+
     def complete(self, job_id, lease_id):
         """Bare completion is forbidden if page evidence is enabled."""
         if self.db.execute(
