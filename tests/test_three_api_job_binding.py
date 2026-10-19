@@ -228,6 +228,35 @@ class JobRequestBindingTests(unittest.TestCase):
             journal.close()
             db.close()
 
+    def test_read_only_dispatch_diagnostics_classifies_bound_and_expired(self):
+        initial = self.coordinator.dispatch_diagnostics(now=self.start)
+        a = next(row for row in initial["lanes"] if row["lane"] == "A")
+        self.assertEqual(a["bound_recovery"], 0)
+        self.assertEqual(a["unbound"], 294)
+        self.assertEqual(a["active_leases"], 1)
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        later = self.start + timedelta(minutes=16)
+        snapshot = self.coordinator.dispatch_diagnostics(now=later)
+        a = next(row for row in snapshot["lanes"] if row["lane"] == "A")
+        self.assertEqual(a["bound_recovery"], 1)
+        self.assertEqual(a["unbound"], 293)
+        self.assertEqual(a["active_leases"], 0)
+        self.assertEqual(a["expired_leases"], 1)
+        self.assertEqual(self.coordinator.db.execute(
+            "SELECT state FROM jobs WHERE id=?", (self.job["id"],)
+        ).fetchone()[0], "leased")
+
+    def test_diagnostics_persist_across_restart_without_releasing_job(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        self.coordinator.db.close()
+        self.coordinator = Coordinator(self.root / "coordinator.sqlite")
+        self.addCleanup(self.coordinator.db.close)
+        snapshot = self.coordinator.dispatch_diagnostics(
+            now=self.start + timedelta(minutes=16))
+        a = next(row for row in snapshot["lanes"] if row["lane"] == "A")
+        self.assertEqual(a["bound_recovery"], 1)
+        self.assertEqual(a["expired_leases"], 1)
+
     def test_dispatch_lease_skips_expired_bound_job_without_starving_lane(self):
         self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
         later = self.start + timedelta(minutes=16)
