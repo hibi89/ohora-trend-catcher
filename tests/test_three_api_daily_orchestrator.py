@@ -310,6 +310,38 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(resumed.step("A",now=NOW+timedelta(minutes=66))["status"],
                          "front_committed")
 
+    def test_tampered_staged_payload_blocks_new_capture_and_recovery(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        count=runner.mirror.summary()["raw_posts"]
+        runner.coordinator.db.execute(
+            "UPDATE staging_posts SET payload_json=? WHERE post_id=?",
+            ('{"id":"115","caption":"tampered"}',"115"))
+        self.assertEqual(runner.step("B",now=NOW)["status"],"recovery_blocked")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],count)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+
+    def test_missing_capture_clock_blocks_replay_without_refetch(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.coordinator.db.execute(
+            "DELETE FROM offline_fixture_clock WHERE job_id=("
+            "SELECT job_id FROM page_evidence WHERE account_ordinal=1 AND page=1)")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"recovery_blocked")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+
+    def test_tampered_capture_clock_prevents_further_projection(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.coordinator.db.execute(
+            "UPDATE offline_fixture_clock SET observed_at=?",
+            ("2026-10-19T11:00:00+00:00",))
+        self.assertEqual(runner.step("B",now=NOW)["status"],"recovery_blocked")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+
     def test_manual_review_not_masked_as_verified(self):
         runner=self.create(front={})
         for account in accounts():
