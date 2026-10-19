@@ -82,3 +82,9 @@ GitHub workflow 상태를 직접 재조회했다. 세부 테스트 수는 해당
 4. 현재 `ThreeApiContractExecutor.execute()`는 capture→RAW 원자성 복구를 제공하지만 coordinator job lease의 획득/반납, account ordinal↔account key 매핑, lane별 cooldown을 직접 관리하지 않는다. 해당 연결은 **미구현**이며, 실 API와 분리된 합성 fixture 기반 integration test를 먼저 작성한다.
 
 이 항목들은 실제 실행 실패 재현 결과가 아닌 **코드상 확인된 통합 위험**이다. 검증된 실패로 과장하지 않는다. Codex 우선순위는 1→2→3→4이며, 각 단계 테스트 통과 전 live runner로 확대하지 않는다.
+
+## 9. PageEvidenceStore 코드 확인 — 중복 구현 금지
+
+`raw_v2/three_api_evidence.py`의 `PageEvidenceStore`가 이미 존재하며 `required_cursor`, `commit_page`, `commit_staged_page`를 제공한다. `commit_page`는 유효 lease·선행 cursor·page edge 검증 후 `page_evidence` INSERT와 `jobs.state='done'` 전이를 **동일 coordinator SQLite transaction**에서 수행한다. `Coordinator.complete`는 evidence table이 있으면 거부한다. 따라서 새 adapter에서 이 코드를 재구현하지 않는다.
+
+**남은 경계:** `PageEvidenceStore.commit_page`의 `receipt`는 호출자가 제공하며, 외부 RAW writer의 영속 기록을 자체 조회·검증하지 않는다. `three_api_contract_executor.py`가 보장하는 RAW receipt와 coordinator의 page evidence를 안전하게 연결하려면 (a) receipt identity·account/page/request 일치 검증, (b) RAW 성공 뒤 coordinator commit 실패 시 restart reconciliation, (c) coordinator done 뒤 RAW 유실 여부 점검, (d) stale lease 및 unknown outcome 차단을 합성 격리 DB 테스트로 입증해야 한다. 두 DB 사이의 분산 원자성은 현재 보장되지 않는다. 이는 코드 정적 검토이며 신규 통합 테스트 통과 주장이 아니다.
