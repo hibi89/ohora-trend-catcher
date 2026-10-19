@@ -256,6 +256,16 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_recovery_diagnostics_without_binding_table_fail_closed(self):
+        isolated = Coordinator(self.root / "unbound-only.sqlite")
+        self.addCleanup(isolated.db.close)
+        isolated.seed()
+        snapshot = isolated.recovery_ready_diagnostics(now=self.start)
+        self.assertEqual(len(snapshot["lanes"]), 3)
+        self.assertTrue(all(row["recoverable_now"] == 0
+                            for row in snapshot["lanes"]))
+        self.assertIsNone(isolated.lease_for_recovery("A", now=self.start))
+
     def test_recovery_diagnostics_exclude_active_lease_until_expiry(self):
         self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
         active = self.coordinator.recovery_ready_diagnostics(now=self.start)
