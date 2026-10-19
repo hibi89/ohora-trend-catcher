@@ -19,8 +19,10 @@ def validate_job_request(job, request, evidence):
     """
     if not isinstance(job, dict) or type(job.get("id")) is not int:
         raise AdapterGuardError("Invalid coordinator job")
-    if job.get("state") != "leased" or not job.get("lease_id"):
-        raise AdapterGuardError("A valid active lease is required")
+    # Coordinator.lease returns the pre-update row with the newly minted lease.
+    # The database is authoritative for actual lease validity at commit time.
+    if job.get("state") not in ("pending", "leased") or not job.get("lease_id"):
+        raise AdapterGuardError("A valid lease token is required")
     page = job.get("page")
     ordinal = job.get("account_ordinal")
     lane = job.get("lane")
