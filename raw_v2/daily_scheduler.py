@@ -142,13 +142,23 @@ def inspect_store(base, source, digest, policy='daily', targets=None):
             blocked=db.execute('SELECT COUNT(*) FROM accounts WHERE blocked=1').fetchone()[0]
             pending_gaps=db.execute("SELECT COUNT(*) FROM accounts WHERE catchup_cursor IS NOT NULL AND blocked=0").fetchone()[0]
             latest=db.execute('SELECT * FROM slots ORDER BY slot_id DESC LIMIT 1').fetchone()
+            usage_row=db.execute('SELECT usage_max FROM runs ORDER BY started_at DESC LIMIT 1').fetchone()
+            latest_usage=usage_row['usage_max'] if usage_row else None
             ready=collector.slot_ready_at(latest)
             stage=choices[0][0] if choices else 'front_pending' if policy=='history-only' and front_pending else 'done'
             return {'day':day,'tasks':choices,'stage':stage,'front_pending':front_pending,
                     'success':success,'exceptions':failures,'blocked':blocked,'pending_gaps':pending_gaps,
-                    'ready':ready,'slot_status':latest['status'] if latest else None}
+                    'ready':ready,'slot_status':latest['status'] if latest else None,
+                    'usage_max':latest_usage}
         finally:
             db.close()
+
+
+def print_usage_status(snap):
+    """Display last persisted Meta X-App-Usage observation, not a live quota."""
+    value=snap.get('usage_max')
+    shown=f'{value:.1f}%' if isinstance(value,(int,float)) else 'unavailable'
+    print(f'META API USAGE (last run observed maximum): {shown}; STOP THRESHOLD: {STOP_USAGE}%')
 
 
 def parse_args(argv=None):
@@ -224,6 +234,7 @@ def main(argv=None):
             snap=inspect_store(base,rows,digest,options.policy,TARGETED_HISTORY_TEN if options.target_legacy_ten else None)
             print(f"[{snap['day']}] daily front success={snap['success']}/294, "
                   f"blocked={snap['blocked']}, other exceptions={snap['exceptions']}; stage={snap['stage']}")
+            print_usage_status(snap)
             if snap['stage']=='front_pending':
                 print(f"HISTORY REFUSED: {snap['front_pending']} daily-front accounts remain unattempted or retryable.")
                 print('SCHEDULER_RESULT_JSON '+json.dumps({
@@ -267,6 +278,7 @@ def main(argv=None):
                 args,task_selector=(lambda db,n:targeted_history_tasks(db,selected_day,TARGETED_HISTORY_TEN)[:n]) if options.target_legacy_ten else (lambda db,n:select_daily_tasks(db,selected_day,n,options.policy)),
                 daily_day=selected_day,cooldown_minutes=63)
             after=inspect_store(base,rows,digest,options.policy,TARGETED_HISTORY_TEN if options.target_legacy_ten else None)
+            print_usage_status(after)
             print(f"Run finished: status={result}; today's front={after['success']}/294; "
                   f"next stage={after['stage']}")
             print('SCHEDULER_RESULT_JSON '+json.dumps({
