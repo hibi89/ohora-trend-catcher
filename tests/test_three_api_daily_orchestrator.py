@@ -256,6 +256,60 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(back.mirror.summary()["raw_posts"],4)
         self.assertEqual(back.ledger.status("KR_001",DAY)["status"],"verified")
 
+    def test_lane_quota_85_and_cooldown_requires_explicit_reset(self):
+        runner=self.create()
+        self.assertTrue(runner.coordinator.observe_usage("A",85,now=NOW))
+        self.assertEqual(runner.step("A",now=NOW)["status"],
+                         "front_lane_unavailable")
+        self.assertFalse(runner.coordinator.reset_after_verified_cooldown(
+            "A",now=NOW+timedelta(minutes=64)))
+        self.assertEqual(runner.step("A",now=NOW+timedelta(minutes=66))["status"],
+                         "front_lane_unavailable")
+        self.assertTrue(runner.coordinator.reset_after_verified_cooldown(
+            "A",now=NOW+timedelta(minutes=65)))
+        self.assertEqual(runner.step("A",now=NOW+timedelta(minutes=66))["status"],
+                         "front_committed")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+
+    def test_lane_missing_usage_halts_only_one_lane(self):
+        runner=self.create()
+        self.assertTrue(runner.coordinator.observe_usage("A",None,now=NOW))
+        self.assertEqual(runner.step("A",now=NOW)["status"],
+                         "front_lane_unavailable")
+        self.assertEqual(runner.step("B",now=NOW)["status"],
+                         "front_fixture_missing")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='B'").fetchone()[0],0)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],0)
+
+    def test_leased_page_not_stolen_before_expiry_and_recoverable(self):
+        runner=self.create()
+        first=runner.coordinator.lease("A",now=NOW)
+        self.assertEqual(first["account_ordinal"],1)
+        second=runner.coordinator.lease("A",now=NOW+timedelta(minutes=14))
+        self.assertEqual(second["account_ordinal"],2)
+        runner.coordinator.db.execute(
+            "UPDATE jobs SET state='done' WHERE id=?", (second["id"],))
+        recovered=runner.coordinator.lease("A",now=NOW+timedelta(minutes=16))
+        self.assertEqual(recovered["account_ordinal"],1)
+        self.assertNotEqual(recovered["lease_id"],first["lease_id"])
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],0)
+
+    def test_restart_preserves_lane_cooldown(self):
+        runner=self.create()
+        runner.coordinator.observe_usage("A",85,now=NOW)
+        runner.close()
+        resumed=self.create()
+        self.assertEqual(resumed.step("A",now=NOW+timedelta(minutes=66))["status"],
+                         "front_lane_unavailable")
+        self.assertTrue(resumed.coordinator.reset_after_verified_cooldown(
+            "A",now=NOW+timedelta(minutes=66)))
+        self.assertEqual(resumed.step("A",now=NOW+timedelta(minutes=66))["status"],
+                         "front_committed")
+
     def test_manual_review_not_masked_as_verified(self):
         runner=self.create(front={})
         for account in accounts():
