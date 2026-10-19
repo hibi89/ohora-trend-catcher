@@ -16,7 +16,7 @@ from three_api_coordinator import stamp, utcnow
 from three_api_paging import validate_page_edge
 
 # Opaque non-secret reference, never a token, URL, raw response, or credential.
-RECEIPT_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}\\Z")
+RECEIPT_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 
 
 class PageEvidenceStore:
