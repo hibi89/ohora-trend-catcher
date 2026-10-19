@@ -20,7 +20,7 @@ class AccountStatusTests(unittest.TestCase):
         self.c.executescript("""
           CREATE TABLE config(k TEXT PRIMARY KEY,v TEXT);
           CREATE TABLE accounts(account_key TEXT,country TEXT,username TEXT,ordinal INTEGER,blocked INTEGER,backfill_done INTEGER,backfill_cursor TEXT,catchup_cursor TEXT,last_attempt TEXT,last_error TEXT);
-          CREATE TABLE posts(post_id TEXT PRIMARY KEY,account_key TEXT,timestamp TEXT);
+          CREATE TABLE posts(post_id TEXT PRIMARY KEY,account_key TEXT,timestamp TEXT);\n          CREATE TABLE post_observations(post_id TEXT,observed_at TEXT);
           CREATE TABLE request_log(account_key TEXT,phase TEXT,status TEXT,http_status INTEGER,finished_at TEXT,started_at TEXT,error_code TEXT,error_message TEXT);
           CREATE TABLE catchup_jobs(account_key TEXT);
           CREATE TABLE history_page_evidence(account_key TEXT,request_id TEXT,requested_cursor TEXT,response_cursor TEXT,oldest_page_ts TEXT,newest_page_ts TEXT,cutoff_ts TEXT,completion_basis TEXT,observed_at TEXT);
@@ -37,7 +37,7 @@ class AccountStatusTests(unittest.TestCase):
             ('KR_005','history','success',200,'2026-10-18T16:03:00+00:00','2026-10-18T16:00:00+00:00',None,None),
             ('KR_006','front','success',200,'2026-10-18T15:03:00+00:00','2026-10-18T15:00:00+00:00',None,None),
         ])
-        self.c.execute('INSERT INTO catchup_jobs VALUES (?)',('KR_006',))
+        self.c.execute('INSERT INTO catchup_jobs VALUES (?)',('KR_006',))\n        self.c.executemany('INSERT INTO post_observations VALUES (?,?)', [('p1','2026-10-17'),('p1','2026-10-18')])
         self.c.commit()
         self.now=datetime(2026,10,19,1,0,tzinfo=timezone.utc)
     def tearDown(self): self.c.close()
@@ -47,7 +47,7 @@ class AccountStatusTests(unittest.TestCase):
         self.assertEqual(rows[1]['unique_posts'],0)
         self.assertEqual(rows[1]['front_checked_today_kst'],'yes')
         self.assertEqual(rows[0]['front_checked_today_kst'],'yes')
-        self.assertEqual(rows[0]['oldest_post_at'],'2025-03-01T00:00:00+00:00')
+        self.assertEqual(rows[0]['oldest_post_at'],'2025-03-01T00:00:00+00:00')\n        self.assertEqual(rows[0]['unique_posts'],2) # two observations of p1 must not increase unique post count
     def test_history_not_front_catchup_unverified_and_errors(self):
         rows=rows_from_db(self.c,self.now)
         self.assertEqual(rows[4]['front_checked_today_kst'],'unknown')
@@ -65,7 +65,7 @@ class AccountStatusTests(unittest.TestCase):
         self.assertEqual(before,self.db.read_bytes())
         self.c=sqlite3.connect(self.db)
         self.c.row_factory=sqlite3.Row
-    def test_missing_db_and_schema(self):
+    def test_output_failure_keeps_db_unchanged(self):\n        before=self.db.read_bytes()\n        self.c.close()\n        blocked=self.root/'not_a_directory'\n        blocked.write_text('x')\n        with self.assertRaises(OSError): generate(self.db,blocked,self.now)\n        self.assertEqual(before,self.db.read_bytes())\n        self.c=sqlite3.connect(self.db)\n        self.c.row_factory=sqlite3.Row\n    def test_missing_db_and_schema(self):
         with self.assertRaises(FileNotFoundError): generate(self.root/'missing.sqlite',self.root/'reports',self.now)
         self.c.execute('DROP TABLE catchup_jobs');self.c.commit()
         with self.assertRaisesRegex(ValueError,'incompatible'): rows_from_db(self.c,self.now)
