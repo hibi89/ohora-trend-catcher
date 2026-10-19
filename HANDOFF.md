@@ -296,3 +296,9 @@ python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-di
 ### P6 CI 검증 업데이트 (2026-10-19)
 - 코드 커밋 `5a8e41f48e44fb1c67084da1744b4e62137b4a49`에 대한 GitHub Actions **Three API offline tests / P6 Runtime Integration Offline / P6 C Contract Offline 모두 success** 확인. 이 결과는 해당 코드 SHA에 대한 것이며 이후 문서 변경 커밋 전체에 대한 별도 CI 판정은 아님.
 - 기존 `OfflineDailyOrchestrator`는 294 계정·격리 SQLite 3개·수동 synthetic fixture·재시작 reconcile을 이미 제공한다. 실 Meta transport와 ContractExecutor를 연결한 운영 어댑터는 여전히 미구현; synthetic 성공을 live 검증으로 표기하지 않는다.
+
+
+### P6 오프라인 어댑터 가드 추가 (2026-10-19)
+- 구현 SHA `40c6354f80185fd229dd8f030f71bd9443df2bbe`: `raw_v2/three_api_adapter_guard.py`는 lease 상태/계정 ordinal/page/lane/phase 및 PageEvidenceStore.required_cursor와 RequestEnvelope cursor의 일치 여부를 fail-closed로 검사. **네트워크·DB 쓰기 없음**.
+- 테스트 SHA `8e1245feabd8d34d542fff456978e4739105641e`: `tests/test_three_api_adapter_guard.py`에 일치/커서 불일치/임대 누락 테스트 추가. 이 SHA CI 결과는 기록 시점 미확인.
+- **미완료**: 가드가 실제 ThreeApiContractExecutor 호출 경로에 연결되지 않았으며, expired lease의 기존 intent reconciliation·RAW receipt 교차 검증·page evidence commit은 별도 구현 필요. 이 가드만으로 live dispatch를 승인하지 않는다.
