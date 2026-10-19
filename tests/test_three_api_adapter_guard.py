@@ -230,12 +230,14 @@ class GuardTests(unittest.TestCase):
                 total = 0
                 # Round one completes all first pages before catch-up.
                 # Every page carries its predecessor's durable cursor proof.
-                for page in (1, 2, 3):
-                    for lane in ("A", "B", "C"):
-                        while True:
+                for page, lane, count in (
+                    (1, "A", 150), (1, "B", 144),
+                    (2, "C", 150), (2, "A", 144),
+                    (3, "B", 150), (3, "C", 144),
+                ):
+                    for _ in range(count):
                             job = coordinator.lease(lane)
-                            if job is None:
-                                break
+                            self.assertIsNotNone(job)
                             if job["page"] != page:
                                 # A later-page job is not eligible until its
                                 # predecessor; all earlier pages are complete.
