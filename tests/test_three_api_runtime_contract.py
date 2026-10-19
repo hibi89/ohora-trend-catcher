@@ -238,5 +238,65 @@ class ContractTests(unittest.TestCase):
             persist_capture_verified(CaptureFake(), record)
 
 
+    def test_unrequested_engagement_is_not_tested(self):
+        from dataclasses import replace
+        request = self.make_request()
+        spec = replace(request.request_spec,
+                       media_fields="id,caption,media_type,comments_count")
+        request = replace(request, request_spec=spec,
+            request_spec_digest=digest_sha256({
+                "api_version": request.api_version,
+                "target_ig_user_id": request.target_ig_user_id, "spec": spec}))
+        now = datetime(2026, 10, 19, tzinfo=timezone.utc)
+        response = ResponseEnvelope(CONTRACT_VERSION, request.request_id, 200,
+            {"media": {"data": [{"id": "123", "comments_count": 0}]}},
+            {"x-app-usage-call-count": "2"}, now, None)
+        record = capture_from_response(request, response, capture_id="c",
+            normalized_posts=[{"id": "123", "comments_count": 0}],
+            account_observation={}, account_fields_tested=frozenset(),
+            carousel_completeness={"123": "not_applicable"}, source_digest="s")
+        self.assertEqual(record.post_field_status["123"]["like_count"], "not_tested")
+        self.assertEqual(record.post_field_status["123"]["comments_count"], "returned")
+        with self.assertRaises(ContractError):
+            capture_from_response(request, response, capture_id="c",
+                normalized_posts=[{"id": "123", "like_count": 2}],
+                account_observation={}, account_fields_tested=frozenset(),
+                carousel_completeness={"123": "not_applicable"}, source_digest="s")
+
+    def test_normalized_post_allowlist_types_and_bounds(self):
+        from dataclasses import replace
+        record = self.make_record()
+        for bad in (
+            [{"id": "123", "media_type": "IMAGE", "private_key": "x"}],
+            [{"id": "123", "media_type": "IMAGE", "like_count": True}],
+            [{"id": "123", "media_type": "IMAGE", "comments_count": -1}],
+            [{"id": "123", "media_type": "IMAGE", "caption": "x" * 9000}],
+            [{"id": "123", "media_type": "IMAGE", "access_token": "s"}],
+            [{"id": "123", "media_type": "IMAGE", "children": []}],
+            [{"id": str(i), "media_type": "IMAGE"} for i in range(5)],
+        ):
+            with self.subTest(bad=str(bad)[:50]), self.assertRaises(ValueError):
+                replace(record, normalized_posts=bad)
+
+    def test_carousel_child_schema_and_maximum(self):
+        from dataclasses import replace
+        record = self.make_record()
+        base = {"id": "123", "media_type": "CAROUSEL_ALBUM"}
+        for children in (
+            [{"id": "124", "authorization": "secret"}],
+            [{"id": "124", "media_type": "UNSAFE"}],
+            [{"id": "124", "media_url": "https://graph.example/paging?access_token=x"}],
+            [{"id": "124", "media_url": 123}],
+            [{"id": "124"}, {"id": "124"}],
+            [{"id": str(i)} for i in range(200, 221)],
+        ):
+            with self.subTest(children=str(children)[:50]), self.assertRaises(ValueError):
+                replace(record, normalized_posts=[{**base, "children": children}],
+                    carousel_completeness={"123": "complete"},
+                    post_field_status={"123": {"like_count": "absent",
+                                                "comments_count": "absent"}})
+
+
+
 if __name__ == "__main__":
     unittest.main()
