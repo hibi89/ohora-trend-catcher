@@ -51,17 +51,20 @@ def validate_job_request(job, request, evidence):
     return True
 
 
-def execute_guarded(job, request, evidence, executor):
-    """Explicit one-request bridge; never leases, retries, or commits page evidence.
+def execute_guarded(job, request, evidence, executor, *, bindings=None, now=None):
+    """Offline-only dispatch bridge; durable job reservation is mandatory.
 
-    The executor must be a ThreeApiContractExecutor-compatible object.
-    Its durable intent logic determines whether an existing request may be
-    recovered from capture; this bridge never authorizes resending it.
+    A basic job/cursor validation alone is NOT enough: an expired lease could
+    otherwise produce a fresh request_id and duplicate an ambiguous HTTP
+    attempt. Only JobRequestBindingStore.dispatch_once may authorize the
+    first send. Subsequent dispatches fail closed, regardless of lease token.
     """
+    from three_api_job_binding import JobRequestBindingStore
+
+    if not isinstance(bindings, JobRequestBindingStore):
+        raise AdapterGuardError("Durable job request binding is required")
     validate_job_request(job, request, evidence)
-    if not callable(getattr(executor, "execute", None)):
-        raise AdapterGuardError("Invalid contract executor")
-    return executor.execute(request)
+    return bindings.dispatch_once(job, request, evidence, executor, now=now)
 
 
 def verify_raw_completion(request, receipt, capture_port, raw_port):
