@@ -30,6 +30,7 @@ class PreparedGraphRequest:
     after: str | None
     token_env_name: str
     method: str = "GET"
+    include_carousel_children: bool = False
 
     def __repr__(self):
         return "PreparedGraphRequest(%r)" % self.safe_summary()
@@ -39,6 +40,7 @@ class PreparedGraphRequest:
         return {"lane": self.lane, "method": self.method,
                 "host": _HOST, "version": self.version,
                 "page_size": 4, "after_present": self.after_present,
+                "carousel_children_opt_in": self.include_carousel_children,
                 "authenticated": False, "mode": "OFFLINE_PREFLIGHT"}
 
     def unsigned_parts(self) -> dict:
@@ -56,7 +58,8 @@ def prepare_graph_request(spec: RequestSpec, credentials: CredentialReference,
         raise TypeError("Expected validated request and credential references")
     # Validate again: callers could construct a dataclass without using the validator.
     canonical = build_request_spec(spec.lane, spec.username,
-                                   after=spec.after, limit=spec.limit)
+                                   after=spec.after, limit=spec.limit,
+                                   include_carousel_children=spec.include_carousel_children)
     if spec != canonical:
         raise ValueError("Untrusted request specification")
     if spec.lane != credentials.lane:
@@ -74,6 +77,7 @@ def prepare_graph_request(spec: RequestSpec, credentials: CredentialReference,
         ig_user_id=caller_ig_id, fields=business_discovery_field(spec),
         after_present=spec.after is not None, after=spec.after,
         token_env_name=credentials.token_env_name,
+        include_carousel_children=spec.include_carousel_children,
     )
 
 

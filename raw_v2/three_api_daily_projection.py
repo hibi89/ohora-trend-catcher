@@ -179,13 +179,14 @@ class DailyGuardedSnapshot:
     """
 
     def __init__(self, source_db, ledger_db, accounts, references, environment,
-                 day, *, http_client=None):
+                 day, *, http_client=None, include_carousel_children=False):
         source_db=Path(source_db)
         ledger_db=Path(ledger_db)
         if source_db.resolve()==ledger_db.resolve():
             raise DailyProjectionError("Separate staging and gap stores required")
         self.executor=GuardedThreeApiExecutor(
-            source_db,accounts,references,environment,http_client=http_client
+            source_db,accounts,references,environment,http_client=http_client,
+            include_carousel_children=include_carousel_children
         )
         try:
             self.ledger=DailyGapLedger(ledger_db)

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import re
 
 _FIELDS = "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count,thumbnail_url"
+# Explicit opt-in only. Nested field grammar is unverified against live Meta API.
+_CAROUSEL_CHILDREN = "children{id,media_type,media_url,thumbnail_url}"
 _USERNAME = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 _CURSOR = re.compile(r"^[A-Za-z0-9_=-]{1,512}$")
 
@@ -20,6 +22,7 @@ class RequestSpec:
     limit: int
     media_fields: str
     after: str | None
+    include_carousel_children: bool = False
     method: str = "GET"
     endpoint: str = "/{ig-user-id}"
 
@@ -27,11 +30,15 @@ class RequestSpec:
         return {"lane": self.lane, "username": self.username,
                 "limit": self.limit, "media_fields": self.media_fields,
                 "after_present": self.after is not None,
+                "carousel_children_opt_in": self.include_carousel_children,
                 "method": self.method, "endpoint": self.endpoint}
 
 
-def build_request_spec(lane, username, *, after=None, limit=4):
+def build_request_spec(lane, username, *, after=None, limit=4,
+                       include_carousel_children=False):
     """Validate the intended query before any future authenticated adapter."""
+    if type(include_carousel_children) is not bool:
+        raise ValueError("Carousel child expansion requires a boolean opt-in")
     if lane not in ("A", "B", "C"):
         raise ValueError("Unknown lane")
     if not isinstance(username, str) or not _USERNAME.fullmatch(username):
@@ -42,7 +49,9 @@ def build_request_spec(lane, username, *, after=None, limit=4):
         not isinstance(after, str) or not _CURSOR.fullmatch(after)
     ):
         raise ValueError("Invalid opaque cursor")
-    return RequestSpec(lane, username, limit, _FIELDS, after)
+    fields = _FIELDS + ("," + _CAROUSEL_CHILDREN if include_carousel_children else "")
+    return RequestSpec(lane, username, limit, fields, after,
+                       include_carousel_children=include_carousel_children)
 
 
 def business_discovery_field(spec):

@@ -25,7 +25,10 @@ class GuardedExecutionError(ValueError):
 
 
 class _GuardedPageFetcher:
-    def __init__(self, references, environment, client, version):
+    def __init__(self, references, environment, client, version,
+                 include_carousel_children=False):
+        if type(include_carousel_children) is not bool:
+            raise GuardedExecutionError("Carousel child expansion must be boolean")
         if not isinstance(references, Mapping) or set(references) != {"A", "B", "C"}:
             raise GuardedExecutionError("Exactly three credential references required")
         if not isinstance(environment, Mapping):
@@ -48,6 +51,7 @@ class _GuardedPageFetcher:
         self._environment = environment
         self._client = client
         self._version = version
+        self._include_carousel_children = include_carousel_children
 
     def __repr__(self):
         return "_GuardedPageFetcher(mode='OFFLINE_INTEGRATION_ONLY')"
@@ -74,7 +78,8 @@ class _GuardedPageFetcher:
             raise GuardedExecutionError("Lane credential unavailable")
         try:
             spec = build_request_spec(lane, intent.get("username"),
-                                      after=cursor, limit=4)
+                                      after=cursor, limit=4,
+                                      include_carousel_children=self._include_carousel_children)
             prepared = prepare_graph_request(
                 spec, ref, caller, version=self._version
             )
@@ -89,10 +94,14 @@ class GuardedThreeApiExecutor:
     """Isolated coordinator + fail-closed bridge, never a production collector."""
 
     def __init__(self, state_db, accounts, references, environment,
-                 *, http_client=None, version="v26.0"):
+                 *, http_client=None, version="v26.0",
+                 include_carousel_children=False):
         # A disabled transport is always the default.
         client = GraphHTTPClient() if http_client is None else http_client
-        fetcher = _GuardedPageFetcher(references, environment, client, version)
+        fetcher = _GuardedPageFetcher(
+            references, environment, client, version,
+            include_carousel_children=include_carousel_children,
+        )
         self._runner = OfflineThreeApiRunner(
             Path(state_db), accounts, fetcher, envelope_fixture=True,
         )
