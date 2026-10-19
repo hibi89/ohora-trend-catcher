@@ -455,3 +455,8 @@ User: `git pull origin main`, run the full collector dry run then its explicit `
 - 최신 코드 커밋: `5a8e41f48e44fb1c67084da1744b4e62137b4a49`. 이 SHA의 CI는 이 기록 시점 **미확인**. 직전 `cb974e1` CI는 P6 C Contract PASS, Three API 및 P6 Runtime Integration FAIL(동일 RAW projection fixture의 CHECK constraint 오류, 총 492 tests 중 1 error).
 - 미완료: coordinator lease ↔ RequestEnvelope ↔ contract executor ↔ durable RAW receipt ↔ PageEvidenceStore를 묶는 오프라인 통합 어댑터, 만료 lease의 outcome reconciliation, DB 간 장애 복구 검증, 운영 Meta E2E.
 - 검증 주의: 과거 489 PASS 기록을 최신 492 테스트 전체 통과로 오인하지 말 것. 새로운 SHA의 CI 결과를 먼저 확인.
+
+
+### P6 CI 검증 업데이트 (2026-10-19)
+- 코드 커밋 `5a8e41f48e44fb1c67084da1744b4e62137b4a49`에 대한 GitHub Actions **Three API offline tests / P6 Runtime Integration Offline / P6 C Contract Offline 모두 success** 확인. 이 결과는 해당 코드 SHA에 대한 것이며 이후 문서 변경 커밋 전체에 대한 별도 CI 판정은 아님.
+- 기존 `OfflineDailyOrchestrator`는 294 계정·격리 SQLite 3개·수동 synthetic fixture·재시작 reconcile을 이미 제공한다. 실 Meta transport와 ContractExecutor를 연결한 운영 어댑터는 여전히 미구현; synthetic 성공을 live 검증으로 표기하지 않는다.
