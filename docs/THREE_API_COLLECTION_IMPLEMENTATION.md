@@ -1,3 +1,5 @@
+> **2026-10-19 p6 Meta 응답 정규화:** `raw_v2/three_api_meta_normalizer.py`에 Business Discovery 응답 정규화(허용 필드만 저장, `paging.next` URL 제거, 오류/중복 아닌 유효성 검사)를 구현하고 오프라인 실행기에 `meta_fixture=True`로 연결했다. 신규 테스트 7개 및 CI 등록. 기존 Windows 37/37 PASS, 이후 신규 12개 포함 **49개 재검증 전**. 실제 API 호출·토큰 사용·운영 DB 변경 없음. Meta 실제 응답과의 호환성은 미검증.
+
 ## 2026-10-19 offline runner integration milestone
 - Added `raw_v2/three_api_offline_runner.py` with injectable synthetic fixture `fetch_page(intent,cursor)`; leases A/B/C, builds official 294-account intent, resolves the verified prior cursor, atomically stages normalized posts and cursor evidence. No credentials, network calls, or production DB access.
 - Five new `tests/test_three_api_offline_runner.py` cover first page, A-to-C cursor chain, invalid response rollback, fixture failure, and terminal page. CI includes them. **Windows regression now totals 42 tests pending rerun** (prior 37/37 PASS).
