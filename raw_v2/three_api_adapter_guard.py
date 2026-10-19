@@ -1,7 +1,8 @@
-"""Offline-only preflight guard for a coordinator job and contract request.
+"""Offline-only guarded bridges for coordinator jobs and contract requests.
 
-This module performs no network access, credential reads, or database writes.
-It is a fail-closed boundary, not a live adapter or a completion mechanism.
+Validation is read-only; injected executors and evidence ports may perform
+writes. No built-in network sender, credential reads, scheduler, or live adapter.
+An immutable job/request reservation is mandatory before guarded dispatch.
 """
 from __future__ import annotations
 
@@ -70,7 +71,7 @@ def execute_guarded(job, request, evidence, executor, *, bindings=None, now=None
 def verify_raw_completion(request, receipt, capture_port, raw_port):
     """Read-only gate before any coordinator page-evidence acknowledgement.
 
-    Verify the durable capture, matching RAW receipt, and confirmed intent.
+    Verify the durable capture and matching persisted RAW receipt.
     This does NOT commit coordinator evidence or repair expired leases.
     """
     from three_api_runtime_contract import validate_raw_receipt
