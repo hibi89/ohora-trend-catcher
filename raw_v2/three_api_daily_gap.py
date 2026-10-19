@@ -1,9 +1,10 @@
 """Offline KST daily-front and durable catch-up continuity ledger.
 
-This is a separate policy prototype, NOT wired to Meta, production RAW v2,
-or the existing one-shot three-API coordinator. It stores only synthetic or
-explicitly supplied post IDs, cursor edges and audit state in its own SQLite
-file. User authorization is required before any live connector is written.
+This is an isolated offline policy ledger. DailyEvidenceProjector can
+project completed, ordered three-API staging evidence into it, but there is
+no live Meta connector, background scheduler, or RAW production DB writer.
+It stores IDs, cursor edges and audit state in a separate SQLite file.
+Live integration and real post persistence still require explicit approval.
 
 Daily front: at most three pages x four posts = twelve per account.
 If the prior latest post ID was not reached, preserve its anchor and next
