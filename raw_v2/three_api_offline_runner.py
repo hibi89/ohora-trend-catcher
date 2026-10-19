@@ -12,17 +12,21 @@ from three_api_coordinator import Coordinator, LANES
 from three_api_evidence import PageEvidenceStore
 from three_api_adapter import build_intent
 from three_api_meta_normalizer import normalize_meta_page
+from three_api_http_fixture import stage_fixture_envelope
 
 
 class OfflineThreeApiRunner:
-    def __init__(self, state_db, accounts, fetch_page, *, meta_fixture=False):
+    def __init__(self, state_db, accounts, fetch_page, *, meta_fixture=False, envelope_fixture=False):
         if not callable(fetch_page):
             raise TypeError("A callable offline page fixture is required")
         self.coordinator = Coordinator(Path(state_db))
         self.evidence = PageEvidenceStore(self.coordinator)
         self.accounts = accounts
         self.fetch_page = fetch_page
+        if meta_fixture and envelope_fixture:
+            raise ValueError('Choose only one fixture format')
         self.meta_fixture = meta_fixture
+        self.envelope_fixture = envelope_fixture
 
     def close(self):
         self.coordinator.db.close()
@@ -45,6 +49,9 @@ class OfflineThreeApiRunner:
         response = self.fetch_page(intent, cursor)
         if not isinstance(response, dict):
             raise ValueError("Fixture response must be a dictionary")
+        if self.envelope_fixture:
+            return stage_fixture_envelope(
+                self.coordinator, self.evidence, job, response, now=now)
         if self.meta_fixture:
             response = normalize_meta_page(response, requested_cursor=cursor)
         edge = self.evidence.commit_staged_page(
