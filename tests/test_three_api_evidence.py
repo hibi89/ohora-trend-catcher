@@ -133,5 +133,67 @@ class EvidenceTests(unittest.TestCase):
         ).fetchone()[0], 0)
 
 
+    def test_staged_commit_is_atomic(self):
+        job = self.c.lease("A")
+        edge = self.e.commit_staged_page(
+            job["id"], job["lease_id"], {
+                "data": [{"id": "post-1", "caption": "nail"}],
+                "paging": {"next": "https://graph.facebook.com/next",
+                           "cursors": {"after": "edge1"}},
+            })
+        self.assertEqual(edge["next_cursor"], "edge1")
+        self.assertEqual(self.c.db.execute(
+            "SELECT COUNT(*) FROM staging_posts"
+        ).fetchone()[0], 1)
+        self.assertEqual(self.c.db.execute(
+            "SELECT COUNT(*) FROM page_evidence"
+        ).fetchone()[0], 1)
+        self.assertEqual(self.c.db.execute(
+            "SELECT state FROM jobs WHERE id=?", (job["id"],)
+        ).fetchone()[0], "done")
+
+    def test_staged_invalid_cursor_rolls_back_posts(self):
+        job = self.c.lease("A")
+        with self.assertRaises(ValueError):
+            self.e.commit_staged_page(
+                job["id"], job["lease_id"], {
+                    "data": [{"id": "post-1"}],
+                    "paging": {"next": "https://graph.facebook.com/next"},
+                })
+        self.assertEqual(self.c.db.execute(
+            "SELECT COUNT(*) FROM staging_posts"
+        ).fetchone()[0], 0)
+        self.assertEqual(self.c.db.execute(
+            "SELECT COUNT(*) FROM page_evidence"
+        ).fetchone()[0], 0)
+
+    def test_staged_duplicate_post_id_rejected(self):
+        job = self.c.lease("A")
+        with self.assertRaises(ValueError):
+            self.e.commit_staged_page(job["id"], job["lease_id"], {
+                "data": [{"id": "dup"}, {"id": "dup"}],
+            })
+        self.assertEqual(self.c.db.execute(
+            "SELECT COUNT(*) FROM staging_posts"
+        ).fetchone()[0], 0)
+
+    def test_staged_stale_lease_rolls_back(self):
+        job = self.c.lease("A")
+        with self.assertRaises(ValueError):
+            self.e.commit_staged_page(job["id"], "stale", {
+                "data": [{"id": "post-1"}],
+            })
+        self.assertEqual(self.c.db.execute(
+            "SELECT COUNT(*) FROM staging_posts"
+        ).fetchone()[0], 0)
+
+    def test_staged_limit_rejected(self):
+        job = self.c.lease("A")
+        with self.assertRaises(ValueError):
+            self.e.commit_staged_page(job["id"], job["lease_id"], {
+                "data": [{"id": str(i)} for i in range(5)],
+            })
+
+
 if __name__ == "__main__":
     unittest.main()
