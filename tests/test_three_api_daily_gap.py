@@ -156,5 +156,30 @@ class DailyGapTests(unittest.TestCase):
         with self.assertRaises(GapEvidenceError):
             self.l.record_page("KR_001","2026-10-19",phase="catchup",requested_cursor="p5",post_ids=["99"])
 
+    def test_previous_day_partial_front_blocks_history_on_next_day(self):
+        self.seed()
+        self.l.record_page("KR_001","2026-10-19",phase="front",
+                           post_ids=["115","114"],next_cursor="p2")
+        self.l.begin_day("KR_001","2026-10-20")
+        self.l.record_page("KR_001","2026-10-20",phase="front",
+                           post_ids=["117","115"])
+        actions=self.l.next_actions(["KR_001"],"2026-10-20")
+        self.assertEqual(actions[0]["phase"],"needs_review")
+        self.assertEqual(actions[0]["gap_day"],"2026-10-19")
+
+    def test_existing_earlier_daily_window_can_resume_after_new_head(self):
+        self.seed()
+        self.l.record_page("KR_001","2026-10-19",phase="front",
+                           post_ids=["115","114"],next_cursor="p2")
+        self.l.begin_day("KR_001","2026-10-20")
+        self.l.record_page("KR_001","2026-10-20",phase="front",
+                           post_ids=["117","115"])
+        state=self.l.begin_day("KR_001","2026-10-19")
+        self.assertEqual(state["front_pages"],1)
+        self.l.record_page("KR_001","2026-10-19",phase="front",
+                           requested_cursor="p2",post_ids=["113","112"],
+                           next_cursor="p3")
+        self.assertEqual(self.l.status("KR_001","2026-10-19")["front_pages"],2)
+
 if __name__ == "__main__":
     unittest.main()
