@@ -331,6 +331,59 @@ class Coordinator:
             ],
         }
 
+    def recovery_ready_diagnostics(self, now=None):
+        """Read-only counts of bound recovery candidates per lane.
+
+        Mirrors lease_for_recovery eligibility without changing leases.
+        Bound work with an active lease, blocked predecessor, or absent
+        cursor proof is excluded. A halted lane reports zero ready jobs.
+        """
+        now = now or utcnow()
+        current = stamp(now)
+        tables = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        proof = (
+            """ AND (j.page=1 OR EXISTS (
+                SELECT 1 FROM page_evidence proof
+                WHERE proof.account_ordinal=j.account_ordinal
+                  AND proof.page=j.page-1 AND proof.terminal=0
+                  AND proof.response_cursor IS NOT NULL
+            ))""" if "page_evidence" in tables else ""
+        )
+        bound = (
+            """ AND EXISTS (
+                SELECT 1 FROM job_request_bindings b WHERE b.job_id=j.id
+            )""" if "job_request_bindings" in tables else " AND 0"
+        )
+        rows = self.db.execute(
+            """SELECT lane.lane,
+               CASE WHEN lane.halted=0 AND lane.ready_at<=?
+                    THEN 1 ELSE 0 END AS lane_ready,
+               COUNT(j.id) AS eligible_jobs
+               FROM lanes lane
+               LEFT JOIN jobs j ON j.lane=lane.lane
+                 AND (j.state='pending' OR
+                      (j.state='leased' AND j.leased_until<=?))
+                 AND NOT EXISTS (
+                     SELECT 1 FROM jobs earlier
+                     WHERE earlier.account_ordinal=j.account_ordinal
+                       AND earlier.page<j.page AND earlier.state!='done'
+                 )""" + proof + bound + """
+               GROUP BY lane.lane,lane.halted,lane.ready_at
+               ORDER BY lane.lane""",
+            (current, current),
+        ).fetchall()
+        return {
+            "mode": "OFFLINE_RECOVERY_READ_ONLY_NO_DISPATCH",
+            "as_of_utc": current,
+            "lanes": [
+                {"lane": row["lane"], "lane_ready": bool(row["lane_ready"]),
+                 "eligible_jobs": row["eligible_jobs"],
+                 "recoverable_now": row["eligible_jobs"] if row["lane_ready"] else 0}
+                for row in rows
+            ],
+        }
+
     def summary(self):
         return {
             "mode":"OFFLINE_ONLY_NO_META_CALLS",
