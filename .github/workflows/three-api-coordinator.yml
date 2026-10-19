@@ -20,6 +20,7 @@ on:
       - 'raw_v2/three_api_guarded_executor.py'
       - 'raw_v2/three_api_daily_gap.py'
       - 'raw_v2/three_api_daily_projection.py'
+      - 'raw_v2/three_api_daily_orchestrator.py'
       - 'raw_v2/three_api_reanchor.py'
       - 'raw_v2/three_api_catchup_offline.py'
       - 'raw_v2/three_api_catchup_payload.py'
@@ -44,6 +45,7 @@ on:
       - 'tests/test_three_api_guarded_executor.py'
       - 'tests/test_three_api_daily_gap.py'
       - 'tests/test_three_api_daily_projection.py'
+      - 'tests/test_three_api_daily_orchestrator.py'
       - 'tests/test_three_api_reanchor.py'
       - 'tests/test_three_api_catchup_offline.py'
       - 'tests/test_three_api_catchup_payload.py'
@@ -71,6 +73,7 @@ on:
       - 'raw_v2/three_api_guarded_executor.py'
       - 'raw_v2/three_api_daily_gap.py'
       - 'raw_v2/three_api_daily_projection.py'
+      - 'raw_v2/three_api_daily_orchestrator.py'
       - 'raw_v2/three_api_reanchor.py'
       - 'raw_v2/three_api_catchup_offline.py'
       - 'raw_v2/three_api_catchup_payload.py'
@@ -95,6 +98,7 @@ on:
       - 'tests/test_three_api_guarded_executor.py'
       - 'tests/test_three_api_daily_gap.py'
       - 'tests/test_three_api_daily_projection.py'
+      - 'tests/test_three_api_daily_orchestrator.py'
       - 'tests/test_three_api_reanchor.py'
       - 'tests/test_three_api_catchup_offline.py'
       - 'tests/test_three_api_catchup_payload.py'
@@ -119,8 +123,8 @@ jobs:
           python-version: '3.11'
       - name: Compile all three-API modules and tests
         run: |
-          python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py raw_v2/three_api_checkpoints.py raw_v2/three_api_paging.py raw_v2/three_api_evidence.py raw_v2/three_api_offline_runner.py raw_v2/three_api_meta_normalizer.py raw_v2/three_api_usage.py raw_v2/three_api_http_fixture.py raw_v2/three_api_request_spec.py raw_v2/three_api_credentials.py raw_v2/three_api_http_preflight.py raw_v2/three_api_runtime_boundary.py raw_v2/three_api_graph_http.py raw_v2/three_api_guarded_executor.py raw_v2/three_api_daily_gap.py raw_v2/three_api_daily_projection.py raw_v2/three_api_reanchor.py raw_v2/three_api_catchup_offline.py raw_v2/three_api_raw_mirror.py raw_v2/three_api_raw_projection.py raw_v2/three_api_catchup_payload.py
-          python -m py_compile tests/test_three_api_coordinator.py tests/test_three_api_adapter.py tests/test_three_api_checkpoints.py tests/test_three_api_paging.py tests/test_three_api_evidence.py tests/test_three_api_offline_runner.py tests/test_three_api_meta_normalizer.py tests/test_three_api_usage.py tests/test_three_api_http_fixture.py tests/test_three_api_envelope_runner.py tests/test_three_api_policy_hardening.py tests/test_three_api_request_spec.py tests/test_three_api_credentials.py tests/test_three_api_http_preflight.py tests/test_three_api_runtime_boundary.py tests/test_three_api_graph_http.py tests/test_three_api_guarded_executor.py tests/test_three_api_daily_gap.py tests/test_three_api_daily_projection.py tests/test_three_api_reanchor.py tests/test_three_api_catchup_offline.py tests/test_three_api_raw_mirror.py tests/test_three_api_raw_projection.py tests/test_three_api_catchup_payload.py tests/test_three_api_carousel_children.py tests/test_three_api_carousel_optin.py
+          python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py raw_v2/three_api_checkpoints.py raw_v2/three_api_paging.py raw_v2/three_api_evidence.py raw_v2/three_api_offline_runner.py raw_v2/three_api_meta_normalizer.py raw_v2/three_api_usage.py raw_v2/three_api_http_fixture.py raw_v2/three_api_request_spec.py raw_v2/three_api_credentials.py raw_v2/three_api_http_preflight.py raw_v2/three_api_runtime_boundary.py raw_v2/three_api_graph_http.py raw_v2/three_api_guarded_executor.py raw_v2/three_api_daily_gap.py raw_v2/three_api_daily_projection.py raw_v2/three_api_reanchor.py raw_v2/three_api_catchup_offline.py raw_v2/three_api_raw_mirror.py raw_v2/three_api_raw_projection.py raw_v2/three_api_catchup_payload.py raw_v2/three_api_daily_orchestrator.py
+          python -m py_compile tests/test_three_api_coordinator.py tests/test_three_api_adapter.py tests/test_three_api_checkpoints.py tests/test_three_api_paging.py tests/test_three_api_evidence.py tests/test_three_api_offline_runner.py tests/test_three_api_meta_normalizer.py tests/test_three_api_usage.py tests/test_three_api_http_fixture.py tests/test_three_api_envelope_runner.py tests/test_three_api_policy_hardening.py tests/test_three_api_request_spec.py tests/test_three_api_credentials.py tests/test_three_api_http_preflight.py tests/test_three_api_runtime_boundary.py tests/test_three_api_graph_http.py tests/test_three_api_guarded_executor.py tests/test_three_api_daily_gap.py tests/test_three_api_daily_projection.py tests/test_three_api_reanchor.py tests/test_three_api_catchup_offline.py tests/test_three_api_raw_mirror.py tests/test_three_api_raw_projection.py tests/test_three_api_catchup_payload.py tests/test_three_api_carousel_children.py tests/test_three_api_carousel_optin.py tests/test_three_api_daily_orchestrator.py
       - name: Run three-API offline regression suites
         run: |
           python -m unittest discover -s tests -p 'test_three_api_coordinator.py' -v
@@ -142,6 +146,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_three_api_guarded_executor.py' -v
           python -m unittest discover -s tests -p 'test_three_api_daily_gap.py' -v
           python -m unittest discover -s tests -p 'test_three_api_daily_projection.py' -v
+          python -m unittest discover -s tests -p 'test_three_api_daily_orchestrator.py' -v
           python -m unittest discover -s tests -p 'test_three_api_reanchor.py' -v
           python -m unittest discover -s tests -p 'test_three_api_catchup_offline.py' -v
           python -m unittest discover -s tests -p 'test_three_api_catchup_payload.py' -v
