@@ -18,7 +18,8 @@ class ContractTests(unittest.TestCase):
             account_ordinal=1, account_key="KR_001", username="example.nails",
             lane="A", phase="front", page=1, cursor=None,
             requested_at=datetime(2026, 10, 19, 9, tzinfo=timezone(timedelta(hours=9))),
-            request_spec=spec, request_spec_digest=digest_sha256(spec),
+            request_spec=spec, api_version="v24.0", target_ig_user_id="17841400000000000",
+            request_spec_digest=digest_sha256({"api_version": "v24.0", "target_ig_user_id": "17841400000000000", "spec": spec}),
         )
 
     def test_request_time_normalized_and_spec_bound(self):
