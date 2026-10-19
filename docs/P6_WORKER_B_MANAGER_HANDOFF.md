@@ -22,3 +22,10 @@ C RawWriterPort expects write_capture(CaptureRecord)->RawWriteReceipt and get_ra
 
 ## Verification honesty
 GitHub commits are real; no executed test result, Draft PR, or integration success is claimed yet.
+
+## Worker B incremental update (2026-10-19, latest)
+- Writer validation hardening commits: dcc083fb193fd00f584294cddc03c7dc5ff519c2 (carousel IDs/counts), 0d6d3859f993d81e2e2a59f82cbaa078f70f5a9a (empty post IDs).
+- Offline tests expanded to 13 authored cases, including late media collision atomic rollback: 8e50e4ffd74450d8e8ab52c7a44f549df5455174. **Not executed; pass status unknown.**
+- C contract file changed since initial review (blob SHA be9c1b9853576f1c3a27aad90e2ef1bc8c7ef572) but still declares `CONTRACT_VERSION = "0.2-draft"`; manager must publish approved immutable contract SHA before runtime integration.
+- Next isolated verification command (no Meta/operational DB): `python -m unittest discover -s tests -p test_three_api_raw_writer.py -v`.
+- Existing provisional writer uses dict/string interface and does not yet meet C RawWriterPort. Do not promote or mark production-ready.
