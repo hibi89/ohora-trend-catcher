@@ -139,6 +139,55 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(self.bindings.lookup(reissued["id"])["request_id"],
                          self.request.request_id)
 
+    def test_job_bound_capture_raw_and_page_completion_end_to_end(self):
+        journal = CaptureJournal(str(self.root / "capture.sqlite"))
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        db.executescript(SCHEMA)
+        db.execute("INSERT INTO accounts VALUES(?)", ("KR_001",))
+        transport = FakeTransport(make_response(self.request))
+        executor = ThreeApiContractExecutor(
+            transport, journal, ContractRawWriter(db),
+            clock=lambda: self.start)
+        try:
+            receipt = execute_guarded(
+                self.job, self.request, self.evidence, executor,
+                bindings=self.bindings, now=self.start)
+            self.assertEqual(receipt.status, "committed")
+            other_request = replace(self.request, request_id="req-" + "d" * 64)
+            with self.assertRaises(JobBindingError):
+                self.bindings.commit_captured_page(
+                    self.job, other_request, self.evidence,
+                    journal, ContractRawWriter(db), now=self.start)
+            self.assertEqual(self.coordinator.db.execute(
+                "SELECT COUNT(*) FROM page_evidence"
+            ).fetchone()[0], 0)
+
+            edge = self.bindings.commit_captured_page(
+                self.job, self.request, self.evidence,
+                journal, ContractRawWriter(db), now=self.start)
+            self.assertTrue(edge["terminal"])
+            self.assertEqual(transport.calls, 1)
+            self.assertEqual(self.coordinator.db.execute(
+                "SELECT state FROM jobs WHERE id=?", (self.job["id"],)
+            ).fetchone()[0], "done")
+            saved = self.coordinator.db.execute(
+                "SELECT receipt FROM page_evidence WHERE job_id=?",
+                (self.job["id"],)).fetchone()
+            self.assertEqual(saved[0], receipt.raw_receipt_id)
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM post_observations"
+            ).fetchone()[0], 1)
+            with self.assertRaises(JobBindingError):
+                self.bindings.commit_captured_page(
+                    self.job, self.request, self.evidence,
+                    journal, ContractRawWriter(db), now=self.start)
+            self.assertEqual(self.coordinator.db.execute(
+                "SELECT COUNT(*) FROM page_evidence"
+            ).fetchone()[0], 1)
+        finally:
+            journal.close()
+            db.close()
+
     def test_lease_must_be_live_before_reservation(self):
         with self.assertRaises(JobBindingError):
             self.bindings.reserve(
