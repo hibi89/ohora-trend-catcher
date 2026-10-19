@@ -55,6 +55,8 @@ class OperatorReportTests(unittest.TestCase):
         self.assertEqual(report["daily_front"]["first_page_missing"],294)
         self.assertEqual(report["daily_front"]["first_page_committed"],0)
         self.assertEqual(report["daily_front"]["front_window_open"],294)
+        self.assertEqual(report["daily_front"]["first_page_proof_gap_in_closed_windows"],0)
+        self.assertIn("첫 페이지 확정 증거",report["daily_front"]["completion_warning"])
         self.assertEqual(len(report["daily_front"]["first_page_missing_sample"]),20)
         self.assertTrue(report["daily_front"]["first_page_missing_sample_truncated"])
         self.assertEqual(report["daily_front"]["first_page_missing_sample"][0],"KR_001")
@@ -211,9 +213,23 @@ class OperatorReportTests(unittest.TestCase):
         self.assertEqual(before,self.dump(obj))
         self.assertEqual(report["daily_front"]["front_window_closed"],294)
         self.assertEqual(report["daily_front"]["first_page_committed"],0)
+        self.assertEqual(report["daily_front"]["first_page_proof_gap_in_closed_windows"],294)
+        self.assertIn("수집 완료로 표시하지 말고",report["daily_front"]["completion_warning"])
         self.assertEqual(report["policy"]["next_phase_if_storage_verified"],
                          "history_held")
         self.assertFalse(report["policy"]["unattended_execution_enabled"])
+
+    def test_single_closed_window_without_source_proof_is_not_completion(self):
+        obj=self.create(front={})
+        obj.ledger.record_page("KR_001",DAY,phase="front",post_ids=["20001"])
+        before=self.dump(obj)
+        report=obj.operator_report(now=NOW)
+        self.assertEqual(before,self.dump(obj))
+        self.assertEqual(report["daily_front"]["front_window_closed"],1)
+        self.assertEqual(report["daily_front"]["first_page_committed"],0)
+        self.assertEqual(report["daily_front"]["first_page_proof_gap_in_closed_windows"],1)
+        self.assertIn("수집 완료로 표시하지 말고",report["daily_front"]["completion_warning"])
+        self.assertFalse(report["live_meta_verified"])
 
     def test_catchup_and_manual_review_counted_from_old_gap_windows(self):
         base=DailyGapLedger(self.ledger)
