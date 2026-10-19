@@ -23,6 +23,23 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(guard.AdapterGuardError):
             guard.validate_job_request(job, request, evidence)
 
+    def test_rejects_malformed_request_without_leaking_error(self):
+        job = {"id": 1, "state": "leased", "lease_id": "x",
+               "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
+        evidence = SimpleNamespace(required_cursor=lambda account, page: None)
+        with self.assertRaises(guard.AdapterGuardError):
+            guard.validate_job_request(job, SimpleNamespace(), evidence)
+
+    def test_rejects_history_even_when_request_matches(self):
+        job = {"id": 1, "state": "leased", "lease_id": "x",
+               "page": 2, "account_ordinal": 1, "lane": "C", "phase": "history"}
+        request = SimpleNamespace(account_ordinal=1, page=2, lane="C",
+                                  phase="history", cursor="cursor2",
+                                  request_spec=SimpleNamespace(after="cursor2"))
+        evidence = SimpleNamespace(required_cursor=lambda account, page: "cursor2")
+        with self.assertRaises(guard.AdapterGuardError):
+            guard.validate_job_request(job, request, evidence)
+
     def test_rejects_unleased_job(self):
         job = {"id": 1, "state": "pending", "lease_id": None,
                "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
