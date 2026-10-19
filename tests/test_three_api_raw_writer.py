@@ -94,11 +94,11 @@ class RawWriterTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT media_id,media_role FROM post_media").fetchall(),
                          [("child-1","carousel_child")])
     def test_failed_commit_can_replay(self):
-        c=capture();c["posts"][0]["children"]="invalid"
+        c=capture();c["posts"][0]["media_type"]="CAROUSEL_ALBUM";c["posts"][0]["children"]="invalid"
         with self.assertRaises(RawWriteError):
             write_capture(self.db,c)
         self.assertEqual(self.count("posts"),0)
-        c["posts"][0].pop("children")
+        c["posts"][0].pop("children");c["posts"][0]["media_type"]="IMAGE"
         self.assertEqual(replay_saved(self.db,c,source_verified=True),"committed")
     def test_source_verification_required(self):
         with self.assertRaises(RawWriteError):
