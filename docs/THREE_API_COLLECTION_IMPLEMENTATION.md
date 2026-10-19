@@ -1,3 +1,5 @@
+> **2026-10-19 p6 자동 검증 확인 (최신):** GitHub Actions [Three API offline tests #39217147308](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39217147308), 코드·테스트 CI 변경 커밋 `1d6e71c344bca9c5181fcc29a89cb0c1c38adc08`에서 **14개 테스트 스위트 합계 91/91 PASS**, Python 3.11 컴파일 PASS. 실제 job 로그까지 확인. 독립 로컬 Python 3.13 관련 테스트 23/23 PASS. 이는 **오프라인 회귀 검증**이지 실제 Meta 인증·수집·쿼터 격리 검증이 아니다. 아래 ‘CI 미확인’은 **해당 기록 당시의 과거 상태**이며 최신 기준으로는 해결됨. 코드: `raw_v2/three_api_http_preflight.py`; 운영 `collection.sqlite`/토큰/실제 API 호출 없음.
+
 > **2026-10-19 — p6 HTTP 오프라인 사전검증 구현 (후속):**
 > - [`three_api_http_preflight.py`](../raw_v2/three_api_http_preflight.py): `RequestSpec`+A/B/C `CredentialReference`+숫자형 IG User ID+Graph 버전(기본 `v26.0`, 기존 collector 기본값)을 검증해 **토큰 없는 GET URL/fields 쿼리 명세** 생성. `repr`/상태 정보에서는 커서·사용자 ID·환경변수명을 노출하지 않으며, 임의로 만든 가짜 `RequestSpec` 입력은 재검증한다. `OfflineFixtureTransport`는 데이터 전용 합성 응답 저장소로 HTTP 기능이 없다.
 > - [`test_three_api_http_preflight.py`](../tests/test_three_api_http_preflight.py) 신규 **11개** 포함, 인증 참조 7개 + 요청 명세 5개까지 격리 로컬 **23/23 PASS** (Python 3.13). 기존 Windows **68/68 PASS**는 이전 스냅샷 기준. 전체 현재 **91개 테스트**의 CI 실행 성공 여부는 별도 확인 필요.
