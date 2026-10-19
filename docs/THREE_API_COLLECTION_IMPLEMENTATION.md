@@ -1,3 +1,8 @@
+## 2026-10-19 offline runner integration milestone
+- Added `raw_v2/three_api_offline_runner.py` with injectable synthetic fixture `fetch_page(intent,cursor)`; leases A/B/C, builds official 294-account intent, resolves the verified prior cursor, atomically stages normalized posts and cursor evidence. No credentials, network calls, or production DB access.
+- Five new `tests/test_three_api_offline_runner.py` cover first page, A-to-C cursor chain, invalid response rollback, fixture failure, and terminal page. CI includes them. **Windows regression now totals 42 tests pending rerun** (prior 37/37 PASS).
+- This is **NOT** a live 3-API engine: fixture injection is not a Meta client, and current coordinator snapshot plan does not implement daily front/catchup/history or anchoring against concurrent new posts. Do not use it to collect live data without separately approved adapter and isolated pilot.
+
 
 ## 2026-10-19 atomic offline staging milestone
 - `PageEvidenceStore.commit_staged_page()` now writes up to four normalized post payloads to `staging_posts` **in the same coordinator SQLite transaction** as page cursor evidence and job completion. It rejects duplicate/invalid post IDs, oversized pages, invalid cursor edges and stale leases; failures roll back staged rows and job status.
