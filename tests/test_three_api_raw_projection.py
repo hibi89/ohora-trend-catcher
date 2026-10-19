@@ -47,7 +47,7 @@ class RawProjectionTests(unittest.TestCase):
         if page==2:
             self.c.db.execute(
                 "INSERT INTO jobs(account_ordinal,page,lane,phase) "
-                "VALUES (1,2,'C','history')"
+                "VALUES (1,2,'C','catchup')"
             )
         lane="A" if page==1 else "C"
         job=self.c.lease(lane,now=NOW)
