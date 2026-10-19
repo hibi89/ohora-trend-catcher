@@ -48,7 +48,8 @@ class AccountStatusTests(unittest.TestCase):
         self.assertEqual(rows[1]['unique_posts'],0)
         self.assertEqual(rows[1]['front_checked_today_kst'],'yes')
         self.assertEqual(rows[0]['front_checked_today_kst'],'yes')
-        self.assertEqual(rows[0]['oldest_post_at'],'2025-03-01T00:00:00+00:00')\n        self.assertEqual(rows[0]['unique_posts'],2) # two observations of p1 must not increase unique post count
+        self.assertEqual(rows[0]['oldest_post_at'],'2025-03-01T00:00:00+00:00')
+        self.assertEqual(rows[0]['unique_posts'],2) # two observations of p1 must not increase unique post count
     def test_history_not_front_catchup_unverified_and_errors(self):
         rows=rows_from_db(self.c,self.now)
         self.assertEqual(rows[4]['front_checked_today_kst'],'unknown')
@@ -66,7 +67,11 @@ class AccountStatusTests(unittest.TestCase):
         self.assertEqual(before,self.db.read_bytes())
         self.c=sqlite3.connect(self.db)
         self.c.row_factory=sqlite3.Row
-    def test_output_failure_keeps_db_unchanged(self):\n        before=self.db.read_bytes()\n        self.c.close()\n        blocked=self.root/'not_a_directory'\n        blocked.write_text('x')\n        with self.assertRaises(OSError): generate(self.db,blocked,self.now)\n        self.assertEqual(before,self.db.read_bytes())\n        self.c=sqlite3.connect(self.db)\n        self.c.row_factory=sqlite3.Row\n    def test_missing_db_and_schema(self):
+    def test_output_failure_keeps_db_unchanged(self):\n        before=self.db.read_bytes()
+        self.c.close()\n        blocked=self.root/'not_a_directory'\n        blocked.write_text('x')\n        with self.assertRaises(OSError): generate(self.db,blocked,self.now)
+        self.assertEqual(before,self.db.read_bytes())
+        self.c=sqlite3.connect(self.db)
+        self.c.row_factory=sqlite3.Row\n    def test_missing_db_and_schema(self):
         with self.assertRaises(FileNotFoundError): generate(self.root/'missing.sqlite',self.root/'reports',self.now)
         self.c.execute('DROP TABLE catchup_jobs');self.c.commit()
         with self.assertRaisesRegex(ValueError,'incompatible'): rows_from_db(self.c,self.now)
