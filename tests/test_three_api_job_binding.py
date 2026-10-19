@@ -256,6 +256,19 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_recovery_respects_lane_halt_and_verified_cooldown(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        later = self.start + timedelta(minutes=16)
+        self.assertTrue(self.coordinator.observe_usage("A", 85, now=self.start))
+        self.assertIsNone(self.coordinator.lease_for_recovery("A", now=later))
+        self.assertFalse(self.coordinator.reset_after_verified_cooldown(
+            "A", now=later))
+        ready = self.start + timedelta(minutes=65)
+        self.assertTrue(self.coordinator.reset_after_verified_cooldown(
+            "A", now=ready))
+        recovered = self.coordinator.lease_for_recovery("A", now=ready)
+        self.assertEqual(recovered["id"], self.job["id"])
+
     def test_recovery_alias_never_consumes_fresh_work(self):
         later = self.start + timedelta(minutes=16)
         self.assertIsNone(self.coordinator.lease_for_recovery("A", now=later))
