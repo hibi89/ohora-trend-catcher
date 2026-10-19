@@ -34,17 +34,25 @@ class CheckpointTests(unittest.TestCase):
     def test_read_only_checkpoint(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "snapshot.sqlite"
-            with sqlite3.connect(path) as db:
+            # sqlite3 connection context commits/rolls back but does not close.
+            db = sqlite3.connect(path)
+            try:
                 db.execute("""CREATE TABLE accounts (
                     account_key TEXT PRIMARY KEY, latest_id TEXT,
                     backfill_cursor TEXT, catchup_cursor TEXT,
                     catchup_anchor TEXT, backfill_done INTEGER)""")
                 db.execute("INSERT INTO accounts VALUES (?,?,?,?,?,?)",
                            ("KR_001", "post1", "after1", None, None, 0))
+                db.commit()
+            finally:
+                db.close()
             result = mod.inspect_checkpoint(path, "KR_001")
             self.assertEqual(result["backfill_cursor"], "after1")
-            with sqlite3.connect(path) as db:
+            db = sqlite3.connect(path)
+            try:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 1)
+            finally:
+                db.close()
 
 
 if __name__ == "__main__":
