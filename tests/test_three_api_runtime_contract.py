@@ -66,9 +66,9 @@ class ContractTests(unittest.TestCase):
     def test_raw_receipt_requires_final_status(self):
         now = datetime(2026, 10, 19, tzinfo=timezone.utc)
         with self.assertRaises(ValueError):
-            RawWriteReceipt(CONTRACT_VERSION, "c", "digest", "raw-1", "pending", now, {})
+            RawWriteReceipt(CONTRACT_VERSION, "c", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "raw-1", "pending", now, {})
         self.assertEqual(RawWriteReceipt(
-            CONTRACT_VERSION, "c", "digest", "raw-1", "committed", now,
+            CONTRACT_VERSION, "c", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "raw-1", "committed", now,
             {"posts": 2}).row_counts["posts"], 2)
 
 
@@ -102,11 +102,11 @@ class ContractTests(unittest.TestCase):
 
     def test_raw_receipt_utc_and_nonnegative_counts(self):
         now = datetime(2026, 10, 19, 9, tzinfo=timezone(timedelta(hours=9)))
-        receipt = RawWriteReceipt(CONTRACT_VERSION, "capture", "digest", "raw",
+        receipt = RawWriteReceipt(CONTRACT_VERSION, "capture", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "raw",
                                   "already_committed", now, {"posts": 0})
         self.assertEqual(receipt.committed_at.utcoffset(), timedelta(0))
         with self.assertRaises(ValueError):
-            RawWriteReceipt(CONTRACT_VERSION, "capture", "digest", "raw",
+            RawWriteReceipt(CONTRACT_VERSION, "capture", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "raw",
                             "committed", now, {"posts": -1})
 
     def test_error_scopes_and_retry_not_approval(self):
