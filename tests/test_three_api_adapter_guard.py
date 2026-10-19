@@ -1,8 +1,14 @@
 """Offline preflight guard tests."""
 import importlib.util
 from pathlib import Path
+import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
+from three_api_coordinator import Coordinator
+from three_api_evidence import PageEvidenceStore
 
 source = Path(__file__).resolve().parents[1] / "raw_v2" / "three_api_adapter_guard.py"
 spec = importlib.util.spec_from_file_location("adapter_guard", source)
@@ -109,6 +115,48 @@ class GuardTests(unittest.TestCase):
                 job, request, receipt, cap_port, missing, evidence,
                 response={"data": []})
         self.assertEqual(calls, [])
+
+    def test_real_sqlite_page_completion_is_atomic_and_not_repeatable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            coordinator = Coordinator(Path(folder) / "isolated.sqlite")
+            try:
+                coordinator.seed()
+                evidence = PageEvidenceStore(coordinator)
+                job = coordinator.lease("A")
+                request = SimpleNamespace(
+                    request_id="req-one", account_ordinal=1, page=1,
+                    lane="A", phase="front", cursor=None,
+                    request_spec=SimpleNamespace(after=None))
+                capture = SimpleNamespace(
+                    capture_id="cap-one", capture_digest="a" * 64,
+                    request=request)
+                receipt = SimpleNamespace(
+                    capture_id="cap-one", capture_digest="a" * 64,
+                    raw_receipt_id="raw-one", status="committed")
+                capture_port = SimpleNamespace(
+                    get_capture_for_request=lambda key: capture)
+                raw_port = SimpleNamespace(
+                    get_raw_receipt=lambda key: receipt)
+                page = {"data": [{"id": "post-1"}],
+                        "paging": {"next": "https://graph.facebook.com/next",
+                                   "cursors": {"after": "edge1"}}}
+                edge = guard.commit_verified_page(
+                    job, request, receipt, capture_port, raw_port,
+                    evidence, response=page)
+                self.assertEqual(edge["next_cursor"], "edge1")
+                self.assertEqual(evidence.required_cursor(1, 2), "edge1")
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT state FROM jobs WHERE id=?", (job["id"],)
+                ).fetchone()[0], "done")
+                with self.assertRaises(ValueError):
+                    guard.commit_verified_page(
+                        job, request, receipt, capture_port, raw_port,
+                        evidence, response=page)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(*) FROM page_evidence"
+                ).fetchone()[0], 1)
+            finally:
+                coordinator.db.close()
 
     def test_rejects_unleased_job(self):
         job = {"id": 1, "state": "pending", "lease_id": None,
