@@ -1,3 +1,6 @@
+> **CI FINAL VERIFIED · 2026-10-19 KST:** source [08b4d4e](https://github.com/hibi89/ohora-trend-catcher/commit/08b4d4e2266ff2e7e2e14479c014d56c0715c113) / [Three API Actions 39238776626](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39238776626) **28 suites, 302/302 PASS**, [RAW v2 Actions 39238776861](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39238776861) **400/400 PASS**. 추가 4개 lane cooldown/lease/restart 테스트 포함. 294개 가상 계정 front 완주 + 한 계정 page2/page3/page4 Catch-up + RAW mirror 309/309/309 및 재시작 중복방지, 한 계정 누락 시 catch-up 차단 검증. 실 Meta/실토큰/운영 collection.sqlite 호출·변경 0회. **이것은 실제 294개 계정 실수집의 증거가 아님.** 이전 본문에 'CI 재검증 중'으로 적힌 것은 과거 시점 기록이며 이 최신 확인을 우선한다. Codex handoff: docs/CODEX_NEXT_SHIFT_2026-10-19.md.
+>
+
 # P6 — Codex 6 Luna Extra High: 다음 교대 개발 지시서
 
 작성: 2026-10-19 KST
