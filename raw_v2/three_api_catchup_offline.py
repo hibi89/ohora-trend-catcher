@@ -3,11 +3,13 @@
 No tokens, Meta transport, automatic scheduler, or RAW collection.sqlite access.
 An inbox proof is staged before the ledger cursor is advanced. On interruption
 reconcile_pending() replays the durable inbox, without fetching another page.
-Only IDs and cursor proofs are persisted, never full RAW media payloads.
+New fixture captures preserve allowlisted payload, digest and observed_at
+atomically beside ID proof. Legacy ID-only pages remain unprojectable.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -20,6 +22,47 @@ from three_api_meta_normalizer import normalize_meta_page
 
 class OfflineCatchupError(ValueError):
     """Sanitized errors; never include tokens, IDs, captions or cursors."""
+
+
+
+def _sealed_payload(account, day, number, cursor, next_cursor, ids, posts, observed_at):
+    return json.dumps(
+        {"account_key": account, "gap_day": day, "page_no": number,
+         "requested_cursor": cursor, "next_cursor": next_cursor,
+         "ids": ids, "posts": posts, "observed_at":observed_at},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    )
+
+
+def verified_catchup_payload(row):
+    """Validate versioned durable post payload against the inbox ID/cursor edge."""
+    if (row["payload_version"] != 1 or not row["payload_json"]
+            or not row["payload_sha256"] or not row["observed_at"]):
+        raise OfflineCatchupError("Unprojectable legacy or incomplete catch-up payload")
+    if hashlib.sha256(row["payload_json"].encode("utf-8")).hexdigest() != row["payload_sha256"]:
+        raise OfflineCatchupError("Catch-up payload seal mismatch")
+    try:
+        envelope = json.loads(row["payload_json"])
+        posts = envelope["posts"]
+        ids = json.loads(row["ids_json"])
+        if (not isinstance(posts, list) or len(posts) > 4
+                or not all(isinstance(p, dict) and isinstance(p.get("id"), str) for p in posts)
+                or ids != [p["id"] for p in posts]
+                or envelope != {
+                    "account_key": row["account_key"], "gap_day": row["gap_day"],
+                    "page_no": row["page_no"],
+                    "requested_cursor": row["requested_cursor"],
+                    "next_cursor": row["next_cursor"], "ids": ids, "posts": posts,
+                    "observed_at":row["observed_at"]
+                }
+                or _sealed_payload(row["account_key"], row["gap_day"], row["page_no"],
+                    row["requested_cursor"], row["next_cursor"], ids, posts,
+                    row["observed_at"])
+                   != row["payload_json"]):
+            raise OfflineCatchupError("Staged payload differs from ID/cursor evidence")
+    except (ValueError, TypeError, KeyError):
+        raise OfflineCatchupError("Invalid staged catch-up payload") from None
+    return posts
 
 
 class OfflineCatchupRunner:
@@ -50,6 +93,8 @@ class OfflineCatchupRunner:
             page_no INTEGER NOT NULL, lane TEXT NOT NULL,
             requested_cursor TEXT, next_cursor TEXT,
             ids_json TEXT NOT NULL, applied INTEGER NOT NULL DEFAULT 0,
+            payload_version INTEGER NOT NULL DEFAULT 0,
+            payload_json TEXT, payload_sha256 TEXT, observed_at TEXT,
             PRIMARY KEY(account_key,gap_day,page_no)
           );
           CREATE TABLE IF NOT EXISTS catchup_lease (
@@ -58,6 +103,16 @@ class OfflineCatchupRunner:
             PRIMARY KEY(account_key,gap_day)
           );
         """)
+        # Add nullable payload columns only; legacy ID-only pages are never invented.
+        cols = {row[1] for row in self.db.execute("PRAGMA table_info(catchup_inbox)")}
+        for name, ddl in (
+            ("payload_version", "INTEGER NOT NULL DEFAULT 0"),
+            ("payload_json", "TEXT"),
+            ("payload_sha256", "TEXT"),
+            ("observed_at", "TEXT"),
+        ):
+            if name not in cols:
+                self.db.execute("ALTER TABLE catchup_inbox ADD COLUMN " + name + " " + ddl)
 
     def _lane_ready(self, lane, now):
         row = self.coordinator.db.execute(
@@ -75,6 +130,10 @@ class OfflineCatchupRunner:
         """Replay existing inbox idempotently, including after proof-before-ack crash."""
         account, day, number = row["account_key"], row["gap_day"], row["page_no"]
         ids = json.loads(row["ids_json"])
+        if row["payload_version"] == 1:
+            verified_catchup_payload(row)
+        elif row["payload_version"] != 0:
+            raise OfflineCatchupError("Unknown catch-up payload version")
         proof = self.db.execute(
             "SELECT requested_cursor,next_cursor,media_ids_json FROM page_proof "
             "WHERE account_key=? AND day=? AND phase='catchup' AND page_no=?",
@@ -209,10 +268,16 @@ class OfflineCatchupRunner:
                         or fresh["catch_pages"] != number - 1
                         or fresh["catch_next"] != cursor):
                     raise OfflineCatchupError("Lease or cursor checkpoint changed")
+                sealed = _sealed_payload(account, gap_day, number, cursor,
+                                         next_cursor, ids, normalized["data"], now.isoformat())
+                digest = hashlib.sha256(sealed.encode("utf-8")).hexdigest()
                 self.db.execute(
-                    "INSERT INTO catchup_inbox VALUES (?,?,?,?,?,?,?,0)",
-                    (account, gap_day, number, lane, cursor, next_cursor,
-                     json.dumps(ids, separators=(",", ":"))))
+                    """INSERT INTO catchup_inbox
+                       (account_key,gap_day,page_no,lane,requested_cursor,next_cursor,
+                        ids_json,applied,payload_version,payload_json,payload_sha256,observed_at)
+                       VALUES (?,?,?,?,?,?,?,0,1,?,?,?)""",
+                    (account,gap_day,number,lane,cursor,next_cursor,
+                     json.dumps(ids,separators=(",",":")),sealed,digest,now.isoformat()))
                 self.db.execute("COMMIT")
             except BaseException:
                 self.db.execute("ROLLBACK")

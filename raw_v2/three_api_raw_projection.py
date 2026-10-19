@@ -7,8 +7,9 @@ before a stable receipt is staged/promoted to the mirror. On interruption the
 mirror's existing receipt holds the original observed_at, so replay needs no
 HTTP or newly fabricated observation time.
 
-Page-4+ catch-up inbox currently contains IDs, not full posts, and is
-deliberately NOT projected as if full payload existed.
+Page-4+ catch-up has a separate sealed-payload companion projector.
+Legacy ID-only catch-up inbox rows remain unprojectable; this front projector
+operates only on completed pages 1-3.
 """
 from __future__ import annotations
 
