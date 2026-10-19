@@ -103,21 +103,24 @@ class MetaTransport:
         except GraphTransportError:
             _fail(request.request_id, "outcome_unknown", "account",
                   "HTTP outcome unknown; manual reconciliation required", unknown=True)
+        if not isinstance(result, dict) or type(result.get("status")) is not int or not isinstance(result.get("body"), dict):
+            _fail(request.request_id, "outcome_unknown", "account",
+                  "Malformed transport outcome; manual reconciliation required", unknown=True)
         status = result["status"]
+        error = result["body"].get("error")
+        if isinstance(error, dict) and error.get("code") == 4:
+            _fail(request.request_id, "rate_limit", "global", "Meta rate limit", status=status)
         if status == 429:
             _fail(request.request_id, "rate_limit", "global", "Rate limit", status=status)
         if status in (401, 403):
             _fail(request.request_id, "auth", "global", "Authentication rejected", status=status)
         if not 200 <= status < 300 or "error" in result["body"]:
-            error = result["body"].get("error", {})
-            if isinstance(error, dict) and error.get("code") == 4:
-                _fail(request.request_id, "rate_limit", "global", "Meta rate limit", status=status)
             _fail(request.request_id, "http_error", "account", "HTTP rejected", status=status)
         # The current GraphHTTPClient retains only allowlisted usage headers.
         # Never silently accept missing headers; C's final parser must be used
         # before any capture is committed.
-        headers = result["headers"]
-        if not headers:
+        headers = result.get("headers")
+        if not isinstance(headers, dict) or not headers:
             _fail(request.request_id, "usage_missing", "global", "Usage evidence missing")
         try:
             usage = parse_meta_usage(headers)
