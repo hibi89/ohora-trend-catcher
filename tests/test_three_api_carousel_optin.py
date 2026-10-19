@@ -186,7 +186,7 @@ class OptInHTTPMirrorTests(unittest.TestCase):
         self.assertEqual(self.mirror.summary()["raw_post_media"],1)
         saved=snapshot.executor._runner.coordinator.db.execute(
             "SELECT payload_json FROM staging_posts").fetchone()[0]
-        self.assertNotIn("children",saved)
+        self.assertNotIn("children",json.loads(saved))
 
     def test_partial_nested_child_page_blocks_receipt_and_lane(self):
         bad=nested_carousel()
