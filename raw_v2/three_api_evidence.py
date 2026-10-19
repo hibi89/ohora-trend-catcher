@@ -45,6 +45,16 @@ class PageEvidenceStore:
             payload_json TEXT NOT NULL,
             PRIMARY KEY(job_id,post_id)
         )""")
+        # Preserve original API media order, not lexical post IDs or rowid.
+        # Created for new isolated staging databases; historical rows without
+        # this evidence must not be silently projected into daily catch-up.
+        self.db.execute("""CREATE TABLE IF NOT EXISTS staging_post_order (
+            job_id INTEGER NOT NULL,
+            position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 4),
+            post_id TEXT NOT NULL,
+            PRIMARY KEY(job_id,position),
+            UNIQUE(job_id,post_id)
+        )""")
 
     def required_cursor(self, account_ordinal, page):
         if page == 1:
@@ -135,7 +145,11 @@ class PageEvidenceStore:
             if edge["next_cursor"] and edge["records"] == 0:
                 raise ValueError("Empty nonterminal page cannot advance cursor")
             if staged_posts is not None:
-                for post in staged_posts:
+                for position, post in enumerate(staged_posts, 1):
+                    self.db.execute(
+                        "INSERT INTO staging_post_order(job_id,position,post_id) VALUES (?,?,?)",
+                        (job_id, position, post["id"]),
+                    )
                     self.db.execute(
                         """INSERT INTO staging_posts
                            (job_id,account_ordinal,page,post_id,payload_json)
