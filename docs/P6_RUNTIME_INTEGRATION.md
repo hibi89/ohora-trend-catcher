@@ -73,3 +73,12 @@ GitHub workflow 상태를 직접 재조회했다. 세부 테스트 수는 해당
 - **실행 순서:** (1) 현재 모듈 입출력·DB schema·lock 경계 표 작성, (2) 합성 격리 DB에서 adapter와 page1→2→3 상태 전이 구현, (3) 중단/재시작·unknown outcome·cursor 변조·중복 receipt·quota 차단·race 회귀 추가, (4) `python tests/run_offline.py` 전체 재실행, (5) HANDOFF/STATUS/PR에 코드 SHA와 실제 CI 결과 기록. 기존 489 테스트를 다시 작성하지 않는다.
 - **금지/미검증:** 운영 자격증명/토큰 열람, 실 Meta 요청, 운영 DB·CSV·RAW 변경, 기존 수집 경로 삭제, 3개 collector의 동시 실행, unattended scheduler 활성화, Draft 해제, main 병합. 새 오프라인 adapter가 완성되어도 Meta 권한·quota 독립성·실 운영 성공은 별도 승인/검증 전까지 미확인이다.
 - **인수인계 품질 기준:** 코드/문서 수정마다 실제 커밋 SHA·테스트 명령·결과를 구분하고, 실패나 접근 불가 항목을 미검증으로 표시한다. 최종 목표는 p6 하나의 운영 가능한 294계정 수집 시스템이며 p7 별도 제품을 만들지 않는다.
+
+## 8. 코드 확인으로 식별한 필수 수정 사항 (2026-10-19, 오프라인 정적 검토)
+
+1. `Coordinator.lease()`는 `leased_until<=now`인 작업을 다시 임대할 수 있다. 하지만 `ThreeApiContractExecutor.execute()`는 이미 intent만 남은 요청을 `outcome_unknown`으로 차단한다. **재임대는 재전송 허가가 아니다.** 동일 `request_id`/capture journal 조회와 수동 reconciliation을 먼저 수행하고, 불확실한 이전 시도가 있으면 새 HTTP 전송을 차단하는 job-level 상태/연계가 필요하다. 현재 coordinator의 `jobs.state`는 pending/leased/done만 있으므로 `blocked_unknown` 등의 명시적 안전 상태가 필요한지 설계·검증한다.
+2. `Coordinator.lease()`의 선행 페이지 evidence 필터는 `page_evidence` 테이블 존재 여부에 따라 활성화된다. 새 adapter는 evidence 없는 legacy 모드에서 page2/3이 잘못 실행되지 않도록 **fail-closed 초기화**를 강제하고, 이전 페이지의 `done`뿐 아니라 RAW receipt와 동일 계정의 opaque cursor 일치까지 검사해야 한다.
+3. `Coordinator.complete()`는 `page_evidence` 테이블이 있으면 bare completion을 거부한다. adapter는 lease 토큰과 durable RAW receipt 확인 뒤 `PageEvidenceStore.commit_page` 경로를 사용해야 한다. 네트워크 성공만으로 job 완료 처리 금지.
+4. 현재 `ThreeApiContractExecutor.execute()`는 capture→RAW 원자성 복구를 제공하지만 coordinator job lease의 획득/반납, account ordinal↔account key 매핑, lane별 cooldown을 직접 관리하지 않는다. 해당 연결은 **미구현**이며, 실 API와 분리된 합성 fixture 기반 integration test를 먼저 작성한다.
+
+이 항목들은 실제 실행 실패 재현 결과가 아닌 **코드상 확인된 통합 위험**이다. 검증된 실패로 과장하지 않는다. Codex 우선순위는 1→2→3→4이며, 각 단계 테스트 통과 전 live runner로 확대하지 않는다.
