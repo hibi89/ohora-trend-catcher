@@ -110,6 +110,10 @@ class MetaTransport:
             )
         except (ValueError, TypeError):
             _fail(request.request_id, "approval_denied", "global", "Invalid request")
+        # Do not spend quota while the C contract cannot accept a successful
+        # response. Explicitly block before the first HTTP attempt.
+        _fail(request.request_id, "approval_denied", "global",
+              "Runtime capture contract not yet approved")
         try:
             result = self._client.fetch(prepared, self._token)
         except GraphHTTPBlocked:
