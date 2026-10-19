@@ -66,6 +66,7 @@ class JobRequestBindingTests(unittest.TestCase):
         self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
         self.coordinator.db.close()
         self.coordinator = Coordinator(self.root / "coordinator.sqlite")
+        self.addCleanup(self.coordinator.db.close)
         self.evidence = PageEvidenceStore(self.coordinator)
         self.bindings = JobRequestBindingStore(self.coordinator)
         future = self.start + timedelta(minutes=16)
@@ -123,6 +124,7 @@ class JobRequestBindingTests(unittest.TestCase):
 
         self.coordinator.db.close()
         self.coordinator = Coordinator(self.root / "coordinator.sqlite")
+        self.addCleanup(self.coordinator.db.close)
         self.evidence = PageEvidenceStore(self.coordinator)
         self.bindings = JobRequestBindingStore(self.coordinator)
         future = self.start + timedelta(minutes=16)
@@ -133,7 +135,7 @@ class JobRequestBindingTests(unittest.TestCase):
             receipt = self.bindings.recover_captured(
                 reissued, self.request, self.evidence, journal,
                 ContractRawWriter(db), now=future)
-            self.assertEqual(receipt.status, "committed")
+            self.assertEqual(receipt.status, "already_committed")
             self.assertEqual(first_transport.calls, 1)
             self.assertEqual(db.execute(
                 "SELECT COUNT(*) FROM three_api_contract_receipts"
