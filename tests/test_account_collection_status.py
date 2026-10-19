@@ -37,7 +37,8 @@ class AccountStatusTests(unittest.TestCase):
             ('KR_005','history','success',200,'2026-10-18T16:03:00+00:00','2026-10-18T16:00:00+00:00',None,None),
             ('KR_006','front','success',200,'2026-10-18T15:03:00+00:00','2026-10-18T15:00:00+00:00',None,None),
         ])
-        self.c.execute('INSERT INTO catchup_jobs VALUES (?)',('KR_006',))\n        self.c.executemany('INSERT INTO post_observations VALUES (?,?)', [('p1','2026-10-17'),('p1','2026-10-18')])
+        self.c.execute('INSERT INTO catchup_jobs VALUES (?)',('KR_006',))
+        self.c.executemany('INSERT INTO post_observations VALUES (?,?)', [('p1','2026-10-17'),('p1','2026-10-18')])
         self.c.commit()
         self.now=datetime(2026,10,19,1,0,tzinfo=timezone.utc)
     def tearDown(self): self.c.close()
