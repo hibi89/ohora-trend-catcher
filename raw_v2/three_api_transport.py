@@ -12,14 +12,17 @@ import json
 from three_api_graph_http import GraphHTTPClient, GraphHTTPBlocked, GraphTransportError
 from three_api_http_preflight import prepare_graph_request
 from three_api_credentials import CredentialReference
-from three_api_runtime_contract import (
-    CONTRACT_VERSION, ResponseEnvelope, TransportFailure,
-)
+def _contract():
+    # C's contract is branch-owned until integration; importing this module
+    # for offline quota checks must not require merging that draft first.
+    from three_api_runtime_contract import CONTRACT_VERSION, TransportFailure
+    return CONTRACT_VERSION, TransportFailure
 
 
 def _fail(request_id, category, scope, message, *, status=None, unknown=False):
-    raise TransportFailure(CONTRACT_VERSION, request_id, category, scope, False,
-                           status, message, unknown)
+    version, failure_type = _contract()
+    raise failure_type(version, request_id, category, scope, False,
+                       status, message, unknown)
 
 
 def parse_meta_usage(headers):
@@ -79,7 +82,8 @@ class MetaTransport:
 
     def send(self, request):
         # Never send a request whose identity differs from its approved envelope.
-        if request.contract_version != CONTRACT_VERSION:
+        version, _ = _contract()
+        if request.contract_version != version:
             _fail(request.request_id, "approval_denied", "global", "Contract mismatch")
         if request.lane != self._credentials.lane:
             _fail(request.request_id, "approval_denied", "global", "Lane mismatch")
