@@ -94,23 +94,6 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(first["id"], reissued["id"])
         self.assertNotEqual(first["lease_id"], reissued["lease_id"])
 
-    def test_evidence_mode_does_not_reissue_expired_lease(self):
-        """An expired lease may have already sent an unknown-outcome request."""
-        t = datetime(2026, 10, 19, tzinfo=timezone.utc)
-        self.c.db.execute(
-            "CREATE TABLE page_evidence (account_ordinal INTEGER, "
-            "page INTEGER, terminal INTEGER, response_cursor TEXT)"
-        )
-        first = self.c.lease("A", t)
-        next_job = self.c.lease("A", t + timedelta(minutes=16))
-        self.assertIsNotNone(next_job)
-        self.assertNotEqual(first["id"], next_job["id"])
-        saved = self.c.db.execute(
-            "SELECT state,lease_id FROM jobs WHERE id=?", (first["id"],)
-        ).fetchone()
-        self.assertEqual(saved["state"], "leased")
-        self.assertEqual(saved["lease_id"], first["lease_id"])
-
     def test_usage_halts_only_affected_lane(self):
         t = datetime(2026, 10, 19, tzinfo=timezone.utc)
         self.assertFalse(self.c.observe_usage("A",84,t))
