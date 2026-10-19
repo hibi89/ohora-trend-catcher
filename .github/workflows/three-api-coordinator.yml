@@ -6,18 +6,22 @@ on:
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_adapter.py'
       - 'raw_v2/three_api_checkpoints.py'
+      - 'raw_v2/three_api_paging.py'
       - 'tests/test_three_api_coordinator.py'
       - 'tests/test_three_api_adapter.py'
       - 'tests/test_three_api_checkpoints.py'
+      - 'tests/test_three_api_paging.py'
       - '.github/workflows/three-api-coordinator.yml'
   pull_request:
     paths:
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_adapter.py'
       - 'raw_v2/three_api_checkpoints.py'
+      - 'raw_v2/three_api_paging.py'
       - 'tests/test_three_api_coordinator.py'
       - 'tests/test_three_api_adapter.py'
       - 'tests/test_three_api_checkpoints.py'
+      - 'tests/test_three_api_paging.py'
       - '.github/workflows/three-api-coordinator.yml'
   workflow_dispatch:
 
@@ -35,10 +39,11 @@ jobs:
           python-version: '3.11'
       - name: Compile all three-API modules and tests
         run: |
-          python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py raw_v2/three_api_checkpoints.py
-          python -m py_compile tests/test_three_api_coordinator.py tests/test_three_api_adapter.py tests/test_three_api_checkpoints.py
+          python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py raw_v2/three_api_checkpoints.py raw_v2/three_api_paging.py
+          python -m py_compile tests/test_three_api_coordinator.py tests/test_three_api_adapter.py tests/test_three_api_checkpoints.py tests/test_three_api_paging.py
       - name: Run three-API offline regression suites
         run: |
           python -m unittest discover -s tests -p 'test_three_api_coordinator.py' -v
           python -m unittest discover -s tests -p 'test_three_api_adapter.py' -v
           python -m unittest discover -s tests -p 'test_three_api_checkpoints.py' -v
+          python -m unittest discover -s tests -p 'test_three_api_paging.py' -v
