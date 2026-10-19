@@ -284,6 +284,16 @@ class JobRequestBindingTests(unittest.TestCase):
             ).fetchone()[0], 1)
             self.assertEqual(journal.get_intent_outcome(self.request.request_id),
                              "captured")
+            page = self.bindings.commit_captured_page(
+                reissued, self.request, self.evidence, journal,
+                ContractRawWriter(db), now=future)
+            self.assertTrue(page["terminal"])
+            self.assertEqual(self.coordinator.db.execute(
+                "SELECT state FROM jobs WHERE id=?", (reissued["id"],)
+            ).fetchone()[0], "done")
+            self.assertEqual(self.coordinator.db.execute(
+                "SELECT COUNT(*) FROM page_evidence"
+            ).fetchone()[0], 1)
             with self.assertRaises(JobBindingError):
                 self.bindings.dispatch_once(
                     reissued, self.request, self.evidence,
