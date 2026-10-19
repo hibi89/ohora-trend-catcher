@@ -64,5 +64,43 @@ class ContractTests(unittest.TestCase):
             {"posts": 2}).row_counts["posts"], 2)
 
 
+    def test_request_digest_rejects_target_or_api_change(self):
+        from dataclasses import replace
+        request = self.make_request()
+        with self.assertRaises(ValueError):
+            replace(request, target_ig_user_id="another-id")
+        with self.assertRaises(ValueError):
+            replace(request, api_version="v99.0")
+
+    def test_history_hold_and_cursor_mismatch(self):
+        from dataclasses import replace
+        request = self.make_request()
+        with self.assertRaises(ValueError):
+            replace(request, phase="history")
+        with self.assertRaises(ValueError):
+            replace(request, cursor="unrelated")
+
+    def test_capture_rejects_unaware_observation_and_field_state(self):
+        request = self.make_request()
+        cursor = CursorState(CONTRACT_VERSION, request.request_id, "src", None, None, 1)
+        args = (CONTRACT_VERSION, "capture-1", request,
+                {"api_version": "v24.0"}, {"data": []}, [],
+                {}, {"likes": "absent"}, {}, cursor)
+        with self.assertRaises(ValueError):
+            CaptureRecord(*args, datetime(2026, 10, 19))
+        with self.assertRaises(ValueError):
+            CaptureRecord(*args[:7], {"likes": "unknown"}, *args[8:],
+                          datetime(2026, 10, 19, tzinfo=timezone.utc))
+
+    def test_raw_receipt_utc_and_nonnegative_counts(self):
+        now = datetime(2026, 10, 19, 9, tzinfo=timezone(timedelta(hours=9)))
+        receipt = RawWriteReceipt(CONTRACT_VERSION, "capture", "digest", "raw",
+                                  "already_committed", now, {"posts": 0})
+        self.assertEqual(receipt.committed_at.utcoffset(), timedelta(0))
+        with self.assertRaises(ValueError):
+            RawWriteReceipt(CONTRACT_VERSION, "capture", "digest", "raw",
+                            "committed", now, {"posts": -1})
+
+
 if __name__ == "__main__":
     unittest.main()
