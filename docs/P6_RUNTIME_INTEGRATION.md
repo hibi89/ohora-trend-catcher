@@ -94,3 +94,22 @@ GitHub workflow 상태를 직접 재조회했다. 세부 테스트 수는 해당
 `three_api_coordinator.py`의 `Coordinator.seed()`는 page1을 `phase='front'`, page2/3을 `phase='history'`로 만든다. 반면 `three_api_runtime_contract.py`의 `RequestEnvelope.__post_init__`은 `phase == 'history'`이면 `ValueError('History lane is on hold')`를 발생시킨다. **현재 coordinator job을 RequestEnvelope에 그대로 매핑하면 page2/3 실행이 불가능하다.**
 
 **수정 원칙:** 과거 365일 backfill을 의미하는 `history`와 당일 최신 12개 수집의 page2/3 continuation을 혼동하지 않는다. 계약 보호를 제거하거나 `history`를 무조건 허용하지 말고, 일일 최신 12개 continuation에 적합한 명시적 phase 의미를 확정한다. coordinator의 job phase/우선순위와 RequestEnvelope 계약을 최소 변경으로 일치시키고, page2/3의 선행 cursor/RAW receipt 및 과거 history 차단 회귀를 추가한다. 이 항목은 정적 코드 대조로 확인되었으며 실제 실행 테스트는 아직 하지 않았다.
+
+
+## 11. 최신 오프라인 완료 기준 및 실제 운영 전환 체크리스트 (2026-10-20)
+
+> 이 절은 §3의 과거 5개/4+1 미결정 표보다 상단의 **최종 294계정 × 최대 3페이지 × 4건** 정책을 우선한다. 과거 표는 의사결정 이력으로만 남긴다. 아래는 실운영 실행 승인이 아니라 **운영 전 검증 절차**이다.
+
+- 검증 코드 SHA: `78395a69a4fabd80ec1255c65c20904428a27bac`. GitHub Actions **P6 C Contract Offline**, **Three API offline tests**, **P6 Runtime Integration Offline** 모두 성공. 전체 Runtime Integration 521개 오프라인 테스트. 이후 `HANDOFF.md`, `STATUS.md` 문서 커밋은 해당 SHA의 테스트 결과와 구별한다.
+- `Coordinator.lease_for_dispatch`: 영속 요청 바인딩이 없는 작업만 선택. `Coordinator.lease_for_recovery`: 만료된 바인딩 작업의 **저장된 Capture만** 복구. `JobRequestBindingStore.dispatch_once`는 HTTP 이전에 영속 바인딩을 확정하며 동일 job 재전송을 금지한다. `commit_captured_page`는 저장된 Capture → RAW receipt → page evidence를 검증한다.
+- `dispatch_ready_diagnostics`는 선행 페이지·커서·임대·레인 쿨다운 조건을 반영하는 읽기 전용 후보 수이며, 실제 성공 건수나 호출 허가가 아니다.
+
+### 운영 전 단계별 수동 확인 (실행 금지 상태)
+
+1. **원본 보호:** 사용자 PC의 공식 294계정 CSV와 기존 SQLite/RAW·WAL/SHM을 변경하지 않고 백업 경로 및 복원 가능성을 확인한다. GitHub에 인증정보·로컬 원본 데이터를 올리지 않는다.
+2. **설정 검증:** Windows 별도 격리 디렉터리에 Coordinator/Capture/RAW 각각 독립 DB 경로를 설정한다. 실운영 `collection.sqlite`를 사용하지 않는다. 계정 ordinal ↔ 공식 roster key, A/B/C의 권한과 호출 주체가 올바른지 확인한다.
+3. **오프라인 사전검사:** `python tests/run_offline.py`를 실행해 전체 회귀를 확인하고, `dispatch_ready_diagnostics`의 후보 수 및 복구 대상을 기록한다. 재시작·만료 임대·커서 누락·85% usage stop을 검증한다.
+4. **별도 승인 후에만 최소 실험:** 독립 레인 1개에서 제한된 1회 Meta 호출로 반환 필드·opaque cursor·usage header·권한을 확인한다. 실험 결과와 민감정보를 분리해 기록한다. 사용량 증거 누락/85% 이상, 인증 실패, 결과 불확실 시 즉시 중단하고 자동 재시도하지 않는다.
+5. **승인 후 확대 판단:** 실제 3레인의 quota 독립성, Capture/RAW receipt 및 페이지 증거, Windows 재시작 복구, 수동 롤백, 운영 중복실행 방지의 증거가 모두 충족될 때만 294계정 실행 및 scheduler/PR 병합을 별도 결정한다.
+
+**현재 미충족:** 검토 완료된 실 Meta dispatcher, 실제 자격증명 기반 제한 파일럿, Windows 운영 검증, 실 quota 독립성 증명, 294계정 운영 E2E. 이 문서와 CI 성공은 실운영 승인으로 간주하지 않는다.
