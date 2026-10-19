@@ -63,7 +63,7 @@ class FullRosterBatchTests(unittest.TestCase):
         self.assertEqual(self._drain_lane(runner,"B",145),144)
         self.assertEqual(runner.coverage()["front_incomplete"],1)
         self.assertEqual(self._drain_lane(runner,"C",2),1)
-        self.assertEqual(self._drain_lane(runner,"B",2),1)
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
         self.assertEqual(runner.coverage()["front_incomplete"],0)
         self.assertEqual(runner.coverage()["unresolved_gap_windows"],1)
         self.assertEqual(runner.step("A",now=NOW)["status"],"applied")
