@@ -113,6 +113,11 @@ class RawWriterTests(unittest.TestCase):
             with self.assertRaises(RawWriteError):
                 write_capture(self.db,c)
         self.assertEqual(self.count("runs"),0)
+    def test_empty_post_id_rejected(self):
+        c=capture();c["posts"][0]["id"]=""
+        with self.assertRaises(RawWriteError):
+            write_capture(self.db,c)
+        self.assertEqual(self.count("posts"),0)
     def test_unknown_account_rejected(self):
         c=capture();c["account_key"]="unknown"
         with self.assertRaises(RawWriteError):
