@@ -1,0 +1,71 @@
+name: P6 Runtime Integration Offline
+
+on:
+  pull_request:
+    paths:
+      - 'raw_v2/three_api_capture.py'
+      - 'raw_v2/three_api_contract_executor.py'
+      - 'raw_v2/three_api_runtime_contract.py'
+      - 'raw_v2/three_api_raw_writer.py'
+      - 'raw_v2/three_api_transport.py'
+      - 'raw_v2/three_api_graph_http.py'
+      - 'raw_v2/three_api_http_preflight.py'
+      - 'raw_v2/three_api_credentials.py'
+      - 'raw_v2/three_api_meta_normalizer.py'
+      - 'raw_v2/three_api_paging.py'
+      - 'raw_v2/three_api_request_spec.py'
+      - 'raw_v2/three_api_usage.py'
+      - 'tests/test_three_api_capture.py'
+      - 'tests/test_three_api_contract_executor.py'
+      - 'tests/test_three_api_runtime_contract.py'
+      - 'tests/test_three_api_raw_writer.py'
+      - 'tests/test_three_api_transport.py'
+      - '.github/workflows/p6-runtime-integration-offline.yml'
+  push:
+    paths:
+      - 'raw_v2/three_api_capture.py'
+      - 'raw_v2/three_api_contract_executor.py'
+      - 'raw_v2/three_api_runtime_contract.py'
+      - 'raw_v2/three_api_raw_writer.py'
+      - 'raw_v2/three_api_transport.py'
+      - 'raw_v2/three_api_graph_http.py'
+      - 'raw_v2/three_api_http_preflight.py'
+      - 'raw_v2/three_api_credentials.py'
+      - 'raw_v2/three_api_meta_normalizer.py'
+      - 'raw_v2/three_api_paging.py'
+      - 'raw_v2/three_api_request_spec.py'
+      - 'raw_v2/three_api_usage.py'
+      - 'tests/test_three_api_capture.py'
+      - 'tests/test_three_api_contract_executor.py'
+      - 'tests/test_three_api_runtime_contract.py'
+      - 'tests/test_three_api_raw_writer.py'
+      - 'tests/test_three_api_transport.py'
+      - '.github/workflows/p6-runtime-integration-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile runtime modules and tests
+        run: |
+          python -m py_compile \
+            raw_v2/three_api_capture.py \
+            raw_v2/three_api_contract_executor.py \
+            raw_v2/three_api_runtime_contract.py \
+            raw_v2/three_api_raw_writer.py \
+            raw_v2/three_api_transport.py \
+            tests/test_three_api_contract_executor.py \
+            tests/test_three_api_runtime_contract.py \
+            tests/test_three_api_raw_writer.py \
+            tests/test_three_api_transport.py
+      - name: Run complete offline regression suite with sockets blocked
+        run: python tests/run_offline.py
