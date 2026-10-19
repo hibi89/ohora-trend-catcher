@@ -40,6 +40,23 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(guard.AdapterGuardError):
             guard.validate_job_request(job, request, evidence)
 
+    def test_guarded_bridge_calls_executor_once(self):
+        job = {"id": 1, "state": "leased", "lease_id": "lease",
+               "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
+        request = SimpleNamespace(account_ordinal=1, page=1, lane="A",
+                                  phase="front", cursor=None,
+                                  request_spec=SimpleNamespace(after=None))
+        evidence = SimpleNamespace(required_cursor=lambda account, page: None)
+        calls = []
+        executor = SimpleNamespace(execute=lambda value: calls.append(value) or "receipt")
+        self.assertEqual(guard.execute_guarded(job, request, evidence, executor),
+                         "receipt")
+        self.assertEqual(calls, [request])
+        request.lane = "B"
+        with self.assertRaises(guard.AdapterGuardError):
+            guard.execute_guarded(job, request, evidence, executor)
+        self.assertEqual(calls, [request])
+
     def test_rejects_unleased_job(self):
         job = {"id": 1, "state": "pending", "lease_id": None,
                "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
