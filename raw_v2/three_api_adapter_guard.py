@@ -60,3 +60,33 @@ def execute_guarded(job, request, evidence, executor):
     if not callable(getattr(executor, "execute", None)):
         raise AdapterGuardError("Invalid contract executor")
     return executor.execute(request)
+
+
+def verify_raw_completion(request, receipt, capture_port, raw_port):
+    """Read-only gate before any coordinator page-evidence acknowledgement.
+
+    Verify the durable capture, matching RAW receipt, and confirmed intent.
+    This does NOT commit coordinator evidence or repair expired leases.
+    """
+    from three_api_runtime_contract import validate_raw_receipt
+
+    if receipt is None or not getattr(request, "request_id", None):
+        raise AdapterGuardError("Missing RAW completion evidence")
+    try:
+        record = capture_port.get_capture_for_request(request.request_id)
+        if record is None or record.request.request_id != request.request_id:
+            raise AdapterGuardError("Durable capture unavailable")
+        persisted = raw_port.get_raw_receipt(record.capture_id)
+        if persisted is None:
+            raise AdapterGuardError("Persisted RAW receipt unavailable")
+        validate_raw_receipt(record, receipt)
+        validate_raw_receipt(record, persisted)
+        if (persisted.raw_receipt_id != receipt.raw_receipt_id
+                or persisted.status not in ("committed", "already_committed")
+                or capture_port.get_intent_outcome(request.request_id) != "captured"):
+            raise AdapterGuardError("RAW completion evidence mismatch")
+    except AdapterGuardError:
+        raise
+    except (AttributeError, TypeError, ValueError):
+        raise AdapterGuardError("Invalid RAW completion evidence") from None
+    return persisted.raw_receipt_id
