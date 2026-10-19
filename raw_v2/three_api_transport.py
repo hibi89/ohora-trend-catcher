@@ -31,6 +31,7 @@ def parse_meta_usage(headers):
     if not isinstance(headers, dict):
         raise ValueError("Missing usage evidence")
     levels = []
+    headers = {str(k).lower(): v for k, v in headers.items()}
     for name in ("x-app-usage", "x-business-use-case-usage"):
         if name not in headers:
             continue
@@ -39,12 +40,11 @@ def parse_meta_usage(headers):
         except (TypeError, ValueError):
             raise ValueError("Malformed usage evidence") from None
         entries = [parsed] if name == "x-app-usage" else (
-            list(parsed.values()) if isinstance(parsed, dict) else [])
+            [item for group in parsed.values() for item in group]
+            if isinstance(parsed, dict) and all(isinstance(group, list) and group for group in parsed.values()) else [])
         if not entries:
             raise ValueError("Empty usage evidence")
         for entry in entries:
-            if isinstance(entry, list):
-                entry = entry[0] if len(entry) == 1 else None
             if not isinstance(entry, dict):
                 raise ValueError("Invalid usage metrics")
             keys = ("call_count", "total_cputime", "total_time") if name == "x-app-usage" else (
