@@ -11,6 +11,8 @@ edges and Coordinator.complete is disabled. An evidence row and its job's
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 
 from three_api_coordinator import stamp, utcnow
 from three_api_paging import validate_page_edge
@@ -35,6 +37,14 @@ class PageEvidenceStore:
         )""")
         self.db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS
             page_evidence_receipt_unique ON page_evidence(receipt)""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS staging_posts (
+            job_id INTEGER NOT NULL,
+            account_ordinal INTEGER NOT NULL,
+            page INTEGER NOT NULL,
+            post_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY(job_id,post_id)
+        )""")
 
     def required_cursor(self, account_ordinal, page):
         if page == 1:
@@ -51,8 +61,39 @@ class PageEvidenceStore:
             raise ValueError("Missing verified predecessor cursor")
         return previous["response_cursor"]
 
+    def commit_staged_page(self, job_id, lease_id, response,
+                           requested_cursor=None, now=None):
+        """Commit normalized posts and cursor evidence in ONE coordinator DB.
+
+        Offline staging only. Payloads are not production RAW v2 schema and
+        cannot substitute for the existing production collector.
+        """
+        if not isinstance(response, dict) or not isinstance(response.get("data"), list):
+            raise ValueError("Invalid staging page")
+        posts = response["data"]
+        if len(posts) > 4:
+            raise ValueError("Page exceeds four-post staging limit")
+        ids = []
+        for post in posts:
+            if not isinstance(post, dict) or not isinstance(post.get("id"), str):
+                raise ValueError("Every staged post needs a string id")
+            if not post["id"].strip() or len(post["id"]) > 256:
+                raise ValueError("Invalid staged post id")
+            ids.append(post["id"])
+        if len(ids) != len(set(ids)):
+            raise ValueError("Duplicate post ids within a page")
+        canonical = json.dumps(
+            {"job_id": job_id, "posts": posts}, sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+        )
+        receipt = "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return self.commit_page(
+            job_id, lease_id, receipt, response,
+            requested_cursor=requested_cursor, now=now, staged_posts=posts,
+        )
+
     def commit_page(self, job_id, lease_id, receipt, response,
-                    requested_cursor=None, now=None):
+                    requested_cursor=None, now=None, staged_posts=None):
         """Commit a validated cursor edge and the lease completion together.
 
         The caller must FIRST commit collected posts in a staging DB and
@@ -93,6 +134,16 @@ class PageEvidenceStore:
             )
             if edge["next_cursor"] and edge["records"] == 0:
                 raise ValueError("Empty nonterminal page cannot advance cursor")
+            if staged_posts is not None:
+                for post in staged_posts:
+                    self.db.execute(
+                        """INSERT INTO staging_posts
+                           (job_id,account_ordinal,page,post_id,payload_json)
+                           VALUES (?,?,?,?,?)""",
+                        (job_id, job["account_ordinal"], job["page"], post["id"],
+                         json.dumps(post, sort_keys=True, ensure_ascii=False,
+                                    separators=(",", ":"), allow_nan=False)),
+                    )
             self.db.execute(
                 """INSERT INTO page_evidence
                    (account_ordinal,page,job_id,receipt,requested_cursor,
