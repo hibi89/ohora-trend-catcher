@@ -47,7 +47,7 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(guard.AdapterGuardError):
             guard.validate_job_request(job, request, evidence)
 
-    def test_guarded_bridge_calls_executor_once(self):
+    def test_guarded_bridge_refuses_executor_without_durable_binding(self):
         job = {"id": 1, "state": "leased", "lease_id": "lease",
                "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
         request = SimpleNamespace(account_ordinal=1, page=1, lane="A",
@@ -55,14 +55,11 @@ class GuardTests(unittest.TestCase):
                                   request_spec=SimpleNamespace(after=None))
         evidence = SimpleNamespace(required_cursor=lambda account, page: None)
         calls = []
-        executor = SimpleNamespace(execute=lambda value: calls.append(value) or "receipt")
-        self.assertEqual(guard.execute_guarded(job, request, evidence, executor),
-                         "receipt")
-        self.assertEqual(calls, [request])
-        request.lane = "B"
+        executor = SimpleNamespace(execute=lambda value: calls.append(value))
         with self.assertRaises(guard.AdapterGuardError):
             guard.execute_guarded(job, request, evidence, executor)
-        self.assertEqual(calls, [request])
+        self.assertEqual(calls, [])
+
 
     def test_raw_completion_requires_matching_durable_receipt(self):
         request = SimpleNamespace(request_id="req-one")
