@@ -85,6 +85,8 @@ class RequestEnvelope:
     requested_at: datetime
     request_spec: RequestSpec
     request_spec_digest: str
+    api_version: str = "UNSPECIFIED"
+    target_ig_user_id: str = "UNSPECIFIED"
     retry_of: str | None = None
 
     def __post_init__(self) -> None:
@@ -97,8 +99,10 @@ class RequestEnvelope:
             raise ValueError("Lane mismatch")
         if self.request_spec.username != self.username or self.request_spec.after != self.cursor:
             raise ValueError("RequestSpec mismatch")
-        if self.request_spec_digest != digest_sha256(self.request_spec):
+        if self.request_spec_digest != digest_sha256({"api_version": self.api_version, "target_ig_user_id": self.target_ig_user_id, "spec": self.request_spec}):
             raise ValueError("RequestSpec digest mismatch")
+        if not self.api_version or self.api_version == "UNSPECIFIED" or not self.target_ig_user_id or self.target_ig_user_id == "UNSPECIFIED":
+            raise ValueError("API version and target IG user ID required")
         if self.page < 1 or self.account_ordinal < 1:
             raise ValueError("Invalid page or account ordinal")
         if not isinstance(self.day_kst, date) or isinstance(self.day_kst, datetime):
@@ -247,6 +251,9 @@ class CapturePort(Protocol):
 
     def list_pending_captures(self, run_id: str) -> Sequence[CaptureRecord]:
         """Unconfirmed captures for recovery, no network; raises ContractError."""
+
+    def confirm_processed(self, capture_id: str, raw_receipt_id: str) -> None:
+        """Persist verified RAW receipt acknowledgement; raises ContractError."""
 
     def mark_outcome_unknown(self, request_id: str) -> None:
         """Persist ambiguous HTTP outcome; raises ContractError."""
