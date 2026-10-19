@@ -55,6 +55,67 @@ _FORBIDDEN = frozenset(("access_token", "token", "authorization",
     "secret", "cookie", "set-cookie", "headers", "usage_headers"))
 _FIELD_STATES = frozenset(("returned", "null", "absent", "not_tested"))
 _CAROUSEL_STATES = frozenset(("complete", "unknown", "not_applicable"))
+_MAX_POSTS = 4  # approved RequestSpec page size
+_MAX_CHILDREN = 20
+_MAX_TEXT = 8192
+_MAX_URL = 2048
+_MEDIA_TYPES = frozenset(("IMAGE", "VIDEO", "CAROUSEL_ALBUM"))
+_CHILD_MEDIA_TYPES = frozenset(("IMAGE", "VIDEO"))
+_TEXT_FIELDS = frozenset(("caption",))
+_URL_FIELDS = frozenset(("media_url", "permalink", "thumbnail_url"))
+_POST_TEXT_FIELDS = frozenset(("id", "caption", "media_type", "media_url",
+                               "permalink", "timestamp", "thumbnail_url"))
+_CHILD_TEXT_FIELDS = frozenset(("id", "media_type", "media_url", "thumbnail_url"))
+
+
+def validate_normalized_posts(posts: Sequence[Mapping[str, Any]],
+                              *, max_posts: int = _MAX_POSTS) -> None:
+    """Strict schema, primitive types, bounded pages and carousel children."""
+    if not isinstance(posts, (list, tuple)) or len(posts) > max_posts:
+        raise ValueError("Invalid normalized post count")
+    ids: set[str] = set()
+    for post in posts:
+        if not isinstance(post, Mapping) or not set(post).issubset(_POST_FIELDS):
+            raise ValueError("Unallowlisted normalized post field")
+        ident = post.get("id")
+        if not isinstance(ident, str) or not ident.isdecimal() or len(ident) > 64 or ident in ids:
+            raise ValueError("Invalid or duplicate post ID")
+        ids.add(ident)
+        media_type = post.get("media_type")
+        if media_type is not None and media_type not in _MEDIA_TYPES:
+            raise ValueError("Invalid media type")
+        for key, value in post.items():
+            if key in _POST_TEXT_FIELDS and value is not None:
+                if not isinstance(value, str) or len(value) > (
+                        _MAX_TEXT if key == "caption" else
+                        _MAX_URL if key in _URL_FIELDS else 128):
+                    raise ValueError("Invalid normalized text field")
+            if key in ("like_count", "comments_count") and value is not None:
+                if type(value) is not int or value < 0:
+                    raise ValueError("Invalid engagement count")
+        if "children" in post:
+            children = post["children"]
+            if media_type != "CAROUSEL_ALBUM" or not isinstance(children, list):
+                raise ValueError("Children only allowed for carousel")
+            if len(children) > _MAX_CHILDREN:
+                raise ValueError("Too many carousel children")
+            child_ids = {ident}
+            for child in children:
+                if not isinstance(child, Mapping) or not set(child).issubset(_CHILD_FIELDS):
+                    raise ValueError("Unallowlisted child field")
+                cid = child.get("id")
+                if not isinstance(cid, str) or not cid.isdecimal() or len(cid) > 64 or cid in child_ids:
+                    raise ValueError("Invalid or duplicate child ID")
+                child_ids.add(cid)
+                if "media_type" in child and child["media_type"] not in _CHILD_MEDIA_TYPES:
+                    raise ValueError("Invalid child media type")
+                for key, value in child.items():
+                    if key in _CHILD_TEXT_FIELDS and value is not None:
+                        if not isinstance(value, str) or len(value) > (
+                                _MAX_URL if key in _URL_FIELDS else 128):
+                            raise ValueError("Invalid child field type/size")
+        assert_safe_tree(post)
+
 
 
 def assert_safe_tree(value: Any, *, top_keys: frozenset[str] | None = None) -> None:
@@ -333,7 +394,7 @@ class CaptureRecord:
             raise ValueError("Cursor/page mismatch")
         assert_safe_tree(self.actual_request_fields, top_keys=_RECORD_REQUEST_FIELDS)
         assert_safe_tree(self.sanitized_response, top_keys=frozenset(("account", "media")))
-        assert_safe_tree(self.normalized_posts)
+        validate_normalized_posts(self.normalized_posts, max_posts=self.request.request_spec.limit)
         assert_safe_tree(self.account_observation, top_keys=_ACCOUNT_FIELDS)
         if self.usage_metrics is None or not self.usage_metrics or any(type(v) is not int or v < 0 for v in self.usage_metrics.values()):
             raise ValueError("Missing safe usage evidence")
@@ -346,11 +407,14 @@ class CaptureRecord:
         if self.post_field_status is None or set(self.post_field_status) != {
                 p.get("id") for p in self.normalized_posts}:
             raise ValueError("Per-post field states are required")
+        requested = frozenset(
+            key for key in ("like_count", "comments_count")
+            if key in self.request.request_spec.media_fields.split(","))
         for post in self.normalized_posts:
+            if any(key in post for key in ("like_count", "comments_count") if key not in requested):
+                raise ValueError("Unrequested engagement field cannot be stored")
             validate_field_status(post, self.post_field_status[post["id"]],
                                   frozenset(("like_count", "comments_count")))
-            if not isinstance(post, Mapping) or not isinstance(post.get("id"), str):
-                raise ValueError("Invalid normalized post")
             id_ = post["id"]
             status = self.carousel_completeness.get(id_)
             if status not in _CAROUSEL_STATES:
@@ -540,7 +604,8 @@ def capture_from_response(
                 response_received_at=response.received_at, usage_metrics=metrics,
                 post_field_status={
                     post["id"]: field_status_for(post,
-                        frozenset(("like_count", "comments_count")),
+                        frozenset(key for key in ("like_count", "comments_count")
+                                  if key in request.request_spec.media_fields.split(",")),
                         frozenset(("like_count", "comments_count")))
                     for post in normalized_posts})
     except (ValueError, TypeError, KeyError) as exc:
