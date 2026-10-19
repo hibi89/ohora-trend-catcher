@@ -52,6 +52,17 @@ def write_capture(db: sqlite3.Connection, capture: dict):
         raise RawWriteError("Posts must be objects")
     if len({p.get("id") for p in posts}) != len(posts) or any(not isinstance(p.get("id"), str) for p in posts):
         raise RawWriteError("Duplicate or invalid post ID")
+    for post in posts:
+        if post.get("media_type") == "CAROUSEL_ALBUM":
+            children = post.get("children", [])
+            if not isinstance(children, list) or any(not isinstance(c, dict) for c in children):
+                raise RawWriteError("Invalid carousel children")
+            child_ids = [c.get("media_id", c.get("id")) for c in children]
+            if any(not isinstance(mid, str) or not mid for mid in child_ids) or len(set(child_ids)) != len(child_ids):
+                raise RawWriteError("Invalid or duplicate carousel child ID")
+        for field in ("like_count", "comments_count"):
+            if field in post and post[field] is not None and (type(post[field]) is not int or post[field] < 0):
+                raise RawWriteError("Invalid engagement count")
     digest = hashlib.sha256(canonical(capture).encode()).hexdigest()
     if db.in_transaction:
         raise RawWriteError("Writer requires exclusive transaction ownership")
