@@ -113,19 +113,9 @@ class Coordinator:
                 ))"""
                 if evidence_enabled else ""
             )
-            # Strict contract execution keeps expired leases unresolved.
-            # Synthetic fixture orchestration retains its recoverable lease path.
-            strict_mode = self.db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' "
-                "AND name='contract_request_intents'"
-            ).fetchone() is not None
-            lease_filter = (
-                "state='pending'" if strict_mode
-                else "(state='pending' OR (state='leased' AND leased_until<=?))"
-            )
             job = self.db.execute(
                 """SELECT * FROM jobs WHERE lane=?
-                   AND """ + lease_filter + """
+                   AND (state='pending' OR (state='leased' AND leased_until<=?))
                    AND NOT EXISTS (
                        SELECT 1 FROM jobs earlier
                        WHERE earlier.account_ordinal=jobs.account_ordinal
@@ -134,7 +124,7 @@ class Coordinator:
                    """ + proof_filter + """
                    ORDER BY CASE phase WHEN 'front' THEN 0 ELSE 1 END,
                             page,account_ordinal LIMIT 1""",
-                (lane,) if strict_mode else (lane,current),
+                (lane,current),
             ).fetchone()
             if job is None:
                 self.db.execute("COMMIT")
