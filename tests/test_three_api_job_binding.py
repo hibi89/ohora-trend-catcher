@@ -256,6 +256,40 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_mixed_recovery_and_fresh_dispatch_do_not_collide(self):
+        # One request was reserved, then its lease expired. A different
+        # unbound job can dispatch while the first remains recover-only.
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        later = self.start + timedelta(minutes=16)
+        fresh = self.coordinator.lease("A", now=later, skip_bound=True)
+        self.assertEqual(fresh["account_ordinal"], 2)
+        recovery = self.coordinator.lease("A", now=later)
+        self.assertEqual(recovery["id"], self.job["id"])
+        self.assertNotEqual(recovery["id"], fresh["id"])
+        snapshot = self.coordinator.dispatch_ready_diagnostics(now=later)
+        a = next(row for row in snapshot["lanes"] if row["lane"] == "A")
+        self.assertEqual(a["eligible_jobs"], 148)
+        self.assertEqual(a["dispatchable_now"], 148)
+        self.assertEqual(self.bindings.lookup(recovery["id"])["request_id"],
+                         self.request.request_id)
+        self.assertIsNone(self.bindings.lookup(fresh["id"]))
+        self.assertEqual(self.coordinator.db.execute(
+            "SELECT COUNT(*) FROM jobs WHERE state='leased'"
+        ).fetchone()[0], 2)
+
+    def test_bound_work_cannot_starve_dispatch_across_repeated_expiry(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        for minutes, expected_account in ((16, 2), (32, 3), (48, 4)):
+            now = self.start + timedelta(minutes=minutes)
+            candidate = self.coordinator.lease("A", now=now, skip_bound=True)
+            self.assertEqual(candidate["account_ordinal"], expected_account)
+            # The bound first job remains blocked from any new dispatch.
+            self.assertEqual(self.bindings.lookup(self.job["id"])["request_id"],
+                             self.request.request_id)
+        self.assertEqual(self.coordinator.db.execute(
+            "SELECT COUNT(*) FROM job_request_bindings"
+        ).fetchone()[0], 1)
+
     def test_read_only_dispatch_diagnostics_classifies_bound_and_expired(self):
         initial = self.coordinator.dispatch_diagnostics(now=self.start)
         a = next(row for row in initial["lanes"] if row["lane"] == "A")
