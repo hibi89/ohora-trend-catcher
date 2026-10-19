@@ -1,3 +1,5 @@
+> **2026-10-19 p6 요청 명세 준비:** `raw_v2/three_api_request_spec.py` 추가. 토큰·HTTP·환경변수 없이 A/B/C lane, 사용자명, 4개 고정 페이지 크기, 검증된 커서로 Business Discovery 필드 표현식만 생성. URL 직접 추적 금지, 안전한 진단 dict는 커서 원문 미노출. `tests/test_three_api_request_spec.py` 신규 5개, CI 등록. **기존 Windows 68/68 PASS; 신규 포함 73개 테스트는 아직 검증 전.** 실제 Meta 요청 구문·권한·응답은 실환경 미검증이며 현재 모듈은 오프라인 요청 명세만 생성함.
+
 > **2026-10-19 p6 정책 보강:** `estimated_time_to_regain_access`를 사용률에서 제외하고 HTTP 2xx라도 Meta `error` 본문이면 저장 없이 레인 중단. `tests/test_three_api_policy_hardening.py` 2개 추가, CI 연결. **기존 Windows 66/66 PASS, 신규 포함 68개는 아직 재검증 전.** 실제 Meta API/토큰/운영 DB 미사용. 실수집 전 HTTP 클라이언트·인증 분리·API 헤더 실제 검증·쿼터 공유 여부 확인 필수.
 
 > **2026-10-19 p6 통합:** `raw_v2/three_api_offline_runner.py`의 `envelope_fixture=True` 모드에서 A/B/C lease→모의 HTTP 응답→사용량 85% 사전 게이트→Meta 정규화→원자적 staging→검증 커서 인계까지 연결. `tests/test_three_api_envelope_runner.py` 4개 신규 및 CI 추가. **직전 56/56 Windows PASS**, 이후 신규 6+4개를 포함한 **66개 테스트는 재검증 전**. 실제 Meta API/운영 DB/토큰 미사용. 주의: 기존 `meta_fixture=False, envelope_fixture=False`는 오프라인 회귀용으로 사용량 헤더 게이트 없이 합성 데이터 저장하므로 실제 수집 경로로 절대 사용 금지.
