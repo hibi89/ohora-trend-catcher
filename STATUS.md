@@ -1,3 +1,9 @@
+> **2026-10-19 p6 최신 인수인계 — HTTP 오프라인 사전검증**
+> - **구현:** [`raw_v2/three_api_http_preflight.py`](raw_v2/three_api_http_preflight.py)에서 A/B/C 인증 **환경변수 참조** + `RequestSpec` + IG User ID + `v26.0`을 검증해 인증정보 없는 Graph GET 요청을 준비한다. 데이터 전용 `OfflineFixtureTransport`는 실제 HTTP를 지원하지 않는다. 임의 구성한 명세/인증 참조, 잘못된 버전·ID, 잘못된 cursor, 인증값·ID가 디버그 repr에 노출되는 문제를 검사한다.
+> - **검증:** 격리된 로컬 Python 3.13에서 관련 3개 모듈의 오프라인 테스트 **23/23 PASS** (인증 참조 7 + 요청 명세 5 + 신규 HTTP preflight 11). 이전 사용자 Windows 68/68 PASS는 유지되나, 전체 **91개 현재 테스트**의 GitHub CI 결과는 **미확인**. 최신 CI에 새 테스트 등록.
+> - **미구현·금지:** 토큰 읽기/실제 HTTP 요청/Meta live 수집/세 lane 실제 인증·쿼터 분리/RAW v2 운영 DB 연동은 **아직 미구현·미검증**. 사용자 승인 없이 Meta 호출, `.env.local` 업로드, 운영 `collection.sqlite` 수정 금지.
+> - **상세:** [`docs/THREE_API_COLLECTION_IMPLEMENTATION.md`](docs/THREE_API_COLLECTION_IMPLEMENTATION.md) 및 상기 코드·테스트. 새 채팅방에서는 이 최신 인덱스를 우선하고 아래 과거 시점의 재검증 대기 기록은 최신 상태로 오인하지 말 것.
+
 > **2026-10-19 p6 인증 경계:** [`raw_v2/three_api_credentials.py`](raw_v2/three_api_credentials.py)는 A/B/C에 대해 서로 다른 6개 환경변수 **이름만** 검증한다. 실제 토큰·IG ID를 읽거나 저장하지 않으며 HTTP 요청을 실행하지 않는다. [`tests/test_three_api_credentials.py`](tests/test_three_api_credentials.py) 7개는 별도 격리 로컬 테스트에서 **7/7 PASS** 후 코드와 동일한 내용으로 GitHub 반영, CI 스위트 등록. 직전 사용자 확인 68/68 PASS 이후 신규 5+7개를 포함한 **총 80개 GitHub 전체 CI 결과는 별도 확인 필요**. 이 단계는 요청 명세·인증 참조 구조로서 **실제 HTTP 클라이언트/실수집/쿼터 격리 검증 미완료**. 실제 토큰·.env·운영 DB를 건드리지 말 것.
 
 > **2026-10-19 p6 요청 명세 준비:** `raw_v2/three_api_request_spec.py` 추가. 토큰·HTTP·환경변수 없이 A/B/C lane, 사용자명, 4개 고정 페이지 크기, 검증된 커서로 Business Discovery 필드 표현식만 생성. URL 직접 추적 금지, 안전한 진단 dict는 커서 원문 미노출. `tests/test_three_api_request_spec.py` 신규 5개, CI 등록. **기존 Windows 68/68 PASS; 신규 포함 73개 테스트는 아직 검증 전.** 실제 Meta 요청 구문·권한·응답은 실환경 미검증이며 현재 모듈은 오프라인 요청 명세만 생성함.
