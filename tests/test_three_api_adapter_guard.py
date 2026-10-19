@@ -221,6 +221,54 @@ class GuardTests(unittest.TestCase):
             finally:
                 coordinator.db.close()
 
+    def test_all_882_pages_complete_with_real_sqlite_evidence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            coordinator = Coordinator(Path(folder) / "isolated.sqlite")
+            try:
+                coordinator.seed()
+                evidence = PageEvidenceStore(coordinator)
+                total = 0
+                # Round one completes all first pages before catch-up.
+                # Every page carries its predecessor's durable cursor proof.
+                for page in (1, 2, 3):
+                    for lane in ("A", "B", "C"):
+                        while True:
+                            job = coordinator.lease(lane)
+                            if job is None:
+                                break
+                            if job["page"] != page:
+                                # A later-page job is not eligible until its
+                                # predecessor; all earlier pages are complete.
+                                self.fail("Unexpected page order")
+                            ordinal = job["account_ordinal"]
+                            previous = None if page == 1 else f"cursor-{ordinal}-{page-1}"
+                            payload = {
+                                "data": [{"id": f"post-{ordinal}-{page}"}],
+                                "paging": {
+                                    "next": "https://graph.facebook.com/next",
+                                    "cursors": {"after": f"cursor-{ordinal}-{page}"},
+                                },
+                            }
+                            evidence.commit_page(
+                                job["id"], job["lease_id"],
+                                f"raw-{ordinal}-{page}", payload,
+                                requested_cursor=previous)
+                            total += 1
+                self.assertEqual(total, 882)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE state='done'"
+                ).fetchone()[0], 882)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(*) FROM page_evidence"
+                ).fetchone()[0], 882)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(DISTINCT account_ordinal) FROM page_evidence"
+                ).fetchone()[0], 294)
+                self.assertTrue(all(coordinator.lease(lane) is None
+                                    for lane in ("A", "B", "C")))
+            finally:
+                coordinator.db.close()
+
     def test_rejects_unleased_job(self):
         job = {"id": 1, "state": "pending", "lease_id": None,
                "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
