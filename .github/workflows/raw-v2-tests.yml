@@ -9,6 +9,7 @@ on:
       - 'tests/test_batch_recovery.py'
       - 'tests/test_audit.py'
       - 'tests/run_offline.py'
+      - 'tests/test_three_api_catchup_offline.py'
       - '.github/workflows/raw-v2-tests.yml'
   workflow_dispatch:
 jobs:
