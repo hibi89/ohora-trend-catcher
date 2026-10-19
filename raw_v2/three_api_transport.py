@@ -11,7 +11,8 @@ import json
 
 from three_api_graph_http import GraphHTTPClient, GraphHTTPBlocked, GraphTransportError
 from three_api_http_preflight import prepare_graph_request
-from three_api_credentials import CredentialReference
+from three_api_credentials import CredentialReference, validate_identity_value
+from three_api_paging import validate_page_edge
 def _contract():
     # C's contract is branch-owned until integration; importing this module
     # for offline quota checks must not require merging that draft first.
@@ -61,6 +62,19 @@ def parse_meta_usage(headers):
     return max(levels)
 
 
+def extract_next_cursor(payload, *, requested_cursor=None):
+    """Validate Business Discovery paging without following or storing next URL."""
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid response")
+    account = payload.get("business_discovery")
+    if not isinstance(account, dict):
+        raise ValueError("Missing Business Discovery")
+    media = account.get("media")
+    if not isinstance(media, dict):
+        raise ValueError("Missing media")
+    return validate_page_edge(media, requested_cursor=requested_cursor)["next_cursor"]
+
+
 class MetaTransport:
     """One HTTP attempt per send; injected GraphHTTPClient remains the sole sender."""
 
@@ -70,7 +84,7 @@ class MetaTransport:
             raise TypeError("Expected GraphHTTPClient")
         if not isinstance(credentials, CredentialReference):
             raise TypeError("Expected credential reference")
-        if not isinstance(caller_ig_id, str) or not caller_ig_id:
+        if not validate_identity_value(caller_ig_id):
             raise ValueError("Missing caller identity")
         if not isinstance(token, str) or not token:
             raise ValueError("Missing explicit runtime authorization")
