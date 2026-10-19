@@ -12,7 +12,8 @@ from three_api_runtime_contract import (
     RequestEnvelope, ResponseEnvelope, ContractError, FailureEvidence,
     capture_from_response, sanitize_meta_response, requested_fields,
     validate_capture_receipt, validate_raw_receipt, CaptureReceipt,
-    TransportFailure, canonical_bytes, digest_sha256, utc,
+    TransportFailure, persist_capture_verified, commit_raw_and_confirm,
+    canonical_bytes, digest_sha256, utc,
 )
 
 
@@ -179,6 +180,62 @@ class ContractTests(unittest.TestCase):
         validate_raw_receipt(record, raw)
         with self.assertRaises(ValueError):
             validate_raw_receipt(record, replace(raw, capture_digest="0" * 64))
+
+    def test_post_like_comment_states(self):
+        from dataclasses import replace
+        record = self.make_record()
+        self.assertEqual(record.post_field_status["123"]["like_count"], "returned")
+        self.assertEqual(record.post_field_status["123"]["comments_count"], "absent")
+        with self.assertRaises(ValueError):
+            replace(record, post_field_status={"123": {
+                "like_count": "absent", "comments_count": "absent"}})
+
+    def test_recovery_reuses_raw_receipt_without_new_write(self):
+        record = self.make_record()
+        receipt = CaptureReceipt(CONTRACT_VERSION, record.capture_id,
+            record.request.request_id, record.request.account_key,
+            record.request.lane, record.observed_at, record.capture_digest,
+            "storage", True)
+        raw_receipt = RawWriteReceipt(CONTRACT_VERSION, record.capture_id,
+            record.capture_digest, "raw1", "already_committed",
+            record.observed_at, {"posts": 1})
+        class CaptureFake:
+            def __init__(self):
+                self.confirmations = []
+            def save_capture(self, value):
+                return receipt
+            def get_capture(self, key):
+                return record
+            def confirm_processed(self, capture_id, raw_id):
+                self.confirmations.append((capture_id, raw_id))
+        class RawFake:
+            def __init__(self):
+                self.writes = 0
+            def get_raw_receipt(self, key):
+                return raw_receipt
+            def write_capture(self, value):
+                self.writes += 1
+                raise AssertionError("RAW should never be written a second time")
+        capture, raw = CaptureFake(), RawFake()
+        persist_capture_verified(capture, record)
+        self.assertEqual(commit_raw_and_confirm(capture, raw, record), raw_receipt)
+        self.assertEqual(raw.writes, 0)
+        self.assertEqual(capture.confirmations, [("capture-1", "raw1")])
+
+    def test_capture_reread_digest_mismatch_blocks(self):
+        from dataclasses import replace
+        record = self.make_record()
+        receipt = CaptureReceipt(CONTRACT_VERSION, record.capture_id,
+            record.request.request_id, record.request.account_key,
+            record.request.lane, record.observed_at, record.capture_digest,
+            "storage", True)
+        class CaptureFake:
+            def save_capture(self, value):
+                return receipt
+            def get_capture(self, key):
+                return replace(record, capture_id="different")
+        with self.assertRaises(ContractError):
+            persist_capture_verified(CaptureFake(), record)
 
 
 if __name__ == "__main__":
