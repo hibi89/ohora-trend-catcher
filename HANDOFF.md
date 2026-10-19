@@ -291,3 +291,8 @@ python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-di
 - 다음 작업: 최신 SHA CI 확인 → 별도 오프라인 어댑터/합성 통합 테스트 작성 → expired lease가 기존 요청을 재전송하지 않도록 intent/receipt reconcile → RAW receipt와 page evidence 일치 및 장애 복구 테스트 → 전체 회귀 CI.
 - 안전 게이트: 실제 Meta 요청·토큰 읽기·운영 DB/원본 CSV 변경·자동 스케줄러·main 병합·PR Draft 해제는 별도 승인 전 금지. 테스트 성공과 운영 검증 완료를 구분.
 - 상세 설계·정적 발견사항: `docs/P6_RUNTIME_INTEGRATION.md` §7–10. §10의 phase 충돌은 코드에서 수정했으며, 문서의 당시 발견 기록은 이력으로 취급.
+
+
+### P6 CI 검증 업데이트 (2026-10-19)
+- 코드 커밋 `5a8e41f48e44fb1c67084da1744b4e62137b4a49`에 대한 GitHub Actions **Three API offline tests / P6 Runtime Integration Offline / P6 C Contract Offline 모두 success** 확인. 이 결과는 해당 코드 SHA에 대한 것이며 이후 문서 변경 커밋 전체에 대한 별도 CI 판정은 아님.
+- 기존 `OfflineDailyOrchestrator`는 294 계정·격리 SQLite 3개·수동 synthetic fixture·재시작 reconcile을 이미 제공한다. 실 Meta transport와 ContractExecutor를 연결한 운영 어댑터는 여전히 미구현; synthetic 성공을 live 검증으로 표기하지 않는다.
