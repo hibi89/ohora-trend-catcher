@@ -256,6 +256,17 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_recovery_alias_never_consumes_fresh_work(self):
+        later = self.start + timedelta(minutes=16)
+        self.assertIsNone(self.coordinator.lease_for_recovery("A", now=later))
+        fresh = self.coordinator.lease_for_dispatch("A", now=later)
+        self.assertEqual(fresh["account_ordinal"], 1)
+        self.assertIsNone(self.coordinator.lease_for_recovery("A", now=later))
+        self.bindings.reserve(fresh, self.request, self.evidence, now=later)
+        renewed = self.coordinator.lease_for_recovery(
+            "A", now=later + timedelta(minutes=16))
+        self.assertEqual(renewed["id"], fresh["id"])
+
     def test_bound_only_recovery_does_not_lease_unbound_jobs(self):
         later = self.start + timedelta(minutes=16)
         self.assertIsNone(self.coordinator.lease_bound_for_recovery("A", now=later))
