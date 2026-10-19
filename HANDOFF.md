@@ -1,3 +1,33 @@
+# P6 CURRENT HANDOFF — READ THIS FIRST (2026-10-20)
+
+> **Source of truth for next chat.** This block supersedes older dated status paragraphs below. Older entries are historical evidence, not current instructions.
+
+## Identity / goal
+- Repository: `hibi89/ohora-trend-catcher`; active branch: `codex/p6-readiness-hardening-20261019`; Draft PR #6. Do **not** merge into `main` without explicit user approval.
+- Objective: OHORA Trend Catcher RAW v2.1 / p6 safe 3-lane Meta collection integration, durable capture → isolated RAW → cursor/page evidence, no duplicate HTTP after unknown outcomes.
+- **Confirmed policy (supersedes old 5-post / 4+1 notes):** 294 official accounts; A/B/C lanes, two rounds, up to 3 pages × 4 posts = 12 posts/account. Round 1: A accounts 1–150/page 1; B 151–294/page 1; C 1–150/page 2. Round 2: A 151–294/page 2; B 1–150/page 3; C 151–294/page 3. Page 2/3 requires prior durable nonterminal cursor proof. 85% lane usage stop, 65-minute cooldown, explicit verified reset. The 150-account lane assignment is project policy, **not** proven Meta quota independence.
+
+## Latest verified and pending
+- **Latest verified code commit: `633865f3ca2708d5574ebe74c022c03edeb918dd`.** GitHub Actions `P6 Runtime Integration Offline` run **39341896412**, `Three API offline tests` run **39341896447**, `P6 C Contract Offline` run **39341896554**: all **SUCCESS**.
+- Tests use synthetic/injected fixtures and blocked sockets on GitHub-hosted **Ubuntu/Python 3.11**, **not Windows validation**, and do not establish real Meta connectivity or production quality.
+- `Coordinator.lease_for_dispatch` excludes durably bound jobs; `lease_for_recovery` selects only bound jobs. `JobRequestBindingStore.dispatch_once` atomically binds original request before any HTTP; expired/ambiguous attempts are never automatically resent. `commit_captured_page` reconstructs page proof from original durable capture and verifies RAW receipt. `dispatch_ready_diagnostics` and `recovery_ready_diagnostics` are read-only; no scheduler.
+- `G0–G6` evaluator reports evidence only, **never runtime authorization**, even if all flags are true.
+- Last documentation checkpoint preceding this block: `STATUS.md` commit `b8b4d0fe4cf02aaccfda51bbfad68a5377fd8c58`. Check current branch HEAD before making further edits; documentation commits may advance HEAD without new code tests.
+
+## Remaining work (in order)
+1. Final static review: compare actual branch and PR changes with policy; fix only demonstrable bugs, run offline CI again for any code changes.
+2. Confirm Windows isolated environment preflight on a real Windows runner/operator machine. **Not yet done; do not mark as complete.**
+3. Review real Meta adapter, scopes, quotas, account identity and cursor behavior; perform a separately approved limited pilot only after gates are satisfied. **Not verified.**
+4. Verify operational RAW/collection DB migration, 294-account live run, observability and unattended scheduling separately. **Not authorized or verified.**
+5. Final approval for Draft PR #6 → main merge must come from user; do not merge autonomously.
+
+## Safety and working method
+- No live Meta calls, tokens, credentials, production `collection.sqlite`/CSV changes, automatic retry, scheduler enablement, or `main` merge without explicit approval.
+- User's **“ㄱ”** means continue concrete p6 coding/QA. Prefer work and CI evidence over repetitive updates. **User requests continuously updated handoff until completion**, so update `HANDOFF.md` and `STATUS.md` at meaningful verified milestones and after any material change of plan, risk or next action. State verified vs pending distinctly.
+- Resume: fetch latest branch HEAD, read **this top block**, `STATUS.md`, `docs/P6_RUNTIME_INTEGRATION.md`, and CI for latest code SHA. Run/fix only necessary checks, avoid expanding scope.
+
+---
+
 > **2026-10-19 확정 수집 정책 (기존 5개/4+1 논의보다 우선):** 공식 294계정, Meta A/B/C 3개 레인, 2라운드, 계정별 최대 3페이지 × 페이지당 4개 = 최신 게시물 최대 12개. 라운드 1: A 1–150/page1, B 151–294/page1, C 1–150/page2. 라운드 2: A 151–294/page2, B 1–150/page3, C 151–294/page3. 반드시 계정별 실제 opaque cursor와 선행 페이지 증거를 사용한다. 150계정/레인은 프로젝트 운영 정책이며 Meta 공식 한도 증명이 아니다. 기존 5개·4+1 비교 문단은 폐기된 의사결정 이력이며 현재 미결 정책이 아니다. 이 변경은 **문서 정정만**으로, 294계정 live runner/실 Meta/운영 DB 검증을 뜻하지 않는다. 사용자 승인 전 실 API·토큰·운영 DB/CSV·main 병합 금지.
 
 > **P6 CURRENT — 2026-10-19 KST · PR #6 단일 요청 런타임 통합 CI 검증 및 문서 최신화 (아래 이력보다 우선).** [Draft PR #6](https://github.com/hibi89/ohora-trend-catcher/pull/6)의 통합 코드 기준 SHA `40ae73bdb33338fc90d37442f64453945ae7bcd5`, branch `codex/p6-readiness-hardening-20261019`. [P6 Runtime CI #39261103712](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39261103712) **489/489 PASS**, [Three API offline #39261103742](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39261103742) success, [P6 C Contract #39261103691](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39261103691) **22 PASS**. A/B/C v1.0 Port 계약·opt-in transport·durable capture journal·격리 RAW writer·단일 request executor(중단 후 no-refetch 복구)가 구현·합성 CI 검증됨. **과거 294/294 합성 오케스트레이터는 실제 Meta 운영 runner와 별개**. 공식 최신 게시물 5개 요구와 현재 `limit=4` 1페이지 계약은 미조정: 4+1 두 페이지(호출 증가) vs 요구를 4개로 변경(고객 합의 필요)의 사용자 결정 대기. 실 Meta 권한/nested carousel/쿼터 독립성/page4+ HTTP/운영 DB migration/실 294 runner/무인 스케줄러는 **미검증 또는 미구현**. **실 Meta·토큰·운영 `collection.sqlite`/CSV·무인 실행 금지, PR Draft 유지, main 병합 금지.** `main` 기준 SHA `bcdb84b640738fdfceaf833dd831a26d401a2427`. **최신 기술/검증/승인 게이트 문서:** [docs/P6_RUNTIME_INTEGRATION.md](docs/P6_RUNTIME_INTEGRATION.md). 해당 문서 및 본 인수인계는 *코드 489 PASS 이후의 문서 전용 변경*이므로 변경 후 HEAD의 CI를 별도로 확인해야 한다. 로컬 checkout DNS 제한으로 원본 재실행 미검증. 다음 안전 단위: 기존 계약의 off-line 경계 QA와 4+1 정책 확정 후 요청 계획 수립. 복구: 본 문서 상단 최신 블록 및 신규 통합 가이드만 revert; 운영 데이터 영향 없음. Vercel/Production 미적용. 원본 공식 로컬 294계정 목록·운영 자료는 원격에서 확인/수정하지 않음. 인수인계 확인: 2026-10-19 KST.
