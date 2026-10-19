@@ -193,6 +193,52 @@ class Coordinator:
         )
         return result.rowcount == 1
 
+    def dispatch_diagnostics(self, now=None):
+        """Read-only, offline counts for dispatch and recovery planning.
+
+        A bound unfinished job is NEVER eligible for first-time dispatch,
+        regardless of lease expiry. The diagnostic does not authorize sends.
+        """
+        now = now or utcnow()
+        current = stamp(now)
+        bound_exists = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='job_request_bindings'"
+        ).fetchone() is not None
+        bound_join = (
+            " LEFT JOIN job_request_bindings b ON b.job_id=j.id "
+            if bound_exists else ""
+        )
+        bound_condition = "b.job_id IS NOT NULL" if bound_exists else "0"
+        rows = self.db.execute(
+            """SELECT j.lane,
+               SUM(CASE WHEN j.state='done' THEN 1 ELSE 0 END) AS done,
+               SUM(CASE WHEN j.state!='done' AND """ + bound_condition + """
+                        THEN 1 ELSE 0 END) AS bound_recovery,
+               SUM(CASE WHEN j.state!='done' AND NOT (""" +
+            bound_condition + """) THEN 1 ELSE 0 END) AS unbound,
+               SUM(CASE WHEN j.state='leased' AND j.leased_until>?
+                        THEN 1 ELSE 0 END) AS active_leases,
+               SUM(CASE WHEN j.state='leased' AND j.leased_until<=?
+                        THEN 1 ELSE 0 END) AS expired_leases
+               FROM jobs j""" + bound_join + """
+               GROUP BY j.lane ORDER BY j.lane""",
+            (current, current),
+        ).fetchall()
+        return {
+            "mode": "OFFLINE_DIAGNOSTIC_NO_DISPATCH",
+            "as_of_utc": current,
+            "lanes": [
+                {"lane": row["lane"],
+                 "done": row["done"],
+                 "bound_recovery": row["bound_recovery"],
+                 "unbound": row["unbound"],
+                 "active_leases": row["active_leases"],
+                 "expired_leases": row["expired_leases"]}
+                for row in rows
+            ],
+        }
+
     def summary(self):
         return {
             "mode":"OFFLINE_ONLY_NO_META_CALLS",
