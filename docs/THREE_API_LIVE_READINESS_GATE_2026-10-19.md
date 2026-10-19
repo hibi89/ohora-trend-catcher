@@ -1,6 +1,6 @@
 # OHORA 3-API 실운영 전환 게이트 — 설계 전용
 
-> 상태: **승인 전 점검표만 작성**. 실제 Meta 호출·권한 변경·토큰 사용·운영 RAW DB 연결·무인 실행은 수행하지 않음. 이 문서는 런타임 구현 또는 실증 완료 증거가 아니다.
+> 상태: **승인 전 설계 + 오프라인 증거 검증 순수 함수 구현**. `raw_v2/three_api_live_readiness.py`의 `evaluate_live_readiness(evidence)`는 G0~G6를 모두 엄격한 `True`로 제출하더라도 `runtime_authorized=False`를 반환한다. 입력 누락·추가 키·문자열/숫자 truthy 값은 전부 차단한다. **실제 수집 실행 경로에 연결된 승인 게이트가 아니며, 실 Meta 호출·권한 변경·토큰 사용·운영 RAW DB 연결·무인 실행은 수행하지 않음.** 이 문서는 실증 완료 증거가 아니다.
 
 ## 현재 확인된 범위
 
@@ -42,3 +42,7 @@
 - 승인 후: G2의 최소 호출 수와 대상 계정·시간창을 명시해 권한 및 필드만 검증한다. 다른 게이트를 통과한 것으로 해석하지 않는다.
 
 **롤백:** 이 문서만 삭제하면 된다. 실제 자격증명·운영 데이터·스케줄러 변경은 없음.
+
+## 오프라인 증거 검증 API
+
+`evaluate_live_readiness({"G0": False, "G1": False, "G2": False, "G3": False, "G4": False, "G5": False, "G6": False})`는 승인 여부와 무관하게 실행 권한을 부여하지 않는 **진단 함수**다. 모든 게이트가 `True`여도 별도의 사용자 승인과 실제 API 권한 검증이 필요하다. `tests/test_three_api_live_readiness.py` 및 Three API CI가 누락·변조·truthy 문자열·임의 추가 필드·민감 입력 비반향을 검사한다. 기존 collector/transport에 자동 연결하지 않는다.
