@@ -29,3 +29,8 @@ GitHub commits are real; no executed test result, Draft PR, or integration succe
 - C contract file changed since initial review (blob SHA be9c1b9853576f1c3a27aad90e2ef1bc8c7ef572) but still declares `CONTRACT_VERSION = "0.2-draft"`; manager must publish approved immutable contract SHA before runtime integration.
 - Next isolated verification command (no Meta/operational DB): `python -m unittest discover -s tests -p test_three_api_raw_writer.py -v`.
 - Existing provisional writer uses dict/string interface and does not yet meet C RawWriterPort. Do not promote or mark production-ready.
+
+## Open blocker (B)
+- Non-carousel child-data rejection was committed as 33cf53dc468869ff8d2d3f7dd5fd486b772eccf5.
+- Repeated attempts to add the corresponding regression test were blocked by the GitHub write tool; no test commit exists for that case.
+- The manager should not count this branch among the verified main CI test suites. B branch tests have not been run.
