@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
 
@@ -155,6 +156,42 @@ class GuardTests(unittest.TestCase):
                 self.assertEqual(coordinator.db.execute(
                     "SELECT COUNT(*) FROM page_evidence"
                 ).fetchone()[0], 1)
+            finally:
+                coordinator.db.close()
+
+    def test_expired_lease_cannot_commit_even_with_valid_raw_receipt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            coordinator = Coordinator(Path(folder) / "isolated.sqlite")
+            try:
+                coordinator.seed()
+                evidence = PageEvidenceStore(coordinator)
+                start = datetime(2026, 10, 19, tzinfo=timezone.utc)
+                job = coordinator.lease("A", now=start)
+                request = SimpleNamespace(
+                    request_id="req-one", account_ordinal=1, page=1,
+                    lane="A", phase="front", cursor=None,
+                    request_spec=SimpleNamespace(after=None))
+                capture = SimpleNamespace(
+                    capture_id="cap-one", capture_digest="a" * 64,
+                    request=request)
+                receipt = SimpleNamespace(
+                    capture_id="cap-one", capture_digest="a" * 64,
+                    raw_receipt_id="raw-one", status="committed")
+                capture_port = SimpleNamespace(
+                    get_capture_for_request=lambda key: capture)
+                raw_port = SimpleNamespace(
+                    get_raw_receipt=lambda key: receipt)
+                with self.assertRaises(ValueError):
+                    guard.commit_verified_page(
+                        job, request, receipt, capture_port, raw_port, evidence,
+                        response={"data": [{"id": "post-1"}]},
+                        now=start + timedelta(minutes=16))
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(*) FROM page_evidence"
+                ).fetchone()[0], 0)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT state FROM jobs WHERE id=?", (job["id"],)
+                ).fetchone()[0], "leased")
             finally:
                 coordinator.db.close()
 
