@@ -50,7 +50,9 @@ def write_capture(db: sqlite3.Connection, capture: dict):
     posts = capture["posts"]
     if not isinstance(posts, list) or any(not isinstance(p, dict) for p in posts):
         raise RawWriteError("Posts must be objects")
-    if len({p.get("id") for p in posts}) != len(posts) or any(not isinstance(p.get("id"), str) for p in posts):
+    if any(not isinstance(p.get("id"), str) or not p["id"] for p in posts):
+        raise RawWriteError("Invalid post ID")
+    if len({p["id"] for p in posts}) != len(posts):
         raise RawWriteError("Duplicate or invalid post ID")
     for post in posts:
         if post.get("media_type") == "CAROUSEL_ALBUM":
