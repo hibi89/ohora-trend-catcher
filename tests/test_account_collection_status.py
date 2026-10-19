@@ -20,7 +20,8 @@ class AccountStatusTests(unittest.TestCase):
         self.c.executescript("""
           CREATE TABLE config(k TEXT PRIMARY KEY,v TEXT);
           CREATE TABLE accounts(account_key TEXT,country TEXT,username TEXT,ordinal INTEGER,blocked INTEGER,backfill_done INTEGER,backfill_cursor TEXT,catchup_cursor TEXT,last_attempt TEXT,last_error TEXT);
-          CREATE TABLE posts(post_id TEXT PRIMARY KEY,account_key TEXT,timestamp TEXT);\n          CREATE TABLE post_observations(post_id TEXT,observed_at TEXT);
+          CREATE TABLE posts(post_id TEXT PRIMARY KEY,account_key TEXT,timestamp TEXT);
+          CREATE TABLE post_observations(post_id TEXT,observed_at TEXT);
           CREATE TABLE request_log(account_key TEXT,phase TEXT,status TEXT,http_status INTEGER,finished_at TEXT,started_at TEXT,error_code TEXT,error_message TEXT);
           CREATE TABLE catchup_jobs(account_key TEXT);
           CREATE TABLE history_page_evidence(account_key TEXT,request_id TEXT,requested_cursor TEXT,response_cursor TEXT,oldest_page_ts TEXT,newest_page_ts TEXT,cutoff_ts TEXT,completion_basis TEXT,observed_at TEXT);
@@ -67,11 +68,16 @@ class AccountStatusTests(unittest.TestCase):
         self.assertEqual(before,self.db.read_bytes())
         self.c=sqlite3.connect(self.db)
         self.c.row_factory=sqlite3.Row
-    def test_output_failure_keeps_db_unchanged(self):\n        before=self.db.read_bytes()
-        self.c.close()\n        blocked=self.root/'not_a_directory'\n        blocked.write_text('x')\n        with self.assertRaises(OSError): generate(self.db,blocked,self.now)
+    def test_output_failure_keeps_db_unchanged(self):
+        before=self.db.read_bytes()
+        self.c.close()
+        blocked=self.root/'not_a_directory'
+        blocked.write_text('x')
+        with self.assertRaises(OSError): generate(self.db,blocked,self.now)
         self.assertEqual(before,self.db.read_bytes())
         self.c=sqlite3.connect(self.db)
-        self.c.row_factory=sqlite3.Row\n    def test_missing_db_and_schema(self):
+        self.c.row_factory=sqlite3.Row
+    def test_missing_db_and_schema(self):
         with self.assertRaises(FileNotFoundError): generate(self.root/'missing.sqlite',self.root/'reports',self.now)
         self.c.execute('DROP TABLE catchup_jobs');self.c.commit()
         with self.assertRaisesRegex(ValueError,'incompatible'): rows_from_db(self.c,self.now)
