@@ -19,6 +19,8 @@ from three_api_adapter_guard import execute_guarded, AdapterGuardError
 from three_api_capture import CaptureJournal
 from three_api_contract_executor import ThreeApiContractExecutor
 from three_api_raw_writer import ContractRawWriter
+from three_api_runtime_contract import CONTRACT_VERSION, TransportFailure
+from three_api_contract_executor import ContractExecutionError
 from test_three_api_contract_executor import (
     FakeTransport, OBSERVED_AT, SCHEMA, make_request, make_response,
 )
@@ -93,6 +95,49 @@ class JobRequestBindingTests(unittest.TestCase):
             self.assertIsNone(capture.get_intent_outcome(self.request.request_id))
         finally:
             capture.close()
+
+    def test_unknown_http_outcome_restart_blocks_new_request_id(self):
+        journal = CaptureJournal(str(self.root / "capture.sqlite"))
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        db.executescript(SCHEMA)
+        db.execute("INSERT INTO accounts VALUES(?)", ("KR_001",))
+        failure = TransportFailure(
+            CONTRACT_VERSION, self.request.request_id, "outcome_unknown",
+            "account", False, None, "Synthetic ambiguous HTTP result", True)
+        first_transport = FakeTransport(error=failure)
+        executor = ThreeApiContractExecutor(
+            first_transport, journal, ContractRawWriter(db),
+            clock=lambda: self.start)
+        try:
+            with self.assertRaises(ContractExecutionError):
+                execute_guarded(
+                    self.job, self.request, self.evidence, executor,
+                    bindings=self.bindings, now=self.start)
+            self.assertEqual(first_transport.calls, 1)
+            self.assertEqual(journal.get_intent_outcome(self.request.request_id),
+                             "unknown")
+        finally:
+            journal.close()
+            db.close()
+
+        self.coordinator.db.close()
+        self.coordinator = Coordinator(self.root / "coordinator.sqlite")
+        self.addCleanup(self.coordinator.db.close)
+        self.evidence = PageEvidenceStore(self.coordinator)
+        self.bindings = JobRequestBindingStore(self.coordinator)
+        future = self.start + timedelta(minutes=16)
+        reissued = self.coordinator.lease("A", now=future)
+        self.assertEqual(reissued["id"], self.job["id"])
+        calls = []
+        new_request = replace(self.request, request_id="req-" + "f" * 64)
+        with self.assertRaises(JobBindingError):
+            execute_guarded(
+                reissued, new_request, self.evidence,
+                SimpleNamespace(execute=lambda r: calls.append(r)),
+                bindings=self.bindings, now=future)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.bindings.lookup(reissued["id"])["request_id"],
+                         self.request.request_id)
 
     def test_lease_must_be_live_before_reservation(self):
         with self.assertRaises(JobBindingError):
