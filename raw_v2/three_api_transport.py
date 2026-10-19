@@ -7,6 +7,7 @@ at execution time. No automatic retry or credential persistence.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 
 from three_api_graph_http import GraphHTTPClient, GraphHTTPBlocked, GraphTransportError
 from three_api_http_preflight import prepare_graph_request
@@ -19,6 +20,42 @@ from three_api_runtime_contract import (
 def _fail(request_id, category, scope, message, *, status=None, unknown=False):
     raise TransportFailure(CONTRACT_VERSION, request_id, category, scope, False,
                            status, message, unknown)
+
+
+def parse_meta_usage(headers):
+    """Conservatively parse Meta's JSON usage headers; never retain raw headers.
+
+    Returns maximum observed percentage. Missing/malformed evidence fails
+    closed. Values from distinct apps are not assumed to share quota.
+    """
+    if not isinstance(headers, dict):
+        raise ValueError("Missing usage evidence")
+    levels = []
+    for name in ("x-app-usage", "x-business-use-case-usage"):
+        if name not in headers:
+            continue
+        try:
+            parsed = json.loads(headers[name])
+        except (TypeError, ValueError):
+            raise ValueError("Malformed usage evidence") from None
+        entries = [parsed] if name == "x-app-usage" else (
+            list(parsed.values()) if isinstance(parsed, dict) else [])
+        if not entries:
+            raise ValueError("Empty usage evidence")
+        for entry in entries:
+            if isinstance(entry, list):
+                entry = entry[0] if len(entry) == 1 else None
+            if not isinstance(entry, dict):
+                raise ValueError("Invalid usage metrics")
+            keys = ("call_count", "total_cputime", "total_time") if name == "x-app-usage" else (
+                "call_count", "total_cputime", "total_time", "estimated_time_to_regain_access")
+            measured = [entry[k] for k in keys[:3] if k in entry]
+            if not measured or any(type(v) not in (int, float) or not 0 <= v <= 100 for v in measured):
+                raise ValueError("Unverifiable usage percentage")
+            levels.extend(measured)
+    if not levels:
+        raise ValueError("Usage evidence missing")
+    return max(levels)
 
 
 class MetaTransport:
@@ -78,7 +115,14 @@ class MetaTransport:
         headers = result["headers"]
         if not headers:
             _fail(request.request_id, "usage_missing", "global", "Usage evidence missing")
-        # Quota evidence parsing is NOT finalized. Fail closed rather than
-        # interpreting opaque Meta header JSON as a percentage incorrectly.
+        try:
+            usage = parse_meta_usage(headers)
+        except ValueError:
+            _fail(request.request_id, "usage_missing", "global", "Unverifiable usage")
+        if usage >= 85:
+            _fail(request.request_id, "usage_limit", "global", "Usage threshold reached")
+        # C v0.2 draft expects synthetic numeric header keys rather than
+        # Meta's JSON usage format. Until C freezes the translation contract,
+        # block capture rather than fabricating a successful response.
         _fail(request.request_id, "usage_missing", "global",
-              "Quota parser pending contract approval")
+              "Usage contract translation pending approval")
