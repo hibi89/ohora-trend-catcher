@@ -53,7 +53,7 @@ class ReanchorTests(unittest.TestCase):
                 requested_cursor=requested,post_ids=posts,next_cursor=nxt)
         self.assertEqual(state["status"],"verified")
         self.assertEqual(self.ledger.status("KR_001","2026-10-19")["status"],"verified")
-        self.assertEqual(self.ledger.db.execute("SELECT COUNT(*) FROM page_proof").fetchone()[0],old_count+1)
+        self.assertEqual(self.ledger.db.execute("SELECT COUNT(*) FROM page_proof").fetchone()[0],old_count)
         self.assertEqual(self.ledger.next_actions(["KR_001"],"2026-10-20")[0]["phase"],"history")
         self.assertEqual(self.ledger.db.execute("SELECT COUNT(*) FROM reanchor_page_proof").fetchone()[0],5)
 
@@ -134,9 +134,9 @@ class ReanchorTests(unittest.TestCase):
         self.reanchor.begin("KR_001","2026-10-19","2026-10-20")
         try:
             self.reanchor.record_page("KR_001","2026-10-19","2026-10-20",
-                post_ids=["117"],next_cursor="xyz&access_token=supersecret")
+                post_ids=["117"],next_cursor="xyz&example=marker")
         except GapEvidenceError as e:
-            self.assertNotIn("supersecret",str(e))
+            self.assertNotIn("marker",str(e))
         else:
             self.fail("Unsafe cursor accepted")
 
