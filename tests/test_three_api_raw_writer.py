@@ -128,6 +128,26 @@ class RawWriterTests(unittest.TestCase):
         with self.assertRaises(RawWriteError):
             write_capture(self.db,c)
         self.assertEqual(self.count("posts"),0)
+    def test_late_media_collision_rolls_back_entire_capture(self):
+        first=capture()
+        write_capture(self.db,first)
+        second=capture()
+        second["capture_id"]="test-capture-2"
+        second["posts"]=[
+            {"id":"new-post","media_type":"IMAGE","like_count":7},
+            {"id":"other-post","media_type":"IMAGE","children":[]}
+        ]
+        # A post ID already used as a single-media ID must not be reused
+        # as a child of another carousel, even after earlier rows were inserted.
+        second["posts"][1]={"id":"other-post","media_type":"CAROUSEL_ALBUM",
+                            "children":[{"media_id":"post-1","media_type":"IMAGE"}]}
+        with self.assertRaises(RawWriteError):
+            write_capture(self.db,second)
+        self.assertEqual(self.count("posts"),1)
+        self.assertEqual(self.count("runs"),1)
+        self.assertEqual(self.count("post_observations"),1)
+        self.assertEqual(self.count("three_api_raw_receipts"),1)
+        self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(),[])
     def test_source_verification_required(self):
         with self.assertRaises(RawWriteError):
             replay_saved(self.db,capture())
