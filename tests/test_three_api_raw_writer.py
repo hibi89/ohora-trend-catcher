@@ -100,6 +100,29 @@ class RawWriterTests(unittest.TestCase):
         self.assertEqual(self.count("posts"),0)
         c["posts"][0].pop("children");c["posts"][0]["media_type"]="IMAGE"
         self.assertEqual(replay_saved(self.db,c,source_verified=True),"committed")
+    def test_duplicate_carousel_child_rejected(self):
+        c=capture()
+        c["posts"]=[{"id":"album","media_type":"CAROUSEL_ALBUM",
+                     "children":[{"media_id":"same"},{"media_id":"same"}]}]
+        with self.assertRaises(RawWriteError):
+            write_capture(self.db,c)
+        self.assertEqual(self.count("posts"),0)
+    def test_negative_or_boolean_counts_rejected(self):
+        for invalid in (-1, True, "5"):
+            c=capture();c["posts"][0]["like_count"]=invalid
+            with self.assertRaises(RawWriteError):
+                write_capture(self.db,c)
+        self.assertEqual(self.count("runs"),0)
+    def test_unknown_account_rejected(self):
+        c=capture();c["account_key"]="unknown"
+        with self.assertRaises(RawWriteError):
+            write_capture(self.db,c)
+        self.assertEqual(self.count("posts"),0)
+    def test_invalid_clock_rejected(self):
+        c=capture();c["observed_at"]="2026-10-19T11:00:00"
+        with self.assertRaises(RawWriteError):
+            write_capture(self.db,c)
+        self.assertEqual(self.count("posts"),0)
     def test_source_verification_required(self):
         with self.assertRaises(RawWriteError):
             replay_saved(self.db,capture())
