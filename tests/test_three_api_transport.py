@@ -3,9 +3,31 @@ import unittest
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
-from three_api_transport import parse_meta_usage
+from three_api_transport import parse_meta_usage, extract_next_cursor
 
 class QuotaTests(unittest.TestCase):
+    def test_cursor_extraction(self):
+        payload = {"business_discovery": {"media": {
+            "data": [{"id": "123"}],
+            "paging": {"next": "https://example.invalid/?access_token=secret",
+                       "cursors": {"after": "opaque_ABC"}}}}}
+        self.assertEqual(extract_next_cursor(payload), "opaque_ABC")
+
+    def test_full_page_without_cursor_blocks(self):
+        payload = {"business_discovery": {"media": {
+            "data": [{"id": str(i)} for i in range(4)],
+            "paging": {"next": "https://example.invalid/"}}}}
+        with self.assertRaises(ValueError):
+            extract_next_cursor(payload)
+
+    def test_cursor_cycle_blocks(self):
+        payload = {"business_discovery": {"media": {
+            "data": [{"id": "123"}],
+            "paging": {"next": "https://example.invalid/",
+                       "cursors": {"after": "same_cursor"}}}}}
+        with self.assertRaises(ValueError):
+            extract_next_cursor(payload, requested_cursor="same_cursor")
+
     def test_valid(self):
         self.assertEqual(parse_meta_usage({"x-app-usage": '{"call_count":84}'}), 84)
     def test_threshold(self):
