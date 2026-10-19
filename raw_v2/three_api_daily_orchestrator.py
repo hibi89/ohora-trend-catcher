@@ -155,6 +155,167 @@ class OfflineDailyOrchestrator:
             "mirror_pending_pages":self.mirror.summary()["pending_pages"]
         }
 
+    def operator_report(self, *, now):
+        """Read-only, bounded operational diagnosis of this synthetic snapshot.
+
+        Never repairs or dispatches. Counts express *stored evidence*, not
+        verified live Meta coverage. Detailed receipt digest checks still
+        require reconcile(); this method intentionally has zero writes.
+        """
+        if not isinstance(now, datetime) or now.tzinfo is None:
+            raise OfflineDailyScheduleError("Timezone-aware report instant required")
+        now = now.astimezone(timezone.utc)
+        self.daily._verify_binding()
+        utc_time = stamp(now)
+        actions = self.ledger.next_actions(
+            [account["key"] for account in self.accounts], self.day
+        )
+        windows = list(self.ledger.db.execute(
+            "SELECT account_key,status,front_pages FROM daily_window WHERE day=?",
+            (self.day,)
+        ))
+        if (len(windows) != 294
+                or {row["account_key"] for row in windows}
+                   != {account["key"] for account in self.accounts}):
+            raise OfflineDailyScheduleError("Incomplete daily roster ledger")
+        source_pages = list(self.coordinator.db.execute(
+            "SELECT account_ordinal,page,job_id FROM page_evidence"
+        ))
+        first_page = {row["account_ordinal"] for row in source_pages
+                      if row["page"] == 1}
+        missing_page1_keys = [
+            account["key"] for account in self.accounts
+            if account["ordinal"] not in first_page
+        ]
+        clocks = {row["job_id"] for row in self.coordinator.db.execute(
+            "SELECT job_id FROM offline_fixture_clock"
+        )}
+        receipts = {
+            row["request_id"]: row["state"]
+            for row in self.mirror.db.execute(
+                "SELECT request_id,state FROM page_receipts"
+            )
+        }
+        source_missing_clock = sum(
+            row["job_id"] not in clocks for row in source_pages
+        )
+        source_missing_mirror = sum(
+            f"front.{self.day}.{row['account_ordinal']:03d}.p{row['page']}"
+            not in receipts for row in source_pages
+        )
+        staged_front = sum(
+            receipts.get(f"front.{self.day}.{row['account_ordinal']:03d}.p{row['page']}")
+            == "staged" for row in source_pages
+        )
+        statuses = {}
+        for row in windows:
+            statuses[row["status"]] = statuses.get(row["status"], 0) + 1
+        missing_limit = 20
+        lane_rows = []
+        for row in self.coordinator.db.execute(
+            "SELECT lane,halted,reason,ready_at FROM lanes ORDER BY lane"
+        ):
+            try:
+                ready = datetime.fromisoformat(row["ready_at"])
+                if ready.tzinfo is None:
+                    raise ValueError
+                ready = ready.astimezone(timezone.utc)
+                ready_at = stamp(ready)
+            except (ValueError, TypeError, OverflowError):
+                ready = None
+                ready_at = None
+            halted = row["halted"] == 1
+            leased = self.coordinator.db.execute(
+                "SELECT leased_until FROM jobs WHERE lane=? AND state='leased'",
+                (row["lane"],)
+            ).fetchall()
+            expired = sum(
+                isinstance(job["leased_until"], str)
+                and job["leased_until"] <= utc_time for job in leased
+            )
+            lane_rows.append({
+                "lane": row["lane"],
+                "halted": halted,
+                "reason": (row["reason"] if row["reason"] in
+                           ("missing_usage", "usage_limit") else
+                           "unknown" if halted else None),
+                "ready_at_utc": ready_at if halted else None,
+                "requires_manual_reset": halted,
+                "reset_time_reached": halted and ready is not None and now >= ready,
+                "inflight_leases": len(leased),
+                "expired_leases": expired,
+            })
+        phases = {action["phase"] for action in actions}
+        if "front" in phases:
+            next_phase = "front"
+        elif "catchup" in phases:
+            next_phase = "catchup"
+        elif "reanchor" in phases or "needs_review" in phases:
+            next_phase = "manual_review"
+        elif any(phase.startswith("history") for phase in phases):
+            next_phase = "history_held"
+        else:
+            next_phase = "none"
+        pending = self.mirror.db.execute(
+            "SELECT COUNT(*) FROM page_receipts WHERE state='staged'"
+        ).fetchone()[0]
+        recovery_attention = bool(
+            source_missing_clock or source_missing_mirror or staged_front or pending
+        )
+        return {
+            "mode": "SYNTHETIC_OFFLINE_MANUAL_ONLY",
+            "read_only": True,
+            "integrity": "not_fully_revalidated",
+            "live_meta_verified": False,
+            "day": self.day,
+            "evaluated_at_utc": utc_time,
+            "daily_front": {
+                "roster_accounts": 294,
+                "first_page_committed": len(first_page),
+                "first_page_missing": len(missing_page1_keys),
+                "first_page_missing_sample": missing_page1_keys[:missing_limit],
+                "first_page_missing_sample_truncated":
+                    len(missing_page1_keys) > missing_limit,
+                "front_window_open": statuses.get("front_open", 0),
+                "front_window_closed": 294 - statuses.get("front_open", 0),
+                "source_front_page_proofs": len(source_pages),
+            },
+            "gaps": {
+                "catchup_pending_windows": self.ledger.db.execute(
+                    "SELECT COUNT(*) FROM daily_window "
+                    "WHERE day<=? AND status='catchup_pending'",
+                    (self.day,)
+                ).fetchone()[0],
+                "manual_review_windows": self.ledger.db.execute(
+                    "SELECT COUNT(*) FROM daily_window "
+                    "WHERE day<=? AND status='needs_review'",
+                    (self.day,)
+                ).fetchone()[0],
+            },
+            "lanes": lane_rows,
+            "storage": {
+                "source_pages_without_capture_clock": source_missing_clock,
+                "source_pages_without_raw_receipt": source_missing_mirror,
+                "source_pages_with_staged_raw_receipt": staged_front,
+                "raw_staged_receipts": pending,
+                "raw_posts": self.mirror.db.execute(
+                    "SELECT COUNT(*) FROM raw_posts"
+                ).fetchone()[0],
+                "raw_observations": self.mirror.db.execute(
+                    "SELECT COUNT(*) FROM raw_post_observations"
+                ).fetchone()[0],
+                "raw_media": self.mirror.db.execute(
+                    "SELECT COUNT(*) FROM raw_post_media"
+                ).fetchone()[0],
+                "recovery_attention": recovery_attention,
+            },
+            "policy": {
+                "next_phase_if_storage_verified": next_phase,
+                "must_reconcile_before_dispatch": recovery_attention,
+                "unattended_execution_enabled": False,
+            },
+        }
+
     def _release_unused_lease(self, job):
         # Fixture omission is not a successful attempt. Do not wait 15 mins.
         with self.coordinator.db:
