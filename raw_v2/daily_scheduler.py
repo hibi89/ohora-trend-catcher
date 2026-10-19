@@ -154,6 +154,17 @@ def inspect_store(base, source, digest, policy='daily', targets=None):
             db.close()
 
 
+def format_kst(value):
+    """Format timezone-aware timestamps for operator-facing KST logs."""
+    if value is None:
+        return 'unavailable'
+    if isinstance(value, str):
+        value=datetime.fromisoformat(value.replace('Z','+00:00'))
+    if value.tzinfo is None:
+        raise ValueError('ready timestamp must include timezone')
+    return value.astimezone(KST).strftime('%Y-%m-%d %H:%M:%S KST')
+
+
 def print_usage_status(snap):
     """Display last persisted Meta X-App-Usage observation, not a live quota."""
     value=snap.get('usage_max')
@@ -261,7 +272,7 @@ def main(argv=None):
                 if remaining>0 and options.pilot_bypass_cooldown:
                     print('PILOT BYPASS: local cooldown skipped once; persisted slot record retained')
                 elif remaining>0:
-                    print(f'Cooling down until {ready.isoformat()} UTC; {int(remaining)+1}s remaining')
+                    print(f'Cooling down until {format_kst(ready)}; {int(remaining)+1}s remaining')
                     if options.once:
                         print('SCHEDULER_RESULT_JSON '+json.dumps({
                             'policy':options.policy,'run_status':'cooldown','day_kst':snap['day'],
