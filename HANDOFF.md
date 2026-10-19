@@ -281,3 +281,13 @@ python .\raw_v2\daily_scheduler.py --source $src --env-file $envFile --output-di
 
 ## ⑩ 갱신 일시(KST)·확인 시점·검증 범위
 - Drafted 2026-10-18 22:49 KST. Local Python tests PASS; GitHub source files re-read confirmed; actual Windows/Meta access is unavailable here. Last remote commit to be verified after recording BOOK.
+
+
+## P6 최신 인수인계 (2026-10-19, Draft PR #6)
+- 우선 개발 대상: `hibi89/ohora-trend-catcher`, `codex/p6-readiness-hardening-20261019`; p7 classic은 기존 단일 토큰 실수집 참고용, p6의 main 자동 병합 금지.
+- 최근 코드 SHA: `5a8e41f48e44fb1c67084da1744b4e62137b4a49`. 기록 시점 새 CI 결과 미확인. 직전 `cb974e1`에서 C Contract 성공, Three API와 Runtime Integration 실패: `tests/test_three_api_raw_projection.py`의 history fixture가 catchup CHECK와 충돌. 해당 fixture를 최신 커밋에서 수정함.
+- 현재 coordinator seed: page1=front, page2/3=catchup. RequestEnvelope는 history(장기 backfill) 차단 유지. page2/3 continuation을 history로 되돌리지 말 것.
+- 기존 구현 재사용: `raw_v2/three_api_contract_executor.py`의 durable intent/capture/RAW 및 unknown outcome 차단; `raw_v2/three_api_evidence.py`의 page cursor evidence/원자적 coordinator 완료. 새 코드로 중복 구현 금지.
+- 다음 작업: 최신 SHA CI 확인 → 별도 오프라인 어댑터/합성 통합 테스트 작성 → expired lease가 기존 요청을 재전송하지 않도록 intent/receipt reconcile → RAW receipt와 page evidence 일치 및 장애 복구 테스트 → 전체 회귀 CI.
+- 안전 게이트: 실제 Meta 요청·토큰 읽기·운영 DB/원본 CSV 변경·자동 스케줄러·main 병합·PR Draft 해제는 별도 승인 전 금지. 테스트 성공과 운영 검증 완료를 구분.
+- 상세 설계·정적 발견사항: `docs/P6_RUNTIME_INTEGRATION.md` §7–10. §10의 phase 충돌은 코드에서 수정했으며, 문서의 당시 발견 기록은 이력으로 취급.
