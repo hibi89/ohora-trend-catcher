@@ -5,8 +5,6 @@ rehydrate draft contract objects until C freezes its serialization API.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import json
 import sqlite3
 
 def _contract():
@@ -19,7 +17,7 @@ class CaptureJournal:
     def __init__(self, path: str):
         if not isinstance(path, str) or not path or path == ":memory:":
             raise ValueError("Durable on-disk SQLite path required")
-        self._db = sqlite3.connect(path, isolation_level=None, timeout=10)
+        self._db = sqlite3.connect(path, isolation_level='IMMEDIATE', timeout=10)
         self._db.execute("PRAGMA busy_timeout=10000")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.execute("PRAGMA journal_mode=WAL")
