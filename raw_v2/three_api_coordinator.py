@@ -113,9 +113,16 @@ class Coordinator:
                 ))"""
                 if evidence_enabled else ""
             )
+            # In evidence-aware mode an expired lease may represent a sent
+            # request with an unknown outcome. Never reissue it automatically.
+            # Legacy coordinator-only fixtures retain historical lease behavior.
+            lease_filter = (
+                "state='pending'" if evidence_enabled
+                else "(state='pending' OR (state='leased' AND leased_until<=?))"
+            )
             job = self.db.execute(
                 """SELECT * FROM jobs WHERE lane=?
-                   AND (state='pending' OR (state='leased' AND leased_until<=?))
+                   AND """ + lease_filter + """
                    AND NOT EXISTS (
                        SELECT 1 FROM jobs earlier
                        WHERE earlier.account_ordinal=jobs.account_ordinal
@@ -124,7 +131,7 @@ class Coordinator:
                    """ + proof_filter + """
                    ORDER BY CASE phase WHEN 'front' THEN 0 ELSE 1 END,
                             page,account_ordinal LIMIT 1""",
-                (lane,current),
+                (lane,) if evidence_enabled else (lane,current),
             ).fetchone()
             if job is None:
                 self.db.execute("COMMIT")
