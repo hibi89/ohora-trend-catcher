@@ -82,7 +82,7 @@ class Coordinator:
             self.db.execute("ROLLBACK")
             raise
 
-    def lease(self, lane, now=None):
+    def lease(self, lane, now=None, *, skip_bound=False):
         if lane not in LANES:
             raise ValueError("Unknown lane")
         now = now or utcnow()
@@ -113,6 +113,10 @@ class Coordinator:
                 ))"""
                 if evidence_enabled else ""
             )
+            binding_filter = (" AND NOT EXISTS (SELECT 1 FROM job_request_bindings binding "
+                              "WHERE binding.job_id=jobs.id)" if skip_bound and self.db.execute(
+                                  "SELECT 1 FROM sqlite_master WHERE type='table' "
+                                  "AND name='job_request_bindings'").fetchone() else "")
             job = self.db.execute(
                 """SELECT * FROM jobs WHERE lane=?
                    AND (state='pending' OR (state='leased' AND leased_until<=?))
@@ -121,7 +125,7 @@ class Coordinator:
                        WHERE earlier.account_ordinal=jobs.account_ordinal
                        AND earlier.page<jobs.page AND earlier.state!='done'
                    )
-                   """ + proof_filter + """
+                   """ + proof_filter + binding_filter + """
                    ORDER BY CASE phase WHEN 'front' THEN 0 ELSE 1 END,
                             page,account_ordinal LIMIT 1""",
                 (lane,current),
