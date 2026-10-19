@@ -1,3 +1,26 @@
+# 2026-10-19 최우선 인수인계 — 3개 Meta API 운영 설계 / 구현 상태 (신규 채팅방 필독)
+
+> **최신 사용자 결정:** 현재 검증된 단일 API A 수집을 계속 유지한다. API B 토큰은 실제 인증 시 HTTP 401, Meta OAuthException `190/463`(만료)로 확인되어 재발급 대기 중이다. API C는 아직 유효 인증 검증 전이다. **B/C 인증이 확보되면 소규모 권한·실제 수집·독립 quota 테스트 후에만 3-API 전환을 검토한다. 지금 3개 수집기를 실행하지 않는다.**
+>
+> **설계 원문(반드시 읽기):** [3-API 수집·실행 전 안전 기준](docs/THREE_API_COLLECTION_IMPLEMENTATION.md) / **계획 전용 코드:** [raw_v2/three_api_plan.py](raw_v2/three_api_plan.py). 두 파일은 GitHub `main`에 존재하지만 **라이브 다중 토큰 수집기는 미구현**이다. 계획 출력은 실제 API/DB 호출을 하지 않는다.
+>
+> **사용자가 제안한 초기 배분(2라운드, 65분 간격 목표, 계정별 페이지당 4개):**
+>
+> | 라운드 | API A | API B | API C |
+> |---|---|---|---|
+> | 1 | 공식 1~150번, 페이지 1 (1~4) | 공식 151~294번, 페이지 1 (1~4) | 공식 1~150번, 페이지 2 (5~8) |
+> | 2 | 공식 151~294번, 페이지 2 (5~8) | 공식 1~150번, 페이지 3 (9~12) | 공식 151~294번, 페이지 3 (9~12) |
+>
+> 라운드 3 이후에는 **매일 KST 최신 front 우선 → 누락 catchup → 과거 history**를 유지하고, 가용 API 용량으로 과거 6개월 이상/기존 365일 경계 확보를 지향한다. 위 페이지 숫자는 **초기 배분을 설명하는 논리적 위치**이지 실제 운영에서 고정 오프셋으로 요청해도 된다는 뜻이 아니다. 실제 Meta cursor·게시물 ID 앵커를 계정별로 보존해야 한다.
+>
+> **API 안전 기준:** lane별 X-App-Usage 관측값 `>=85%` 또는 신뢰 가능한 사용률 헤더 누락 시 해당 lane 후속 API 요청 중단; lane별 영속 쿨타임 및 기존 `ready_at` 보존. 단순히 토큰이 3개라고 사용량 한도가 독립인 것은 아니다. 실제 응답을 통해 앱/할당량 공유 여부 확인 후 실행. **현재 DB에는 공통 슬롯·커서가 있으므로 3개의 기존 `daily_scheduler.py`를 동일 SQLite에서 병렬 실행 금지.** 단일 coordinator, lane별 lease·쿨타임·재시작·멱등성 설계와 오프라인·소규모 실수집 검증이 선행되어야 한다.
+>
+> **현행 운영은 그대로:** 기존 Python RAW v2.1 `daily_scheduler.py --policy bootstrap-history --live --acknowledge-warnings`와 사용자 Windows 로컬 `%LOCALAPPDATA%\OHORA_RAW_v2\collection.sqlite`의 수집 상태·cursor·백업을 수정하거나 초기화하지 말 것. WARN을 PASS로 표기하지 말 것. DB·인증·Meta live 테스트는 사용자 승인 없이 실행하지 말 것.
+>
+> **후속 작업:** (1) B/C 인증 새 토큰 발급·유효기간 확인 (2) 각 인증 조회/Business Discovery 권한 검증 (3) X-App-Usage 독립성 검증 (4) 안전한 멀티-lane coordinator 구현·오프라인 테스트 (5) 별도 시험 DB 소규모 live pilot (6) 승인 후 본 수집 전환. **기존 계획 문서만 보고 '3-API 구현 완료'라고 말하지 말 것.**
+>
+---
+
 > **2026-10-19 계정별 수집 현황표 추가:** 독립 읽기 전용 `raw_v2/account_collection_status.py`와 합성 테스트를 추가했다. 운영 우선순위는 KST 일일 front → catchup → 기존 커서 history, 6개월 이상은 목표이며 365일 고정 완료 정책은 변경하지 않았다. 계정별 고유 게시물 날짜 범위, 마지막 성공 front, KST 오늘 조회, catchup, history 커서 증거를 CSV/MD로 출력한다. 자세한 실행법·필드 정의: [계정별 수집 현황표](docs/RAW_V2_ACCOUNT_COLLECTION_STATUS.md). **운영 DB 실검증은 아직 수행하지 않았다.**\n\n> **2026-10-19 최신 로컬 운영 기록:** 사용자가 Windows에서 10계정 History 실수집(10/10 HTTP 200, 신규 40) 및 직후 audit **PASS** 확인. 공식 294계정 중 성공 286·조회 실패 8, 누적 고유 게시물 1,330·관측 1,350, integrity/observation/coverage 0/0/0, 미해결 배치 0. **무인 운영 미승인, 실제 365일 전량 완전성 미검증.** GitHub 문서는 사용자 로컬 DB를 대신하지 않는다.
 >
 > **먼저 읽을 문서:** [전체 장애·해결 기록](docs/RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md) · [오류 분류/발견 시 대응 SOP](docs/RAW_V2_ERROR_HANDLING_RUNBOOK.md) · [향후 작업 및 인수 기준](docs/RAW_V2_NEXT_TASKS_AND_ACCEPTANCE.md) · [실행 가이드](raw_v2/README.md). 기존 날짜별 60/70분 또는 이전 게시물 개수는 당시의 과거 스냅샷이다.
