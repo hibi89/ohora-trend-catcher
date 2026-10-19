@@ -256,6 +256,24 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_recovery_ready_diagnostics_are_read_only_and_gate_aware(self):
+        later = self.start + timedelta(minutes=16)
+        before = self.coordinator.recovery_ready_diagnostics(now=later)
+        self.assertEqual(before["lanes"][0]["recoverable_now"], 0)
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        snapshot = self.coordinator.recovery_ready_diagnostics(now=later)
+        a = next(row for row in snapshot["lanes"] if row["lane"] == "A")
+        self.assertEqual(a["eligible_jobs"], 1)
+        self.assertEqual(a["recoverable_now"], 1)
+        self.assertEqual(self.coordinator.db.execute(
+            "SELECT lease_id FROM jobs WHERE id=?", (self.job["id"],)
+        ).fetchone()[0], self.job["lease_id"])
+        self.coordinator.observe_usage("A", 85, now=self.start)
+        blocked = self.coordinator.recovery_ready_diagnostics(now=later)
+        a = next(row for row in blocked["lanes"] if row["lane"] == "A")
+        self.assertEqual(a["eligible_jobs"], 1)
+        self.assertEqual(a["recoverable_now"], 0)
+
     def test_recovery_only_skips_earlier_unbound_job(self):
         # Account 1 is unbound; reserve account 2 on a separate fresh lease.
         second = self.coordinator.lease_for_dispatch("A", now=self.start)
