@@ -195,6 +195,32 @@ class GuardTests(unittest.TestCase):
             finally:
                 coordinator.db.close()
 
+    def test_full_294_account_three_page_lane_plan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            coordinator = Coordinator(Path(folder) / "isolated.sqlite")
+            try:
+                coordinator.seed()
+                coordinator.seed()
+                rows = coordinator.db.execute(
+                    "SELECT account_ordinal,page,lane,phase FROM jobs "
+                    "ORDER BY account_ordinal,page").fetchall()
+                self.assertEqual(len(rows), 294 * 3)
+                for account in range(1, 295):
+                    chunk = rows[(account - 1) * 3:account * 3]
+                    expected = ("A", "C", "B") if account <= 150 else ("B", "A", "C")
+                    self.assertEqual([row["lane"] for row in chunk], list(expected))
+                    self.assertEqual([row["page"] for row in chunk], [1, 2, 3])
+                    self.assertEqual([row["phase"] for row in chunk],
+                                     ["front", "catchup", "catchup"])
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(DISTINCT account_ordinal) FROM jobs"
+                ).fetchone()[0], 294)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE state='done'"
+                ).fetchone()[0], 0)
+            finally:
+                coordinator.db.close()
+
     def test_rejects_unleased_job(self):
         job = {"id": 1, "state": "pending", "lease_id": None,
                "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
