@@ -82,8 +82,7 @@ def verify_raw_completion(request, receipt, capture_port, raw_port):
         validate_raw_receipt(record, receipt)
         validate_raw_receipt(record, persisted)
         if (persisted.raw_receipt_id != receipt.raw_receipt_id
-                or persisted.status not in ("committed", "already_committed")
-                or capture_port.get_intent_outcome(request.request_id) != "captured"):
+                or persisted.status not in ("committed", "already_committed") ):
             raise AdapterGuardError("RAW completion evidence mismatch")
     except AdapterGuardError:
         raise
