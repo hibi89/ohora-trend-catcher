@@ -88,3 +88,9 @@ GitHub workflow 상태를 직접 재조회했다. 세부 테스트 수는 해당
 `raw_v2/three_api_evidence.py`의 `PageEvidenceStore`가 이미 존재하며 `required_cursor`, `commit_page`, `commit_staged_page`를 제공한다. `commit_page`는 유효 lease·선행 cursor·page edge 검증 후 `page_evidence` INSERT와 `jobs.state='done'` 전이를 **동일 coordinator SQLite transaction**에서 수행한다. `Coordinator.complete`는 evidence table이 있으면 거부한다. 따라서 새 adapter에서 이 코드를 재구현하지 않는다.
 
 **남은 경계:** `PageEvidenceStore.commit_page`의 `receipt`는 호출자가 제공하며, 외부 RAW writer의 영속 기록을 자체 조회·검증하지 않는다. `three_api_contract_executor.py`가 보장하는 RAW receipt와 coordinator의 page evidence를 안전하게 연결하려면 (a) receipt identity·account/page/request 일치 검증, (b) RAW 성공 뒤 coordinator commit 실패 시 restart reconciliation, (c) coordinator done 뒤 RAW 유실 여부 점검, (d) stale lease 및 unknown outcome 차단을 합성 격리 DB 테스트로 입증해야 한다. 두 DB 사이의 분산 원자성은 현재 보장되지 않는다. 이는 코드 정적 검토이며 신규 통합 테스트 통과 주장이 아니다.
+
+## 10. 필수 계약 충돌 발견 — page2/3 `phase` (정적 확인)
+
+`three_api_coordinator.py`의 `Coordinator.seed()`는 page1을 `phase='front'`, page2/3을 `phase='history'`로 만든다. 반면 `three_api_runtime_contract.py`의 `RequestEnvelope.__post_init__`은 `phase == 'history'`이면 `ValueError('History lane is on hold')`를 발생시킨다. **현재 coordinator job을 RequestEnvelope에 그대로 매핑하면 page2/3 실행이 불가능하다.**
+
+**수정 원칙:** 과거 365일 backfill을 의미하는 `history`와 당일 최신 12개 수집의 page2/3 continuation을 혼동하지 않는다. 계약 보호를 제거하거나 `history`를 무조건 허용하지 말고, 일일 최신 12개 continuation에 적합한 명시적 phase 의미를 확정한다. coordinator의 job phase/우선순위와 RequestEnvelope 계약을 최소 변경으로 일치시키고, page2/3의 선행 cursor/RAW receipt 및 과거 history 차단 회귀를 추가한다. 이 항목은 정적 코드 대조로 확인되었으며 실제 실행 테스트는 아직 하지 않았다.
