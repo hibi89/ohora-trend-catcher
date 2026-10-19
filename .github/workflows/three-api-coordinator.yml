@@ -22,6 +22,7 @@ on:
       - 'tests/test_three_api_usage.py'
       - 'tests/test_three_api_http_fixture.py'
       - 'tests/test_three_api_envelope_runner.py'
+      - 'tests/test_three_api_policy_hardening.py'
       - '.github/workflows/three-api-coordinator.yml'
   pull_request:
     paths:
@@ -44,6 +45,7 @@ on:
       - 'tests/test_three_api_usage.py'
       - 'tests/test_three_api_http_fixture.py'
       - 'tests/test_three_api_envelope_runner.py'
+      - 'tests/test_three_api_policy_hardening.py'
       - '.github/workflows/three-api-coordinator.yml'
   workflow_dispatch:
 
@@ -62,7 +64,7 @@ jobs:
       - name: Compile all three-API modules and tests
         run: |
           python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py raw_v2/three_api_checkpoints.py raw_v2/three_api_paging.py raw_v2/three_api_evidence.py raw_v2/three_api_offline_runner.py raw_v2/three_api_meta_normalizer.py raw_v2/three_api_usage.py raw_v2/three_api_http_fixture.py
-          python -m py_compile tests/test_three_api_coordinator.py tests/test_three_api_adapter.py tests/test_three_api_checkpoints.py tests/test_three_api_paging.py tests/test_three_api_evidence.py tests/test_three_api_offline_runner.py tests/test_three_api_meta_normalizer.py tests/test_three_api_usage.py tests/test_three_api_http_fixture.py tests/test_three_api_envelope_runner.py
+          python -m py_compile tests/test_three_api_coordinator.py tests/test_three_api_adapter.py tests/test_three_api_checkpoints.py tests/test_three_api_paging.py tests/test_three_api_evidence.py tests/test_three_api_offline_runner.py tests/test_three_api_meta_normalizer.py tests/test_three_api_usage.py tests/test_three_api_http_fixture.py tests/test_three_api_envelope_runner.py tests/test_three_api_policy_hardening.py
       - name: Run three-API offline regression suites
         run: |
           python -m unittest discover -s tests -p 'test_three_api_coordinator.py' -v
@@ -75,3 +77,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_three_api_usage.py' -v
           python -m unittest discover -s tests -p 'test_three_api_http_fixture.py' -v
           python -m unittest discover -s tests -p 'test_three_api_envelope_runner.py' -v
+          python -m unittest discover -s tests -p 'test_three_api_policy_hardening.py' -v
