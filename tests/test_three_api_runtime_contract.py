@@ -1,6 +1,10 @@
 """Offline contract checks; no sockets, tokens, or database."""
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+import sys
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'raw_v2'))
 
 from three_api_request_spec import build_request_spec
 from three_api_runtime_contract import (
