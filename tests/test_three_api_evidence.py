@@ -22,6 +22,8 @@ class EvidenceTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.c = Coordinator(Path(self.tmp.name) / "state.sqlite")
+        # On Windows, SQLite connections must close before TemporaryDirectory cleanup.
+        self.addCleanup(self.c.db.close)
         self.c.seed()
         self.e = PageEvidenceStore(self.c)
 
