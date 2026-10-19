@@ -1,7 +1,15 @@
 # Three-API collection — implementation gate (2026-10-19)
 
 ## Status
-**Offline planner implemented** in `raw_v2/three_api_plan.py`. **Live three-token execution NOT implemented or authorized.** The existing foreground `daily_scheduler.py` remains unchanged and is the only currently validated live path. Do not launch three copies of it against the same SQLite store.
+**Offline planner, coordinator, cursor validator and transactional evidence state are implemented** (`raw_v2/three_api_plan.py`, `three_api_coordinator.py`, `three_api_adapter.py`, `three_api_checkpoints.py`, `three_api_paging.py`, `three_api_evidence.py`). **Live three-token execution NOT implemented or authorized.** The existing foreground `daily_scheduler.py` remains unchanged and is the only currently validated live path. Do not launch three copies of it against the same SQLite store.
+
+
+## 2026-10-19 offline implementation checkpoint (supersedes planner-only status)
+- Coordinator distributes 294 × 3 logical jobs; per-lane persisted cooldown and leases. Evidence-aware leases require a nonterminal, committed predecessor page. Bare `Coordinator.complete()` is blocked when a `PageEvidenceStore` is active.
+- `PageEvidenceStore.commit_page()` validates actual Meta cursor-edge shape and lease expiry; stores the predecessor cursor, next cursor, nonterminal flag and opaque receipt in one transaction with job completion. It rejects stale leases, missing/terminal predecessors, duplicate receipts and cursor cycles. **Receipt is supplied by the caller and is NOT independently proven to reflect a completed external data write.**
+- `tests/test_three_api_evidence.py` includes simulated rollback, expired lease, direct-completion bypass, terminal boundary and page-2 chain cases; GitHub CI workflow includes these tests. **CI result for the latest commit is not yet verified.** All tests are synthetic and make no Meta requests.
+- **Remaining blockers:** fully integrated staging writer and receipt reconciliation, account-level post/head anchor continuity, cross-app quota confirmation, daily-first/catchup/history scheduler, live B/C credential validation, supervised isolated-DB pilot, and user approval before any production DB switch.
+- A's historical `.env.local` path was found on the user's PC; user prepared B/C credential files on Desktop but neither was validated in this stage. Never upload or expose tokens. Original single-API operation is unchanged.
 
 ## Requested schedule
 - Three separately credentialed Meta identities A/B/C, subject to verification that quota limits are actually independent.
