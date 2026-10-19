@@ -187,6 +187,16 @@ class OfflineDailyOrchestrator:
             account["key"] for account in self.accounts
             if account["ordinal"] not in first_page
         ]
+        # Ledger closure can occur without a source page proof; it is not
+        # evidence that a post was captured or promoted.
+        ordinal_by_key = {
+            account["key"]: account["ordinal"] for account in self.accounts
+        }
+        closed_without_page1 = sum(
+            row["status"] != "front_open"
+            and ordinal_by_key[row["account_key"]] not in first_page
+            for row in windows
+        )
         clocks = {row["job_id"] for row in self.coordinator.db.execute(
             "SELECT job_id FROM offline_fixture_clock"
         )}
@@ -262,6 +272,26 @@ class OfflineDailyOrchestrator:
         recovery_attention = bool(
             source_missing_clock or source_missing_mirror or staged_front or pending
         )
+        if closed_without_page1:
+            completion_warning = (
+                "수집 윈도우가 종료됐지만 첫 페이지 확정 증거가 없는 계정이 "
+                "있습니다. 수집 완료로 표시하지 말고 증거를 점검하세요."
+            )
+        elif missing_page1_keys:
+            completion_warning = (
+                "첫 페이지 확정 증거가 없는 계정이 있습니다. "
+                "실제 수집 완료가 아닙니다."
+            )
+        elif statuses.get("front_open", 0):
+            completion_warning = (
+                "첫 페이지 증거가 있어도 열린 수집 윈도우가 있습니다. "
+                "일일 수집 완료가 아닙니다."
+            )
+        else:
+            completion_warning = (
+                "합성 수집 윈도우와 첫 페이지 증거가 확인됐습니다. "
+                "실제 Meta 수집과 전체 무결성은 미검증입니다."
+            )
         return {
             "mode": "SYNTHETIC_OFFLINE_MANUAL_ONLY",
             "read_only": True,
@@ -278,6 +308,8 @@ class OfflineDailyOrchestrator:
                     len(missing_page1_keys) > missing_limit,
                 "front_window_open": statuses.get("front_open", 0),
                 "front_window_closed": 294 - statuses.get("front_open", 0),
+                "first_page_proof_gap_in_closed_windows": closed_without_page1,
+                "completion_warning": completion_warning,
                 "source_front_page_proofs": len(source_pages),
             },
             "gaps": {
