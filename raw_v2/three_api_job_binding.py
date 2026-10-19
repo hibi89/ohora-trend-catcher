@@ -118,6 +118,40 @@ class JobRequestBindingStore:
         self.reserve(job, request, evidence, now=now)
         return executor.execute(request)
 
+    def commit_captured_page(self, job, request, evidence, capture, raw_writer,
+                             *, now=None):
+        """Complete a page from the ORIGINAL bound durable capture only.
+
+        This is an offline coordinator/RAW integration bridge, not a live
+        dispatcher. Reconcile the RAW receipt and capture acknowledgement
+        without HTTP, then derive the page edge from the immutable CaptureRecord
+        (never accept a caller-supplied response or URL). Finally commit the
+        verified receipt and cursor evidence under the current SQLite lease.
+        """
+        from three_api_adapter_guard import verify_raw_completion
+
+        self._verify_bound(job, request, evidence, now)
+        record = capture.get_capture_for_request(request.request_id)
+        if record is None:
+            raise JobBindingError("Bound request has no durable capture; no resend")
+        if digest_sha256(record.request) != digest_sha256(request):
+            raise JobBindingError("Captured request differs from durable binding")
+        receipt = commit_raw_and_confirm(capture, raw_writer, record)
+        receipt_id = verify_raw_completion(request, receipt, capture, raw_writer)
+        edge = {"data": list(record.normalized_posts)}
+        cursor = record.cursor_state.next_cursor
+        if cursor is not None:
+            # The real next URL was intentionally stripped from the capture;
+            # a non-empty marker represents only the verified cursor's presence.
+            edge["paging"] = {
+                "next": "durable-capture-next-present",
+                "cursors": {"after": cursor},
+            }
+        return evidence.commit_page(
+            job["id"], job["lease_id"], receipt_id, edge,
+            requested_cursor=request.cursor, now=now,
+        )
+
     def recover_captured(self, job, request, evidence, capture, raw_writer, *,
                          now=None):
         """Recover only a durable capture for the ORIGINAL bound request.
