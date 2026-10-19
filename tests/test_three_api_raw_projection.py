@@ -95,7 +95,6 @@ class RawProjectionTests(unittest.TestCase):
         self.assertEqual(self.m.summary()["raw_posts"],1)
 
     def test_missing_daily_id_proof_fails_closed(self):
-        self.c.db.execute("DELETE FROM jobs")
         self.save_page()
         self.l.db.execute("DELETE FROM page_proof")
         with self.assertRaises(OfflineRawProjectionError):
