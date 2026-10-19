@@ -80,6 +80,36 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(guard.AdapterGuardError):
             guard.verify_raw_completion(request, receipt, cap_port, mismatched)
 
+    def test_page_commit_requires_verified_raw(self):
+        job = {"id": 5, "state": "leased", "lease_id": "lease",
+               "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
+        request = SimpleNamespace(request_id="req-one", account_ordinal=1,
+                                  page=1, lane="A", phase="front", cursor=None,
+                                  request_spec=SimpleNamespace(after=None))
+        capture = SimpleNamespace(capture_id="cap-one", capture_digest="a" * 64,
+                                  request=request)
+        receipt = SimpleNamespace(capture_id="cap-one",
+                                  capture_digest="a" * 64,
+                                  raw_receipt_id="raw-one", status="committed")
+        cap_port = SimpleNamespace(get_capture_for_request=lambda key: capture)
+        raw_port = SimpleNamespace(get_raw_receipt=lambda key: receipt)
+        calls = []
+        evidence = SimpleNamespace(
+            required_cursor=lambda account, page: None,
+            commit_page=lambda *args, **kwargs: calls.append((args, kwargs)) or "edge")
+        self.assertEqual(guard.commit_verified_page(
+            job, request, receipt, cap_port, raw_port, evidence,
+            response={"data": []}), "edge")
+        self.assertEqual(calls[0][0][:3], (5, "lease", "raw-one"))
+        self.assertIsNone(calls[0][1]["requested_cursor"])
+        calls.clear()
+        missing = SimpleNamespace(get_raw_receipt=lambda key: None)
+        with self.assertRaises(guard.AdapterGuardError):
+            guard.commit_verified_page(
+                job, request, receipt, cap_port, missing, evidence,
+                response={"data": []})
+        self.assertEqual(calls, [])
+
     def test_rejects_unleased_job(self):
         job = {"id": 1, "state": "pending", "lease_id": None,
                "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
