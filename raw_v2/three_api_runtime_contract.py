@@ -549,6 +549,33 @@ def capture_from_response(
                             "Response rejected by capture validation",
                             request.request_id) from exc
 
+def persist_capture_verified(port: CapturePort, record: CaptureRecord) -> CaptureReceipt:
+    """Verifier for A implementation; no actual database is built here.
+    A must atomically commit before returning; this function rereads record
+    to ensure receipt identity/digest. Never infer durability from an in-memory flag.
+    """
+    receipt = port.save_capture(record)
+    validate_capture_receipt(record, receipt)
+    restored = port.get_capture(record.capture_id)
+    if restored is None or restored.capture_digest != record.capture_digest:
+        raise ContractError(CONTRACT_VERSION, "capture_conflict", "global",
+                            "Capture verification failed", record.request.request_id,
+                            record.capture_id)
+    return receipt
+
+
+def commit_raw_and_confirm(capture: CapturePort, raw: RawWriterPort,
+                           record: CaptureRecord) -> RawWriteReceipt:
+    """Crash-safe sequence after durable capture. Prefer existing RAW receipt.
+    B's implementation must atomically commit RAW rows and receipt.
+    """
+    receipt = raw.get_raw_receipt(record.capture_id)
+    if receipt is None:
+        receipt = raw.write_capture(record)
+    validate_raw_receipt(record, receipt)
+    capture.confirm_processed(record.capture_id, receipt.raw_receipt_id)
+    return receipt
+
 
 # Coordination rules:
 # 1. save_intent -> send -> save_capture -> write_capture -> confirm processed.
