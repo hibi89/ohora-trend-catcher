@@ -138,9 +138,9 @@ class DailyProjectionTests(unittest.TestCase):
     def test_binding_different_day_is_rejected(self):
         self.wrapper(lambda *_a,**_k:Reply(response(["115"])))
         with self.assertRaises(DailyProjectionError):
-            self.wrapper(lambda *_a,**_k:Reply(response(["115"])) if False else \
-                DailyGuardedSnapshot(self.source,self.target,accounts(),refs(),
-                    env(),"2026-10-20")
+            DailyGuardedSnapshot(
+                self.source,self.target,accounts(),refs(),
+                env(),"2026-10-20")
 
     def test_order_proof_missing_does_not_claim_success(self):
         self.ledger_with_old_head()
