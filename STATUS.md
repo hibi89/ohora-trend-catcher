@@ -466,3 +466,11 @@ User: `git pull origin main`, run the full collector dry run then its explicit `
 - 구현 SHA `40c6354f80185fd229dd8f030f71bd9443df2bbe`: `raw_v2/three_api_adapter_guard.py`는 lease 상태/계정 ordinal/page/lane/phase 및 PageEvidenceStore.required_cursor와 RequestEnvelope cursor의 일치 여부를 fail-closed로 검사. **네트워크·DB 쓰기 없음**.
 - 테스트 SHA `8e1245feabd8d34d542fff456978e4739105641e`: `tests/test_three_api_adapter_guard.py`에 일치/커서 불일치/임대 누락 테스트 추가. 이 SHA CI 결과는 기록 시점 미확인.
 - **미완료**: 가드가 실제 ThreeApiContractExecutor 호출 경로에 연결되지 않았으며, expired lease의 기존 intent reconciliation·RAW receipt 교차 검증·page evidence commit은 별도 구현 필요. 이 가드만으로 live dispatch를 승인하지 않는다.
+
+
+### P6 offline verification checkpoint (2026-10-20)
+- Verified code SHA `04350f7743081cab7b4476738423da973f8d9ca5`: all three GitHub Actions workflows **success** (P6 C Contract Offline, Three API offline tests, P6 Runtime Integration Offline).
+- `raw_v2/three_api_adapter_guard.py` now has offline guarded execution, persisted RAW receipt verification and a page-evidence commit bridge. Coordinator's newly leased job snapshot can retain pre-update `pending` state; `b51a544` fixed guard compatibility. Actual DB lease token/state/expiry are checked by `PageEvidenceStore.commit_page` at commit time.
+- Tests cover real SQLite RAW-gated page completion, expired lease rejection, duplicate completion refusal, CaptureJournal reopen/restart recovery without HTTP replay, unknown-outcome no-resend, and the entire 294-account/882-page dependency-ordered coordinator/evidence simulation. The 882-page simulation does **not** invoke Meta or persist actual RAW media rows.
+- Important unresolved operational gap: a reviewed live Meta dispatcher wiring coordinator leases to typed request/transport/capture/RAW/evidence, and reconciliation of expired leases with previously sent ambiguous requests. `Coordinator.lease` can reissue expired leases; the contract executor only deduplicates the **same request_id**. A fresh request_id could still duplicate an unknown previous send unless the live dispatcher adds durable job-to-request binding and fail-closed recovery. **Do not enable live dispatch, automated retries, main merge or production DB writes.**
+- Next: design and test durable job/request binding and recovery before any live deployment; keep PR #6 Draft pending explicit approval.
