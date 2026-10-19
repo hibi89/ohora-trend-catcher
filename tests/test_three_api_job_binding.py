@@ -256,6 +256,22 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_explicit_lease_apis_separate_dispatch_from_recovery(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        later = self.start + timedelta(minutes=16)
+        fresh = self.coordinator.lease_for_dispatch("A", now=later)
+        self.assertEqual(fresh["account_ordinal"], 2)
+        self.assertIsNone(self.bindings.lookup(fresh["id"]))
+        recovery = self.coordinator.lease_for_recovery("A", now=later)
+        self.assertEqual(recovery["id"], self.job["id"])
+        self.assertEqual(self.bindings.lookup(recovery["id"])["request_id"],
+                         self.request.request_id)
+        with self.assertRaises(JobBindingError):
+            self.bindings.dispatch_once(
+                recovery, self.request, self.evidence,
+                SimpleNamespace(execute=lambda r: self.fail("replayed HTTP")),
+                now=later)
+
     def test_mixed_recovery_and_fresh_dispatch_do_not_collide(self):
         # One request was reserved, then its lease expired. A different
         # unbound job can dispatch while the first remains recover-only.
