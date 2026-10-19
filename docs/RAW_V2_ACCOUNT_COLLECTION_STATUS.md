@@ -53,7 +53,7 @@ SQLite는 `mode=ro`, `PRAGMA query_only=ON`, `BEGIN` 읽기 트랜잭션으로 �
 ## 검증
 
 ```powershell
-python -m unittest tests.test_account_collection_status -v
+python -m unittest discover -s tests -p 'test_account_collection_status.py' -v
 python .\tests\run_offline.py
 python .\raw_v2\audit.py --output-dir $out
 ```
