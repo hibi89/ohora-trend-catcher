@@ -32,6 +32,10 @@ def stage_fixture_envelope(coordinator, evidence, job, envelope, *, now=None):
         # for this lane until operator review; no automatic retry.
         coordinator.observe_usage(lane, None, now=now)
         return {"status": "blocked", "reason": policy, "lane": lane}
+    # Some API envelopes carry an error despite HTTP 2xx. Never stage it.
+    if isinstance(body, dict) and "error" in body:
+        coordinator.observe_usage(lane, None, now=now)
+        return {"status": "blocked", "reason": "api_error_envelope", "lane": lane}
     observed = observe_headers(coordinator, lane, headers, now=now)
     if observed["halted"]:
         return {"status": "blocked", "reason": "usage_limit_or_missing", "lane": lane}
