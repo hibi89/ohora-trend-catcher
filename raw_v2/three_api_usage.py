@@ -18,7 +18,7 @@ def _numbers(value):
     if isinstance(value, dict):
         result = []
         for key, item in value.items():
-            if key in ("call_count", "total_cputime", "total_time", "estimated_time_to_regain_access"):
+            if key in ("call_count", "total_cputime", "total_time"):
                 result += _numbers(item)
             elif isinstance(item, (dict, list)):
                 result += _numbers(item)
