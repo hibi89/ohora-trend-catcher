@@ -342,6 +342,121 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(runner.coordinator.db.execute(
             "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
 
+    def test_bad_a_page_isolated_b_data_survives_then_a_manual_recovery(self):
+        self.front[(2,1,None)]=fixture([22001],like_count=-1)
+        self.front[(151,1,None)]=fixture([25101])
+        self.front[(152,1,None)]=fixture([25201])
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        before=runner.mirror.db.execute(
+            "SELECT post_id,account_key FROM raw_posts WHERE post_id='115'"
+        ).fetchone()
+        self.assertEqual(tuple(before),("115","KR_001"))
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_blocked")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='A'").fetchone()[0],1)
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],6)
+        self.assertEqual(runner.mirror.summary()["raw_post_observations"],6)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],3)
+        self.assertEqual(runner.step("A",now=NOW+timedelta(minutes=66))["status"],
+                         "front_lane_unavailable")
+        self.front[(2,1,None)]=fixture([22001],like_count=0)
+        self.assertTrue(runner.coordinator.reset_after_verified_cooldown(
+            "A",now=NOW+timedelta(minutes=66)))
+        self.assertEqual(runner.step("A",now=NOW+timedelta(minutes=67))["status"],
+                         "front_committed")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],7)
+        self.assertEqual(runner.mirror.summary()["raw_post_observations"],7)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],4)
+        self.assertEqual(tuple(runner.mirror.db.execute(
+            "SELECT post_id,account_key FROM raw_posts WHERE post_id='115'"
+        ).fetchone()),("115","KR_001"))
+
+    def test_bad_b_lane_does_not_prevent_a_from_collecting_other_accounts(self):
+        self.front[(151,1,None)]=fixture([25101],comments_count=-1)
+        self.front[(2,1,None)]=fixture([22001])
+        runner=self.create()
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_blocked")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='B'").fetchone()[0],1)
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],5)
+        self.assertEqual(runner.ledger.status("KR_151",DAY)["front_pages"],0)
+        self.assertEqual(runner.ledger.status("KR_001",DAY)["front_pages"],1)
+        self.assertEqual(runner.ledger.status("KR_002",DAY)["front_pages"],1)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='A'").fetchone()[0],0)
+        self.assertEqual(runner.coverage()["front_incomplete"],293)
+
+    def test_failed_a_raw_promotion_replays_without_refetch_then_b_continues(self):
+        self.front[(151,1,None)]=fixture([25101])
+        runner=self.create()
+        with mock.patch.object(runner.mirror,"promote_page",
+                               side_effect=RuntimeError("synthetic transient failure")):
+            self.assertEqual(runner.step("A",now=NOW)["status"],"front_blocked")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        self.assertEqual(runner.mirror.summary()["pending_pages"],1)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+        self.front.clear()
+        self.front[(151,1,None)]=fixture([25101])
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],5)
+        self.assertEqual(runner.mirror.summary()["raw_post_observations"],5)
+        self.assertEqual(runner.mirror.summary()["pending_pages"],0)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],2)
+        self.assertEqual(runner.step("A",now=NOW)["status"],
+                         "front_lane_unavailable")
+        self.assertEqual(runner.reconcile()["mirror_posts"],5)
+
+    def test_cross_account_id_collision_keeps_old_raw_and_globally_blocks(self):
+        self.front[(151,1,None)]=fixture([115])
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        old_counts=runner.mirror.summary().copy()
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_blocked")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],old_counts["raw_posts"])
+        self.assertEqual(runner.mirror.summary()["raw_post_observations"],
+                         old_counts["raw_post_observations"])
+        self.assertEqual(runner.mirror.summary()["raw_post_media"],
+                         old_counts["raw_post_media"])
+        self.assertEqual(tuple(runner.mirror.db.execute(
+            "SELECT account_key,post_id FROM raw_posts WHERE post_id='115'"
+        ).fetchone()),("KR_001","115"))
+        self.assertEqual(runner.mirror.summary()["pending_pages"],1)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='B'").fetchone()[0],1)
+        self.assertEqual(runner.step("A",now=NOW)["status"],"recovery_blocked")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],4)
+        self.assertEqual(runner.ledger.status("KR_151",DAY)["front_pages"],1)
+        self.assertEqual(runner.coverage()["front_incomplete"],293)
+
+    def test_malformed_b_carousel_blocks_b_but_c_can_stage_verified_page2(self):
+        invalid=fixture([25101],media_type="CAROUSEL_ALBUM")
+        invalid["payload"]["data"][0]["children"]={
+            "data":[{"id":"25102","media_type":"IMAGE"}],
+            "paging":{"next":"https://example.invalid/next?secret=DROP"}
+        }
+        self.front[(151,1,None)]=invalid
+        self.front[(1,2,"p2")]=fixture([111])
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_blocked")
+        self.assertEqual(runner.step("C",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.mirror.summary()["raw_posts"],5)
+        self.assertEqual(runner.ledger.status("KR_151",DAY)["front_pages"],0)
+        self.assertEqual(runner.ledger.status("KR_001",DAY)["front_pages"],2)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='C'").fetchone()[0],0)
+        dump="\n".join(runner.coordinator.db.iterdump())
+        self.assertNotIn("DROP",dump)
+
     def test_manual_review_not_masked_as_verified(self):
         runner=self.create(front={})
         for account in accounts():
