@@ -30,6 +30,17 @@ class CoordinatorTests(unittest.TestCase):
                 (ordinal,)).fetchall()
             self.assertEqual([r[0] for r in pages], [1, 2, 3])
 
+    def test_daily_page_continuation_uses_allowed_catchup_phase(self):
+        """Page 2/3 are daily continuation, not paused historical backfill."""
+        rows = self.c.db.execute(
+            "SELECT page, phase, COUNT(*) FROM jobs GROUP BY page, phase "
+            "ORDER BY page"
+        ).fetchall()
+        self.assertEqual(
+            [(row[0], row[1], row[2]) for row in rows],
+            [(1, "front", 294), (2, "catchup", 294), (3, "catchup", 294)],
+        )
+
     def test_lease_exclusive_and_stale_completion(self):
         t = datetime(2026, 10, 19, tzinfo=timezone.utc)
         first = self.c.lease("A", t)
