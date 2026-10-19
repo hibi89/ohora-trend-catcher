@@ -1,3 +1,9 @@
+> **2026-10-19 p6 최신 상태 — 인증값 주입·모의 HTTP 전송까지 검증 (이전 항목보다 우선)**
+> - **구현:** [`raw_v2/three_api_runtime_boundary.py`](raw_v2/three_api_runtime_boundary.py)의 `OfflineCredentialedFetcher`는 호출자가 **명시적으로 제공한 매핑**에서 lane별 토큰·IG User ID를 실행 직전에 읽고, [`three_api_http_preflight.py`](raw_v2/three_api_http_preflight.py)의 사전검증 명세를 기반으로 모의 Bearer 헤더를 만든 뒤, **네트워크 기능 없는 메모리 전송기**에만 전달한다. `OfflineThreeApiRunner(..., envelope_fixture=True)`로 A→C 커서 인계·사용량 85% 차단·분리 SQLite staging을 연동 검증. 토큰을 결과·상태 출력·staging DB에 남기지 않는 회귀 테스트 포함. `os.environ` 자동 접근과 `.env` 파싱은 구현하지 않았다.
+> - **검증:** [GitHub Actions #39218398995](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39218398995), CI 트리거 SHA `89f4084fffcd5d79699576d8b9366ea8c3b2e9ee`: **15개 스위트·107/107 PASS**, Python 3.11 컴파일 PASS (job 로그 직접 확인). 신규 `tests/test_three_api_runtime_boundary.py` **16/16 PASS**.
+> - **아직 미구현/미검증:** 실제 HTTP 전송 구현·실제 Meta API 인증/호출, 운영 DB 적재, A/B/C 세 앱/토큰의 진짜 독립 rate limit, 일일 실운영 스케줄러 통합 및 장시간 운영. 별도 승인 없이 실수집·운영 `collection.sqlite` 변경 금지. 토큰/환경파일 업로드·로그·커밋 금지.
+> - **롤백:** 코드 변경 `03ad2c8`(신규 모듈), `84f944d`(테스트), `89f4084`(CI)을 각각 되돌릴 수 있다. 기존 단일-API 수집기는 변경하지 않았다. 아래 과거 시점의 ‘CI 미확인/토큰 읽기 미구현’은 이후 최신 상태로 갱신된 기록이다.
+
 > **2026-10-19 p6 자동 검증 확인 (최신):** GitHub Actions [Three API offline tests #39217147308](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39217147308), 코드·테스트 CI 변경 커밋 `1d6e71c344bca9c5181fcc29a89cb0c1c38adc08`에서 **14개 테스트 스위트 합계 91/91 PASS**, Python 3.11 컴파일 PASS. 실제 job 로그까지 확인. 독립 로컬 Python 3.13 관련 테스트 23/23 PASS. 이는 **오프라인 회귀 검증**이지 실제 Meta 인증·수집·쿼터 격리 검증이 아니다. 아래 ‘CI 미확인’은 **해당 기록 당시의 과거 상태**이며 최신 기준으로는 해결됨. 코드: `raw_v2/three_api_http_preflight.py`; 운영 `collection.sqlite`/토큰/실제 API 호출 없음.
 
 > **2026-10-19 — p6 HTTP 오프라인 사전검증 구현 (후속):**
