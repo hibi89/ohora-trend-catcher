@@ -240,6 +240,24 @@ class DailyGapLedger:
             raise
         return self.status(account_key,day)
 
+    def _pending_gap_action(self, account, gap_day):
+        """Never re-use a cursor after a manual replay-from-head has begun."""
+        table=self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='reanchor_attempt'"
+        ).fetchone()
+        state=None
+        if table is not None:
+            row=self.db.execute(
+                "SELECT state FROM reanchor_attempt "
+                "WHERE account_key=? AND gap_day=? "
+                "ORDER BY replay_day DESC LIMIT 1",
+                (account,gap_day)).fetchone()
+            state=row["state"] if row is not None else None
+        phase=("reanchor" if state=="active" else
+               "needs_review" if state=="needs_review" else "catchup")
+        return {"account_key":account,"phase":phase,"gap_day":gap_day}
+
     def next_actions(self, account_keys, day):
         """Global policy: all unfinished fronts, then oldest gap, then history.
 
