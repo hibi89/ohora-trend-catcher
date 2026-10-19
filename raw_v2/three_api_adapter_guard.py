@@ -89,3 +89,21 @@ def verify_raw_completion(request, receipt, capture_port, raw_port):
     except (AttributeError, TypeError, ValueError):
         raise AdapterGuardError("Invalid RAW completion evidence") from None
     return persisted.raw_receipt_id
+
+
+def commit_verified_page(job, request, receipt, capture_port, raw_port,
+                         evidence, *, response, now=None):
+    """Offline-only bridge: verify RAW durability before atomic page completion.
+
+    The response must be an independently verified normalized page edge.
+    This bridge never makes HTTP requests, retries, or writes production RAW.
+    A stale lease fails in PageEvidenceStore.commit_page.
+    """
+    validate_job_request(job, request, evidence)
+    receipt_id = verify_raw_completion(request, receipt, capture_port, raw_port)
+    if not callable(getattr(evidence, "commit_page", None)):
+        raise AdapterGuardError("Page evidence commit unavailable")
+    return evidence.commit_page(
+        job["id"], job["lease_id"], receipt_id, response,
+        requested_cursor=request.cursor, now=now,
+    )
