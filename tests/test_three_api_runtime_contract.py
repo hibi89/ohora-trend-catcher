@@ -50,7 +50,7 @@ class ContractTests(unittest.TestCase):
         response = ResponseEnvelope(CONTRACT_VERSION, request.request_id, 200,
             {"business_discovery": {"followers_count": None, "media_count": 1,
               "media": {"data": [{"id": "123", "like_count": 0}]}}},
-            {"x-app-usage-call-count": "3"}, observed, None)
+            {"x-app-usage": '{"call_count":3}'}, observed, None)
         return capture_from_response(
             request, response, capture_id="capture-1",
             normalized_posts=[{"id": "123", "media_type": "IMAGE", "like_count": 0}],
@@ -250,7 +250,7 @@ class ContractTests(unittest.TestCase):
         now = datetime(2026, 10, 19, tzinfo=timezone.utc)
         response = ResponseEnvelope(CONTRACT_VERSION, request.request_id, 200,
             {"media": {"data": [{"id": "123", "comments_count": 0}]}},
-            {"x-app-usage-call-count": "2"}, now, None)
+            {"x-app-usage": '{"call_count":2}'}, now, None)
         record = capture_from_response(request, response, capture_id="c",
             normalized_posts=[{"id": "123", "comments_count": 0}],
             account_observation={}, account_fields_tested=frozenset(),
@@ -296,6 +296,38 @@ class ContractTests(unittest.TestCase):
                     post_field_status={"123": {"like_count": "absent",
                                                 "comments_count": "absent"}})
 
+
+
+    def test_real_meta_json_usage_and_fail_closed(self):
+        from three_api_runtime_contract import safe_usage_metrics
+        self.assertEqual(safe_usage_metrics({"x-app-usage": '{"call_count":84.2}'}),
+                         {"max_usage_percent": 85})
+        self.assertEqual(safe_usage_metrics({"x-business-use-case-usage":
+            '{"123":[{"call_count":44},{"call_count":72}]}'}),
+            {"max_usage_percent": 72})
+        for headers in ({}, {"x-app-usage": "invalid"},
+                        {"x-app-usage": '{"call_count":85}'},
+                        {"x-app-usage": '{"call_count":86}'},
+                        {"x-app-usage": '{"call_count":101}'},
+                        {"x-app-usage": '{"call_count":true}'}):
+            with self.subTest(headers=headers), self.assertRaises(ValueError):
+                safe_usage_metrics(headers)
+
+    def test_usage_capture_contains_no_raw_header(self):
+        from dataclasses import replace
+        record = self.make_record()
+        self.assertEqual(record.usage_metrics, {"max_usage_percent": 3})
+        self.assertNotIn("x-app-usage", str(record.usage_metrics))
+        response = ResponseEnvelope(CONTRACT_VERSION, record.request.request_id, 200,
+            {"media": {"data": [{"id": "123"}]}},
+            {"x-app-usage": '{"call_count":85}'},
+            record.observed_at, None)
+        with self.assertRaises(ContractError) as context:
+            capture_from_response(record.request, response, capture_id="capture-2",
+                normalized_posts=[{"id": "123", "media_type": "IMAGE"}],
+                account_observation={}, account_fields_tested=frozenset(),
+                carousel_completeness={"123": "not_applicable"}, source_digest="source-sha")
+        self.assertEqual(context.exception.category, "usage_limit")
 
 
 if __name__ == "__main__":
