@@ -205,6 +205,49 @@ class ContractExecutorTests(unittest.TestCase):
         self.assertEqual(transport.calls, 1)
         self.assertEqual(self.count("post_observations"), 1)
 
+    def test_new_executor_after_restart_recovers_without_http(self):
+        first_transport = FakeTransport(make_response(self.request))
+        first = self.executor(first_transport)
+        original = self.journal.confirm_processed
+
+        def interrupted_ack(capture_id, receipt_id):
+            raise OSError("synthetic process interruption")
+
+        self.journal.confirm_processed = interrupted_ack
+        with self.assertRaises(OSError):
+            first.execute(self.request)
+        self.journal.confirm_processed = original
+        self.journal.close()
+
+        self.journal = CaptureJournal(str(Path(self.temp.name) / "capture.sqlite"))
+        second_transport = FakeTransport(error=AssertionError("HTTP must not run"))
+        restarted = self.executor(second_transport)
+        recovered = restarted.execute(self.request)
+
+        self.assertIn(recovered.status, ("committed", "already_committed"))
+        self.assertEqual(first_transport.calls, 1)
+        self.assertEqual(second_transport.calls, 0)
+        self.assertEqual(self.count("post_observations"), 1)
+        self.assertEqual(self.count("three_api_contract_receipts"), 1)
+
+    def test_new_executor_after_unknown_outcome_never_resends_http(self):
+        failure = TransportFailure(
+            CONTRACT_VERSION, self.request.request_id, "outcome_unknown",
+            "account", False, None, "Synthetic ambiguous result", True,
+        )
+        first_transport = FakeTransport(error=failure)
+        with self.assertRaises(ContractExecutionError):
+            self.executor(first_transport).execute(self.request)
+        self.journal.close()
+
+        self.journal = CaptureJournal(str(Path(self.temp.name) / "capture.sqlite"))
+        second_transport = FakeTransport(error=AssertionError("HTTP must not run"))
+        with self.assertRaises(ContractExecutionError):
+            self.executor(second_transport).execute(self.request)
+        self.assertEqual(first_transport.calls, 1)
+        self.assertEqual(second_transport.calls, 0)
+        self.assertEqual(self.count("three_api_contract_receipts"), 0)
+
     def assert_usage_blocked(self, header):
         transport = FakeTransport(make_response(self.request, usage=header))
         with self.assertRaises(ContractExecutionError):
