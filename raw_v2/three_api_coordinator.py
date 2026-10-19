@@ -48,7 +48,7 @@ class Coordinator:
             account_ordinal INTEGER NOT NULL CHECK(account_ordinal BETWEEN 1 AND 294),
             page INTEGER NOT NULL CHECK(page BETWEEN 1 AND 3),
             lane TEXT NOT NULL CHECK(lane IN ('A','B','C')),
-            phase TEXT NOT NULL CHECK(phase IN ('front','history')),
+            phase TEXT NOT NULL CHECK(phase IN ('front','catchup')),
             state TEXT NOT NULL DEFAULT 'pending'
                 CHECK(state IN ('pending','leased','done')),
             lease_id TEXT,
@@ -75,7 +75,7 @@ class Coordinator:
                     self.db.execute(
                         """INSERT OR IGNORE INTO jobs
                            (account_ordinal,page,lane,phase) VALUES (?,?,?,?)""",
-                        (account,page,lane,"front" if page == 1 else "history"),
+                        (account,page,lane,"front" if page == 1 else "catchup"),
                     )
             self.db.execute("COMMIT")
         except BaseException:
