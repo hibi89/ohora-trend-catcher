@@ -86,6 +86,14 @@ class CoordinatorTests(unittest.TestCase):
         second = self.c.lease("C", t)
         self.assertEqual((second["account_ordinal"], second["page"]), (1, 2))
 
+    def test_expired_lease_can_be_reissued_without_outcome_reconciliation(self):
+        """Characterize unsafe legacy behavior; adapter must refuse resend."""
+        t = datetime(2026, 10, 19, tzinfo=timezone.utc)
+        first = self.c.lease("A", t)
+        reissued = self.c.lease("A", t + timedelta(minutes=16))
+        self.assertEqual(first["id"], reissued["id"])
+        self.assertNotEqual(first["lease_id"], reissued["lease_id"])
+
     def test_usage_halts_only_affected_lane(self):
         t = datetime(2026, 10, 19, tzinfo=timezone.utc)
         self.assertFalse(self.c.observe_usage("A",84,t))
