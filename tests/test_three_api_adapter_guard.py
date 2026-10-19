@@ -57,6 +57,29 @@ class GuardTests(unittest.TestCase):
             guard.execute_guarded(job, request, evidence, executor)
         self.assertEqual(calls, [request])
 
+    def test_raw_completion_requires_matching_durable_receipt(self):
+        request = SimpleNamespace(request_id="req-one")
+        capture = SimpleNamespace(capture_id="cap-one", capture_digest="a" * 64,
+                                  request=request)
+        receipt = SimpleNamespace(capture_id="cap-one",
+                                  capture_digest="a" * 64,
+                                  raw_receipt_id="raw-one", status="committed")
+        cap_port = SimpleNamespace(
+            get_capture_for_request=lambda key: capture)
+        raw_port = SimpleNamespace(
+            get_raw_receipt=lambda key: receipt)
+        self.assertEqual(guard.verify_raw_completion(
+            request, receipt, cap_port, raw_port), "raw-one")
+        missing = SimpleNamespace(get_raw_receipt=lambda key: None)
+        with self.assertRaises(guard.AdapterGuardError):
+            guard.verify_raw_completion(request, receipt, cap_port, missing)
+        mismatched = SimpleNamespace(
+            get_raw_receipt=lambda key: SimpleNamespace(
+                capture_id="cap-one", capture_digest="a" * 64,
+                raw_receipt_id="raw-other", status="committed"))
+        with self.assertRaises(guard.AdapterGuardError):
+            guard.verify_raw_completion(request, receipt, cap_port, mismatched)
+
     def test_rejects_unleased_job(self):
         job = {"id": 1, "state": "pending", "lease_id": None,
                "page": 1, "account_ordinal": 1, "lane": "A", "phase": "front"}
