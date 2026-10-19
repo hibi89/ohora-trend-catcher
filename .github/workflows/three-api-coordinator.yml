@@ -127,3 +127,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_three_api_daily_gap.py' -v
           python -m unittest discover -s tests -p 'test_three_api_daily_projection.py' -v
           python -m unittest discover -s tests -p 'test_three_api_reanchor.py' -v
+          python -m unittest discover -s tests -p 'test_three_api_catchup_offline.py' -v

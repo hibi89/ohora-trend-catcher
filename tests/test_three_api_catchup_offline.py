@@ -112,7 +112,7 @@ class CatchupOfflineTests(unittest.TestCase):
         self.front()
         obj = self.runner()
         obj.run_one("A", TODAY, now=NOW, stage_only=True)
-        self.ledger.db.execute("UPDATE catchup_inbox SET ids_json='[\\"999\\"]'")
+        self.ledger.db.execute("UPDATE catchup_inbox SET ids_json=?", ('["999"]',))
         self.ledger.record_page("KR_001", TODAY, phase="catchup",
             requested_cursor="p4",post_ids=["103","102","101","100"])
         with self.assertRaises(OfflineCatchupError):
