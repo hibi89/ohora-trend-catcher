@@ -228,6 +228,34 @@ class JobRequestBindingTests(unittest.TestCase):
             journal.close()
             db.close()
 
+    def test_dispatch_ready_counts_only_unbound_unblocked_first_pages(self):
+        at_start = self.coordinator.dispatch_ready_diagnostics(now=self.start)
+        lanes = {row["lane"]: row for row in at_start["lanes"]}
+        self.assertEqual(lanes["A"]["eligible_jobs"], 149)
+        self.assertEqual(lanes["B"]["eligible_jobs"], 144)
+        self.assertEqual(lanes["C"]["eligible_jobs"], 0)
+        self.assertEqual(lanes["A"]["dispatchable_now"], 149)
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        later = self.start + timedelta(minutes=16)
+        after = self.coordinator.dispatch_ready_diagnostics(now=later)
+        lanes = {row["lane"]: row for row in after["lanes"]}
+        self.assertEqual(lanes["A"]["eligible_jobs"], 149)
+        self.assertEqual(lanes["A"]["dispatchable_now"], 149)
+        self.assertEqual(lanes["C"]["eligible_jobs"], 0)
+        self.assertEqual(self.coordinator.db.execute(
+            "SELECT state FROM jobs WHERE id=?", (self.job["id"],)
+        ).fetchone()[0], "leased")
+
+    def test_dispatch_ready_counts_respect_lane_halt_without_mutation(self):
+        self.coordinator.observe_usage("A", 85, now=self.start)
+        report = self.coordinator.dispatch_ready_diagnostics(now=self.start)
+        lanes = {row["lane"]: row for row in report["lanes"]}
+        self.assertFalse(lanes["A"]["lane_ready"])
+        self.assertEqual(lanes["A"]["eligible_jobs"], 149)
+        self.assertEqual(lanes["A"]["dispatchable_now"], 0)
+        self.assertEqual(lanes["B"]["dispatchable_now"], 144)
+        self.assertEqual(lanes["C"]["dispatchable_now"], 0)
+
     def test_read_only_dispatch_diagnostics_classifies_bound_and_expired(self):
         initial = self.coordinator.dispatch_diagnostics(now=self.start)
         a = next(row for row in initial["lanes"] if row["lane"] == "A")
