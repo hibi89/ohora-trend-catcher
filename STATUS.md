@@ -2,6 +2,7 @@
 
 - **Branch:** `codex/p6-readiness-hardening-20261019` · **PR:** Draft #6 · **main merge:** NOT approved.
 - **Latest code CI verified:** `633865f3ca2708d5574ebe74c022c03edeb918dd`. All three GitHub Actions successful: Runtime Integration Offline #39341896412; Three API offline #39341896447; C Contract Offline #39341896554.
+- **Final QA logs:** Runtime Integration Offline 529 tests PASS (job 118365200716); Three API offline SUCCESS (job 118365200646); C Contract 22 tests PASS (job 118365201783). Suites overlap; do not sum as unique tests. Ubuntu GitHub Actions only; Windows and live Meta unverified. Node.js 20→24 action runtime deprecation warning is nonfatal.
 - **Implemented and offline-tested:** 294×3 coordinator, 3 lanes/2 rounds/4 posts per page policy, cursor evidence, atomic durable request binding, dispatch-only vs recovery-only leases, capture→RAW→page completion, no HTTP replay on ambiguous outcome, read-only dispatch/recovery diagnostics, usage halt/cooldown and G0–G6 evidence evaluator.
 - **Not verified:** Windows isolated execution, actual Meta API scopes/identity/quota/cursors, production DB migration, real 294-account run, unattended scheduler and end-to-end production readiness. Offline tests ran on Ubuntu/Python 3.11.
 - **Safety:** No Meta calls/secrets/production writes/scheduler/merge. Do not mark as live ready.
