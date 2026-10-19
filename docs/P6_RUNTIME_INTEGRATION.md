@@ -64,3 +64,12 @@ GitHub workflow 상태를 직접 재조회했다. 세부 테스트 수는 해당
 - PR #6 브랜치에 한정해 문서와 **격리 합성 테스트**만 변경할 수 있다. 배포 대상은 해당 없음(Vercel Production 미적용).
 - 기존 코드 되돌리기 없이 이 신규 문서만 삭제하거나 개별 문서 커밋을 revert하여 복구 가능. 기존 원본/운영 DB 변경 없음.
 - 최신 상태 진입점: 루트 `HANDOFF.md`, `STATUS.md`, 본 문서, PR #6 HEAD SHA 및 workflow 결과. 문서 커밋은 런타임 코드 변경/실검증이 아니다.
+
+## 7. p6 최종 개발 기반 결정 및 Codex 구현 경계 (2026-10-19)
+
+- **최종 개발 저장소는 p6** `hibi89/ohora-trend-catcher`, 작업 브랜치는 Draft PR #6. p7 `hibi89/ohora-trend-catcher-classic`은 과거 실수집 코드의 비교 기준이며 통째 병합하거나 중복 디렉터리를 복사하지 않는다.
+- 확인된 실제 코드: p6 `three_api_daily_orchestrator.py`의 `OfflineDailyOrchestrator`는 수동 합성 fixture `step()` 실행기이며 Meta live scheduler가 아니다. p6 `three_api_contract_executor.py`의 `ThreeApiContractExecutor`는 단일 요청의 intent/transport/capture/receipt 경로이다. p7 `daily_scheduler.py`는 기존 단일 Graph API 운영 수집 진입점이며 `--live` opt-in과 front/catchup/history 정책을 갖는다. p7 `three_api_plan.py`는 294계정 3페이지 2라운드 계획만 제공하며 실 병렬 collector가 아니다.
+- **선행 설계 결정:** 단일 요청 executor와 일일 계정/페이지 작업 선택기 사이에 얇은 adapter를 정의한다. 각 `(roster_digest, account_key, page)` 작업의 선행 페이지 RAW receipt 및 실제 opaque cursor를 검증한 후에만 다음 페이지 요청. lane A/B/C 독립 quota/credential/context 및 공통 durable job lease의 소유권을 명확히 한다. 기존 `slots`, `accounts.backfill_cursor`, `collection.sqlite`를 3개 legacy collector가 동시에 공유하게 하지 않는다.
+- **실행 순서:** (1) 현재 모듈 입출력·DB schema·lock 경계 표 작성, (2) 합성 격리 DB에서 adapter와 page1→2→3 상태 전이 구현, (3) 중단/재시작·unknown outcome·cursor 변조·중복 receipt·quota 차단·race 회귀 추가, (4) `python tests/run_offline.py` 전체 재실행, (5) HANDOFF/STATUS/PR에 코드 SHA와 실제 CI 결과 기록. 기존 489 테스트를 다시 작성하지 않는다.
+- **금지/미검증:** 운영 자격증명/토큰 열람, 실 Meta 요청, 운영 DB·CSV·RAW 변경, 기존 수집 경로 삭제, 3개 collector의 동시 실행, unattended scheduler 활성화, Draft 해제, main 병합. 새 오프라인 adapter가 완성되어도 Meta 권한·quota 독립성·실 운영 성공은 별도 승인/검증 전까지 미확인이다.
+- **인수인계 품질 기준:** 코드/문서 수정마다 실제 커밋 SHA·테스트 명령·결과를 구분하고, 실패나 접근 불가 항목을 미검증으로 표시한다. 최종 목표는 p6 하나의 운영 가능한 294계정 수집 시스템이며 p7 별도 제품을 만들지 않는다.
