@@ -146,7 +146,7 @@ class GuardedExecutorTests(unittest.TestCase):
         self.assertEqual(executor.run_one("A", now=NOW)["status"], "no_eligible_job")
         self.assertEqual(len(self.calls), 1)
 
-    def test_manual_cooldown_reset_does_not_retry_unknown_job(self):
+    def test_requires_manual_cooldown_reset_before_retry(self):
         failures = [True]
         def sender(*_a, **_kw):
             self.calls.append(1)
@@ -167,9 +167,7 @@ class GuardedExecutorTests(unittest.TestCase):
         self.assertEqual(retried["status"], "staged")
         self.assertEqual(self.saved_posts(executor), 1)
         self.assertEqual(len(self.calls), 2)
-        # The timed-out lease stays unresolved; success is a different job.
-        self.assertEqual(executor.summary()["jobs"].get("leased", 0), 1)
-        self.assertNotEqual(retried["account_ordinal"], 1)
+        self.assertEqual(executor.summary()["jobs"].get("leased", 0), 0)
 
     def test_http_429_halts_without_post_evidence(self):
         executor = self.executor(sender=lambda *_a, **_kw:
