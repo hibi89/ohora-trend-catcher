@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from three_api_coordinator import Coordinator
 from three_api_evidence import PageEvidenceStore
 from three_api_job_binding import JobBindingError, JobRequestBindingStore
+from three_api_adapter_guard import execute_guarded, AdapterGuardError
 from three_api_capture import CaptureJournal
 from three_api_contract_executor import ThreeApiContractExecutor
 from three_api_raw_writer import ContractRawWriter
@@ -42,8 +43,12 @@ class JobRequestBindingTests(unittest.TestCase):
         calls = []
         executor = SimpleNamespace(
             execute=lambda request: calls.append(request.request_id) or "receipt")
-        result = self.bindings.dispatch_once(
-            self.job, self.request, self.evidence, executor, now=self.start)
+        with self.assertRaises(AdapterGuardError):
+            execute_guarded(self.job, self.request, self.evidence, executor)
+        self.assertEqual(calls, [])
+        result = execute_guarded(
+            self.job, self.request, self.evidence, executor,
+            bindings=self.bindings, now=self.start)
         self.assertEqual(result, "receipt")
         self.assertEqual(calls, [self.request.request_id])
         self.assertEqual(self.bindings.lookup(self.job["id"])["request_id"],
