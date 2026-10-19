@@ -228,6 +228,40 @@ class JobRequestBindingTests(unittest.TestCase):
             journal.close()
             db.close()
 
+    def test_dispatch_lease_skips_expired_bound_job_without_starving_lane(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        later = self.start + timedelta(minutes=16)
+        fresh = self.coordinator.lease("A", now=later, skip_bound=True)
+        self.assertIsNotNone(fresh)
+        self.assertEqual(fresh["account_ordinal"], 2)
+        self.assertEqual(fresh["page"], 1)
+        self.assertIsNone(self.bindings.lookup(fresh["id"]))
+        recovery = self.coordinator.lease("A", now=later)
+        self.assertIsNotNone(recovery)
+        self.assertEqual(recovery["id"], self.job["id"])
+        self.assertNotEqual(recovery["lease_id"], self.job["lease_id"])
+        calls = []
+        with self.assertRaises(JobBindingError):
+            self.bindings.dispatch_once(
+                recovery, replace(self.request, request_id="req-" + "d" * 64),
+                self.evidence,
+                SimpleNamespace(execute=lambda request: calls.append(request)),
+                now=later)
+        self.assertEqual(calls, [])
+
+    def test_dispatch_skip_persists_across_coordinator_restart(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        self.coordinator.db.close()
+        self.coordinator = Coordinator(self.root / "coordinator.sqlite")
+        self.addCleanup(self.coordinator.db.close)
+        self.evidence = PageEvidenceStore(self.coordinator)
+        self.bindings = JobRequestBindingStore(self.coordinator)
+        fresh = self.coordinator.lease(
+            "A", now=self.start + timedelta(minutes=16), skip_bound=True)
+        self.assertEqual(fresh["account_ordinal"], 2)
+        self.assertEqual(self.bindings.lookup(self.job["id"])["request_id"],
+                         self.request.request_id)
+
     def test_lease_must_be_live_before_reservation(self):
         with self.assertRaises(JobBindingError):
             self.bindings.reserve(
