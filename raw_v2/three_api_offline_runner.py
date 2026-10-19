@@ -11,16 +11,18 @@ from pathlib import Path
 from three_api_coordinator import Coordinator, LANES
 from three_api_evidence import PageEvidenceStore
 from three_api_adapter import build_intent
+from three_api_meta_normalizer import normalize_meta_page
 
 
 class OfflineThreeApiRunner:
-    def __init__(self, state_db, accounts, fetch_page):
+    def __init__(self, state_db, accounts, fetch_page, *, meta_fixture=False):
         if not callable(fetch_page):
             raise TypeError("A callable offline page fixture is required")
         self.coordinator = Coordinator(Path(state_db))
         self.evidence = PageEvidenceStore(self.coordinator)
         self.accounts = accounts
         self.fetch_page = fetch_page
+        self.meta_fixture = meta_fixture
 
     def close(self):
         self.coordinator.db.close()
@@ -43,6 +45,8 @@ class OfflineThreeApiRunner:
         response = self.fetch_page(intent, cursor)
         if not isinstance(response, dict):
             raise ValueError("Fixture response must be a dictionary")
+        if self.meta_fixture:
+            response = normalize_meta_page(response, requested_cursor=cursor)
         edge = self.evidence.commit_staged_page(
             job["id"], job["lease_id"], response,
             requested_cursor=cursor, now=now,
