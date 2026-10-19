@@ -150,7 +150,12 @@ class DailyProjectionTests(unittest.TestCase):
         db.execute("DELETE FROM staging_post_order WHERE position=1")
         with self.assertRaises(DailyProjectionError):
             obj.reconcile_all()
-        self.assertIsNone(obj.ledger.status("KR_001","2026-10-19"))
+        # Starting the daily window is safe, but invalid ordered evidence
+        # must never advance its page counter or add page proof.
+        status=obj.ledger.status("KR_001","2026-10-19")
+        self.assertEqual(status["front_pages"],0)
+        self.assertEqual(obj.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof").fetchone()[0],0)
 
     def test_projection_failure_halts_lane_without_refetch(self):
         self.ledger_with_old_head()
