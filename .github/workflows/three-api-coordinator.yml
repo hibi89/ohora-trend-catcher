@@ -5,15 +5,19 @@ on:
     paths:
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_adapter.py'
+      - 'raw_v2/three_api_checkpoints.py'
       - 'tests/test_three_api_coordinator.py'
       - 'tests/test_three_api_adapter.py'
+      - 'tests/test_three_api_checkpoints.py'
       - '.github/workflows/three-api-coordinator.yml'
   pull_request:
     paths:
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_adapter.py'
+      - 'raw_v2/three_api_checkpoints.py'
       - 'tests/test_three_api_coordinator.py'
       - 'tests/test_three_api_adapter.py'
+      - 'tests/test_three_api_checkpoints.py'
       - '.github/workflows/three-api-coordinator.yml'
   workflow_dispatch:
 
@@ -29,9 +33,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Compile coordinator, adapter, and tests
-        run: python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py tests/test_three_api_coordinator.py tests/test_three_api_adapter.py
-      - name: Run coordinator and adapter offline regression suites
+      - name: Compile all three-API modules and tests
+        run: |
+          python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py raw_v2/three_api_checkpoints.py
+          python -m py_compile tests/test_three_api_coordinator.py tests/test_three_api_adapter.py tests/test_three_api_checkpoints.py
+      - name: Run three-API offline regression suites
         run: |
           python -m unittest discover -s tests -p 'test_three_api_coordinator.py' -v
           python -m unittest discover -s tests -p 'test_three_api_adapter.py' -v
+          python -m unittest discover -s tests -p 'test_three_api_checkpoints.py' -v
