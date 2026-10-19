@@ -97,6 +97,22 @@ class Coordinator:
             if state["halted"] or state["ready_at"] > current:
                 self.db.execute("COMMIT")
                 return None
+            # Evidence-aware mode is enabled only after PageEvidenceStore
+            # creates its table. Without it, legacy offline coordinator
+            # regression behavior remains unchanged.
+            evidence_enabled = self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='page_evidence'"
+            ).fetchone() is not None
+            proof_filter = (
+                """AND (jobs.page=1 OR EXISTS (
+                    SELECT 1 FROM page_evidence proof
+                    WHERE proof.account_ordinal=jobs.account_ordinal
+                      AND proof.page=jobs.page-1 AND proof.terminal=0
+                      AND proof.response_cursor IS NOT NULL
+                ))"""
+                if evidence_enabled else ""
+            )
             job = self.db.execute(
                 """SELECT * FROM jobs WHERE lane=?
                    AND (state='pending' OR (state='leased' AND leased_until<=?))
@@ -105,6 +121,7 @@ class Coordinator:
                        WHERE earlier.account_ordinal=jobs.account_ordinal
                        AND earlier.page<jobs.page AND earlier.state!='done'
                    )
+                   """ + proof_filter + """
                    ORDER BY CASE phase WHEN 'front' THEN 0 ELSE 1 END,
                             page,account_ordinal LIMIT 1""",
                 (lane,current),
@@ -123,7 +140,14 @@ class Coordinator:
             raise
 
     def complete(self, job_id, lease_id):
-        """Only the holder of the current lease may acknowledge completion."""
+        """Bare completion is forbidden if page evidence is enabled."""
+        if self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='page_evidence'"
+        ).fetchone():
+            raise RuntimeError(
+                "Page evidence enabled; use PageEvidenceStore.commit_page"
+            )
         self.db.execute("BEGIN IMMEDIATE")
         try:
             result = self.db.execute(
