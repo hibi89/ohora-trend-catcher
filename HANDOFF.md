@@ -1,3 +1,5 @@
+> **2026-10-19 p6 인증 경계:** [`raw_v2/three_api_credentials.py`](raw_v2/three_api_credentials.py)는 A/B/C에 대해 서로 다른 6개 환경변수 **이름만** 검증한다. 실제 토큰·IG ID를 읽거나 저장하지 않으며 HTTP 요청을 실행하지 않는다. [`tests/test_three_api_credentials.py`](tests/test_three_api_credentials.py) 7개는 별도 격리 로컬 테스트에서 **7/7 PASS** 후 코드와 동일한 내용으로 GitHub 반영, CI 스위트 등록. 직전 사용자 확인 68/68 PASS 이후 신규 5+7개를 포함한 **총 80개 GitHub 전체 CI 결과는 별도 확인 필요**. 이 단계는 요청 명세·인증 참조 구조로서 **실제 HTTP 클라이언트/실수집/쿼터 격리 검증 미완료**. 실제 토큰·.env·운영 DB를 건드리지 말 것.
+
 > **2026-10-19 p6 요청 명세 준비:** `raw_v2/three_api_request_spec.py` 추가. 토큰·HTTP·환경변수 없이 A/B/C lane, 사용자명, 4개 고정 페이지 크기, 검증된 커서로 Business Discovery 필드 표현식만 생성. URL 직접 추적 금지, 안전한 진단 dict는 커서 원문 미노출. `tests/test_three_api_request_spec.py` 신규 5개, CI 등록. **기존 Windows 68/68 PASS; 신규 포함 73개 테스트는 아직 검증 전.** 실제 Meta 요청 구문·권한·응답은 실환경 미검증이며 현재 모듈은 오프라인 요청 명세만 생성함.
 
 > **2026-10-19 p6 정책 보강:** `estimated_time_to_regain_access`를 사용률에서 제외하고 HTTP 2xx라도 Meta `error` 본문이면 저장 없이 레인 중단. `tests/test_three_api_policy_hardening.py` 2개 추가, CI 연결. **기존 Windows 66/66 PASS, 신규 포함 68개는 아직 재검증 전.** 실제 Meta API/토큰/운영 DB 미사용. 실수집 전 HTTP 클라이언트·인증 분리·API 헤더 실제 검증·쿼터 공유 여부 확인 필수.
