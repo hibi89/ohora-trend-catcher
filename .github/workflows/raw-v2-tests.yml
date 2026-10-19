@@ -11,6 +11,7 @@ on:
       - 'tests/run_offline.py'
       - 'tests/test_three_api_catchup_offline.py'
       - 'tests/test_three_api_raw_mirror.py'
+      - 'tests/test_three_api_raw_projection.py'
       - '.github/workflows/raw-v2-tests.yml'
   workflow_dispatch:
 jobs:
