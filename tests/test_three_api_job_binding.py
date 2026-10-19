@@ -256,6 +256,16 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_recovery_only_skips_earlier_unbound_job(self):
+        # Account 1 is unbound; reserve account 2 on a separate fresh lease.
+        second = self.coordinator.lease_for_dispatch("A", now=self.start)
+        self.assertEqual(second["account_ordinal"], 2)
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        later = self.start + timedelta(minutes=16)
+        recovered = self.coordinator.lease_for_recovery("A", now=later)
+        self.assertEqual(recovered["id"], self.job["id"])
+        self.assertNotEqual(recovered["id"], second["id"])
+
     def test_recovery_respects_lane_halt_and_verified_cooldown(self):
         self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
         later = self.start + timedelta(minutes=16)
