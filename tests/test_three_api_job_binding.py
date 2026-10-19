@@ -295,10 +295,13 @@ class JobRequestBindingTests(unittest.TestCase):
 
     def test_bound_work_cannot_starve_dispatch_across_repeated_expiry(self):
         self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
-        for minutes, expected_account in ((16, 2), (32, 3), (48, 4)):
+        for minutes in (16, 32, 48):
             now = self.start + timedelta(minutes=minutes)
-            candidate = self.coordinator.lease("A", now=now, skip_bound=True)
-            self.assertEqual(candidate["account_ordinal"], expected_account)
+            candidate = self.coordinator.lease_for_dispatch("A", now=now)
+            # Unbound expired leases may be selected again; a lease is not
+            # evidence of a transport attempt or a completed page.
+            self.assertEqual(candidate["account_ordinal"], 2)
+            self.assertNotEqual(candidate["id"], self.job["id"])
             # The bound first job remains blocked from any new dispatch.
             self.assertEqual(self.bindings.lookup(self.job["id"])["request_id"],
                              self.request.request_id)
