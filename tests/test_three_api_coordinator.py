@@ -50,6 +50,31 @@ class CoordinatorTests(unittest.TestCase):
         second = self.c.lease("C",t)
         self.assertEqual((second["account_ordinal"],second["page"]), (1,2))
 
+    def test_evidence_mode_blocks_page_two_without_cursor(self):
+        """A completed page alone cannot authorize a later-page lease."""
+        t = datetime(2026, 10, 19, tzinfo=timezone.utc)
+        self.c.db.execute(
+            "CREATE TABLE page_evidence (account_ordinal INTEGER, "
+            "page INTEGER, terminal INTEGER, response_cursor TEXT)"
+        )
+        first = self.c.lease("A", t)
+        self.assertEqual((first["account_ordinal"], first["page"]), (1, 1))
+        with self.assertRaises(RuntimeError):
+            self.c.complete(first["id"], first["lease_id"])
+        self.c.db.execute(
+            "UPDATE jobs SET state='done' WHERE id=?", (first["id"],)
+        )
+        self.assertIsNone(self.c.lease("C", t))
+        self.c.db.execute(
+            "INSERT INTO page_evidence VALUES (1, 1, 0, NULL)"
+        )
+        self.assertIsNone(self.c.lease("C", t))
+        self.c.db.execute(
+            "UPDATE page_evidence SET response_cursor='opaque-next'"
+        )
+        second = self.c.lease("C", t)
+        self.assertEqual((second["account_ordinal"], second["page"]), (1, 2))
+
     def test_usage_halts_only_affected_lane(self):
         t = datetime(2026, 10, 19, tzinfo=timezone.utc)
         self.assertFalse(self.c.observe_usage("A",84,t))
