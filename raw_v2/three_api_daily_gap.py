@@ -126,8 +126,11 @@ class DailyGapLedger:
             previous = self.db.execute(
                 "SELECT head_id,observed_day FROM account_head WHERE account_key=?",
                 (account_key,)).fetchone()
-            if previous and previous["observed_day"] > day:
-                raise GapEvidenceError("Cannot start an earlier day after a newer observation")
+            already=self.db.execute(
+                "SELECT 1 FROM daily_window WHERE account_key=? AND day=?",
+                (account_key,day)).fetchone() is not None
+            if not already and previous and previous["observed_day"] > day:
+                raise GapEvidenceError("Cannot create an unanchored earlier day")
             self.db.execute(
                 "INSERT OR IGNORE INTO daily_window(account_key,day,anchor_id) VALUES (?,?,?)",
                 (account_key, day, previous["head_id"] if previous else None))
@@ -255,7 +258,7 @@ class DailyGapLedger:
                 (account,gap_day)).fetchone()
             state=row["state"] if row is not None else None
         phase=("reanchor" if state=="active" else
-               "needs_review" if state=="needs_review" else "catchup")
+               "needs_review" if state in ("needs_review","verified") else "catchup")
         return {"account_key":account,"phase":phase,"gap_day":gap_day}
 
     def next_actions(self, account_keys, day):
@@ -282,6 +285,14 @@ class DailyGapLedger:
                 "SELECT status,day FROM daily_window WHERE account_key=? "
                 "AND day<=? AND status IN ('catchup_pending','needs_review') "
                 "ORDER BY day",(account,day)))
+            old_front=self.db.execute(
+                "SELECT day FROM daily_window WHERE account_key=? AND day<? "
+                "AND status='front_open' ORDER BY day LIMIT 1",
+                (account,day)).fetchone()
+            if old_front is not None:
+                reviews.append({"account_key":account,"phase":"needs_review",
+                                "gap_day":old_front["day"]})
+                continue
             if unfinished:
                 blocked = next((x for x in unfinished if x["status"] == "needs_review"),None)
                 if blocked:
