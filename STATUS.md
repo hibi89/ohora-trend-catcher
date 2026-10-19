@@ -1,3 +1,5 @@
+> **2026-10-19 p6 자동 검증 확인 (최신):** GitHub Actions [Three API offline tests #39217147308](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39217147308), 코드·테스트 CI 변경 커밋 `1d6e71c344bca9c5181fcc29a89cb0c1c38adc08`에서 **14개 테스트 스위트 합계 91/91 PASS**, Python 3.11 컴파일 PASS. 실제 job 로그까지 확인. 독립 로컬 Python 3.13 관련 테스트 23/23 PASS. 이는 **오프라인 회귀 검증**이지 실제 Meta 인증·수집·쿼터 격리 검증이 아니다. 아래 ‘CI 미확인’은 **해당 기록 당시의 과거 상태**이며 최신 기준으로는 해결됨. 코드: `raw_v2/three_api_http_preflight.py`; 운영 `collection.sqlite`/토큰/실제 API 호출 없음.
+
 > **2026-10-19 p6 최신 인수인계 — HTTP 오프라인 사전검증**
 > - **구현:** [`raw_v2/three_api_http_preflight.py`](raw_v2/three_api_http_preflight.py)에서 A/B/C 인증 **환경변수 참조** + `RequestSpec` + IG User ID + `v26.0`을 검증해 인증정보 없는 Graph GET 요청을 준비한다. 데이터 전용 `OfflineFixtureTransport`는 실제 HTTP를 지원하지 않는다. 임의 구성한 명세/인증 참조, 잘못된 버전·ID, 잘못된 cursor, 인증값·ID가 디버그 repr에 노출되는 문제를 검사한다.
 > - **검증:** 격리된 로컬 Python 3.13에서 관련 3개 모듈의 오프라인 테스트 **23/23 PASS** (인증 참조 7 + 요청 명세 5 + 신규 HTTP preflight 11). 이전 사용자 Windows 68/68 PASS는 유지되나, 전체 **91개 현재 테스트**의 GitHub CI 결과는 **미확인**. 최신 CI에 새 테스트 등록.
