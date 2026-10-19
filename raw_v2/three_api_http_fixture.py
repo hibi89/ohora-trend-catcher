@@ -45,5 +45,7 @@ def stage_fixture_envelope(coordinator, evidence, job, envelope, *, now=None):
         job["id"], job["lease_id"], normalized,
         requested_cursor=cursor, now=now,
     )
-    return {"status": "staged", "lane": lane, "records": edge["records"],
-            "terminal": edge["terminal"], "usage": observed["usage"]}
+    return {"status": "staged", "lane": lane, "job_id": job["id"],
+            "account_ordinal": job["account_ordinal"], "page": job["page"],
+            "records": edge["records"], "terminal": edge["terminal"],
+            "usage": observed["usage"]}
