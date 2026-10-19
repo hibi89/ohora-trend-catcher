@@ -82,9 +82,11 @@ class Coordinator:
             self.db.execute("ROLLBACK")
             raise
 
-    def lease(self, lane, now=None, *, skip_bound=False):
+    def lease(self, lane, now=None, *, skip_bound=False, only_bound=False):
         if lane not in LANES:
             raise ValueError("Unknown lane")
+        if skip_bound and only_bound:
+            raise ValueError("Conflicting binding filters")
         now = now or utcnow()
         current = stamp(now)
         expires = stamp(now + timedelta(minutes=LEASE_MINUTES))
@@ -117,6 +119,17 @@ class Coordinator:
                               "WHERE binding.job_id=jobs.id)" if skip_bound and self.db.execute(
                                   "SELECT 1 FROM sqlite_master WHERE type='table' "
                                   "AND name='job_request_bindings'").fetchone() else "")
+            if only_bound:
+                if not self.db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='job_request_bindings'"
+                ).fetchone():
+                    self.db.execute("COMMIT")
+                    return None
+                binding_filter = """ AND EXISTS (
+                    SELECT 1 FROM job_request_bindings binding
+                    WHERE binding.job_id=jobs.id
+                )"""
             job = self.db.execute(
                 """SELECT * FROM jobs WHERE lane=?
                    AND (state='pending' OR (state='leased' AND leased_until<=?))
@@ -159,6 +172,13 @@ class Coordinator:
         use the immutable stored capture and original request binding.
         """
         return self.lease(lane, now=now, skip_bound=False)
+
+    def lease_bound_for_recovery(self, lane, now=None):
+        """Lease only already-bound work for capture-only recovery.
+
+        This method never authorizes HTTP, and skips unbound work entirely.
+        """
+        return self.lease(lane, now=now, only_bound=True)
 
     def complete(self, job_id, lease_id):
         """Bare completion is forbidden if page evidence is enabled."""
