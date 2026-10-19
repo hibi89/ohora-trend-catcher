@@ -166,12 +166,11 @@ class Coordinator:
         return self.lease(lane, now=now, skip_bound=True)
 
     def lease_for_recovery(self, lane, now=None):
-        """Lease pending/expired work, including bound work, for reconciliation.
+        """Lease bound work only, for capture-only reconciliation.
 
-        The caller MUST NOT dispatch HTTP using this lease; recovery must
-        use the immutable stored capture and original request binding.
+        Never consumes fresh unbound jobs and never authorizes HTTP.
         """
-        return self.lease(lane, now=now, skip_bound=False)
+        return self.lease_bound_for_recovery(lane, now=now)
 
     def lease_bound_for_recovery(self, lane, now=None):
         """Lease only already-bound work for capture-only recovery.
