@@ -62,6 +62,8 @@ def write_capture(db: sqlite3.Connection, capture: dict):
             child_ids = [c.get("media_id", c.get("id")) for c in children]
             if any(not isinstance(mid, str) or not mid for mid in child_ids) or len(set(child_ids)) != len(child_ids):
                 raise RawWriteError("Invalid or duplicate carousel child ID")
+        elif post.get("children") not in (None, []):
+            raise RawWriteError("Non-carousel post cannot contain child media")
         for field in ("like_count", "comments_count"):
             if field in post and post[field] is not None and (type(post[field]) is not int or post[field] < 0):
                 raise RawWriteError("Invalid engagement count")
