@@ -8,7 +8,7 @@ separators, ensure_ascii=False, UTC times with microseconds and 'Z' suffix.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime, timezone
 from enum import Enum
 from hashlib import sha256
@@ -22,13 +22,151 @@ Lane = Literal["A", "B", "C"]
 Phase = Literal["front", "catchup", "history"]
 FieldStatus = Literal["returned", "null", "absent", "not_tested"]
 RawStatus = Literal["committed", "already_committed"]
-FailureScope = Literal["account", "lane", "run"]
+FailureScope = Literal["account", "lane", "global"]
 ErrorCategory = Literal[
     "usage_missing", "rate_limit", "auth", "permission", "transport",
     "http_error", "invalid_response", "outcome_unknown", "capture_io",
     "capture_conflict", "raw_io", "raw_conflict", "cursor_conflict",
-    "approval_denied", "budget_expired", "interrupted",
+    "approval_denied", "budget_expired", "interrupted", "usage_limit",
 ]
+
+
+# Fixed conservative blocking scopes. "retryable" never grants another HTTP attempt.
+CATEGORY_SCOPE: Mapping[str, FailureScope] = {
+    "usage_missing": "global", "usage_limit": "global", "rate_limit": "global",
+    "auth": "global", "permission": "account", "transport": "account",
+    "http_error": "account", "invalid_response": "account",
+    "outcome_unknown": "account", "capture_io": "global",
+    "capture_conflict": "global", "raw_io": "global",
+    "raw_conflict": "global", "cursor_conflict": "lane",
+    "approval_denied": "global", "budget_expired": "global",
+    "interrupted": "global",
+}
+_ACCOUNT_FIELDS = frozenset(("id", "username", "followers_count", "media_count"))
+_POST_FIELDS = frozenset(("id", "caption", "media_type", "media_url",
+    "permalink", "timestamp", "like_count", "comments_count", "thumbnail_url",
+    "children"))
+_CHILD_FIELDS = frozenset(("id", "media_type", "media_url", "thumbnail_url"))
+_RECORD_REQUEST_FIELDS = frozenset(("api_version", "target_ig_user_id", "lane",
+    "username", "limit", "media_fields", "cursor", "method", "endpoint",
+    "include_carousel_children"))
+_FORBIDDEN = frozenset(("access_token", "token", "authorization",
+    "client_secret", "app_secret", "paging.next", "next", "password",
+    "secret", "cookie", "set-cookie", "headers", "usage_headers"))
+_FIELD_STATES = frozenset(("returned", "null", "absent", "not_tested"))
+_CAROUSEL_STATES = frozenset(("complete", "unknown", "not_applicable"))
+
+
+def assert_safe_tree(value: Any, *, top_keys: frozenset[str] | None = None) -> None:
+    """Reject credential-bearing keys/URLs anywhere in data being persisted."""
+    if isinstance(value, Mapping):
+        if top_keys is not None and not set(value).issubset(top_keys):
+            raise ValueError("Unallowlisted persisted field")
+        for key, val in value.items():
+            if not isinstance(key, str) or key.lower() in _FORBIDDEN:
+                raise ValueError("Forbidden persisted key")
+            if key.lower().startswith("x-") or "token" in key.lower() or "secret" in key.lower():
+                raise ValueError("Potential credential field")
+            assert_safe_tree(val)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            assert_safe_tree(item)
+    elif isinstance(value, str):
+        lower = value.lower()
+        if "access_token=" in lower or "authorization:" in lower or (
+            lower.startswith(("http://", "https://")) and
+            ("paging" in lower or "token" in lower)):
+            raise ValueError("Potential credential-bearing value")
+    else:
+        _canonical(value)
+
+
+def sanitize_meta_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Only Business Discovery safe fields; never preserve paging URLs/headers."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("Invalid Meta response")
+    source = payload.get("business_discovery", payload)
+    if not isinstance(source, Mapping):
+        raise ValueError("Invalid Business Discovery envelope")
+    account = {k: source[k] for k in _ACCOUNT_FIELDS if k in source}
+    media = source.get("media", source)
+    if not isinstance(media, Mapping) or not isinstance(media.get("data"), list):
+        raise ValueError("Missing media.data")
+    posts = []
+    for item in media["data"]:
+        if not isinstance(item, Mapping):
+            raise ValueError("Invalid post")
+        post = {k: item[k] for k in _POST_FIELDS - {"children"} if k in item}
+        if "children" in item:
+            children = item["children"]
+            if not isinstance(children, Mapping) or not isinstance(children.get("data"), list):
+                raise ValueError("Invalid carousel children")
+            if children.get("paging", {}).get("next") or children.get("paging", {}).get("has_next"):
+                raise ValueError("Incomplete carousel children")
+            post["children"] = {"data": [
+                {k: child[k] for k in _CHILD_FIELDS if k in child}
+                for child in children["data"]]}
+        posts.append(post)
+    clean = {"account": account, "media": {"data": posts}}
+    assert_safe_tree(clean)
+    return clean
+
+
+def safe_usage_metrics(headers: Mapping[str, str]) -> dict[str, int]:
+    """Keep only parsed numeric usage, not header names or header bodies."""
+    if not isinstance(headers, Mapping):
+        raise ValueError("Usage headers missing")
+    result: dict[str, int] = {}
+    for name in ("x-app-usage-call-count", "x-business-use-case-usage-call-count"):
+        if name in headers:
+            value = headers[name]
+            if not isinstance(value, str) or not value.isdecimal():
+                raise ValueError("Unparseable usage metric")
+            result[name.removeprefix("x-").replace("-", "_")] = int(value)
+    if not result:
+        raise ValueError("Usage evidence missing")
+    return result
+
+
+def validate_field_status(values: Mapping[str, Any], states: Mapping[str, str],
+                          required: frozenset[str]) -> None:
+    """Use all four states explicitly; null is NOT absent and not_tested is NOT absent."""
+    if set(states) != set(required):
+        raise ValueError("Incomplete field-status evidence")
+    for key, status in states.items():
+        if status not in _FIELD_STATES:
+            raise ValueError("Invalid field state")
+        if status == "returned" and (key not in values or values[key] is None):
+            raise ValueError("returned must have non-null value")
+        if status == "null" and (key not in values or values[key] is not None):
+            raise ValueError("null must be explicitly present")
+        if status in ("absent", "not_tested") and key in values:
+            raise ValueError("absent/not_tested fields must not contain values")
+
+
+def field_status_for(values: Mapping[str, Any], fields_tested: frozenset[str],
+                     field_names: frozenset[str]) -> dict[str, FieldStatus]:
+    if not set(fields_tested).issubset(field_names):
+        raise ValueError("Invalid tested fields")
+    return {name: ("not_tested" if name not in fields_tested else
+                   "absent" if name not in values else
+                   "null" if values[name] is None else "returned")
+            for name in sorted(field_names)}
+
+
+def requested_fields(request: "RequestEnvelope") -> dict[str, Any]:
+    spec = request.request_spec
+    return {"api_version": request.api_version,
+            "target_ig_user_id": request.target_ig_user_id,
+            "lane": spec.lane, "username": spec.username, "limit": spec.limit,
+            "media_fields": spec.media_fields, "cursor": spec.after,
+            "method": spec.method, "endpoint": spec.endpoint,
+            "include_carousel_children": spec.include_carousel_children}
+
+
+def validate_category_scope(category: str, scope: str) -> None:
+    if category not in CATEGORY_SCOPE or scope != CATEGORY_SCOPE[category]:
+        raise ValueError("Incorrect category/scope combination")
 
 
 def utc(value: datetime) -> datetime:
@@ -139,6 +277,7 @@ class TransportFailure(Exception):
     def __post_init__(self) -> None:
         if self.contract_version != CONTRACT_VERSION:
             raise ValueError("Unsupported contract version")
+        validate_category_scope(self.category, self.scope)
         if self.category == "outcome_unknown" and not self.outcome_unknown:
             raise ValueError("Unknown outcome must be explicit")
 
@@ -152,6 +291,10 @@ class CursorState:
     next_cursor: str | None
     page: int
     # Evidence only; NOT an independently advancing progress pointer.
+
+    def __post_init__(self) -> None:
+        if self.contract_version != CONTRACT_VERSION or self.page < 1:
+            raise ValueError("Invalid cursor evidence")
 
 
 @dataclass(frozen=True)
@@ -168,6 +311,9 @@ class CaptureRecord:
     cursor_state: CursorState
     observed_at: datetime  # EXACT response received_at; immutable on replay
     response_status: Literal["success"] = "success"
+    response_http_status: int = 200
+    response_received_at: datetime | None = None
+    usage_metrics: Mapping[str, int] | None = None
 
     def __post_init__(self) -> None:
         if self.contract_version != CONTRACT_VERSION or self.request.contract_version != CONTRACT_VERSION:
@@ -175,10 +321,42 @@ class CaptureRecord:
         object.__setattr__(self, "observed_at", utc(self.observed_at))
         if self.cursor_state.request_id != self.request.request_id:
             raise ValueError("Cursor source mismatch")
-        if self.response_status != "success":
+        if self.response_status != "success" or not 200 <= self.response_http_status < 300:
             raise ValueError("Failures are not successful captures")
-        if any(v not in ("returned", "null", "absent", "not_tested") for v in self.field_status.values()):
-            raise ValueError("Unknown field status")
+        if self.response_received_at is None or utc(self.response_received_at) != self.observed_at:
+            raise ValueError("observation must equal actual HTTP received_at")
+        object.__setattr__(self, "response_received_at", utc(self.response_received_at))
+        if self.actual_request_fields != requested_fields(self.request):
+            raise ValueError("Request evidence differs from HTTP intent")
+        if self.cursor_state.page != self.request.page or self.cursor_state.current_cursor != self.request.cursor:
+            raise ValueError("Cursor/page mismatch")
+        assert_safe_tree(self.actual_request_fields, top_keys=_RECORD_REQUEST_FIELDS)
+        assert_safe_tree(self.sanitized_response, top_keys=frozenset(("account", "media")))
+        assert_safe_tree(self.normalized_posts)
+        assert_safe_tree(self.account_observation, top_keys=_ACCOUNT_FIELDS)
+        if self.usage_metrics is None or not self.usage_metrics or any(type(v) is not int or v < 0 for v in self.usage_metrics.values()):
+            raise ValueError("Missing safe usage evidence")
+        validate_field_status(self.account_observation, self.field_status,
+                              frozenset(("followers_count", "media_count")))
+        if len(self.normalized_posts) != len(self.sanitized_response["media"]["data"]):
+            raise ValueError("Post count inconsistency")
+        if len(self.carousel_completeness) != len(self.normalized_posts):
+            raise ValueError("Incomplete per-post carousel evidence")
+        for post in self.normalized_posts:
+            if not isinstance(post, Mapping) or not isinstance(post.get("id"), str):
+                raise ValueError("Invalid normalized post")
+            id_ = post["id"]
+            status = self.carousel_completeness.get(id_)
+            if status not in _CAROUSEL_STATES:
+                raise ValueError("Missing carousel completeness")
+            if post.get("media_type") != "CAROUSEL_ALBUM" and status != "not_applicable":
+                raise ValueError("Non-carousel must be not_applicable")
+            if post.get("media_type") == "CAROUSEL_ALBUM":
+                children = post.get("children")
+                if status == "complete" and not isinstance(children, list):
+                    raise ValueError("Complete carousel requires children")
+                if status == "unknown" and children is not None:
+                    raise ValueError("Unknown carousel cannot claim children")
 
     @property
     def capture_digest(self) -> str:
@@ -201,6 +379,8 @@ class CaptureReceipt:
         if self.contract_version != CONTRACT_VERSION:
             raise ValueError("Contract version mismatch")
         object.__setattr__(self, "captured_at", utc(self.captured_at))
+        if self.durable is not True or len(self.capture_digest) != 64 or not self.storage_key:
+            raise ValueError("Receipt only issued after commit+reread+digest verification")
 
 
 @dataclass(frozen=True)
@@ -219,6 +399,8 @@ class RawWriteReceipt:
         object.__setattr__(self, "committed_at", utc(self.committed_at))
         if self.status not in ("committed", "already_committed"):
             raise ValueError("Invalid RAW receipt status")
+        if len(self.capture_digest) != 64 or not self.raw_receipt_id:
+            raise ValueError("Invalid RAW receipt identity")
         if any(type(v) is not int or v < 0 for v in self.row_counts.values()):
             raise ValueError("Invalid row counts")
 
@@ -232,6 +414,46 @@ class ContractError(Exception):
     request_id: str | None = None
     capture_id: str | None = None
     retryable: bool = False
+
+    def __post_init__(self) -> None:
+        if self.contract_version != CONTRACT_VERSION:
+            raise ValueError("Contract version mismatch")
+        validate_category_scope(self.category, self.scope)
+
+
+@dataclass(frozen=True)
+class FailureEvidence:
+    """Persisted FAILED/UNKNOWN outcome; never passed to RAW writer."""
+    contract_version: str
+    request_id: str
+    run_id: str
+    category: ErrorCategory
+    scope: FailureScope
+    outcome: Literal["failed", "outcome_unknown"]
+    recorded_at: datetime
+    safe_message: str
+    http_status: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.contract_version != CONTRACT_VERSION:
+            raise ValueError("Contract version mismatch")
+        validate_category_scope(self.category, self.scope)
+        object.__setattr__(self, "recorded_at", utc(self.recorded_at))
+        if self.outcome == "outcome_unknown" and self.category != "outcome_unknown":
+            raise ValueError("Unknown outcome category mismatch")
+        assert_safe_tree({"safe_message": self.safe_message})
+
+
+def validate_capture_receipt(record: CaptureRecord, receipt: CaptureReceipt) -> None:
+    if receipt.durable is not True or receipt.capture_digest != record.capture_digest or (
+        receipt.capture_id, receipt.request_id, receipt.account_key, receipt.lane) != (
+        record.capture_id, record.request.request_id, record.request.account_key, record.request.lane):
+        raise ValueError("Unverified Capture receipt")
+
+
+def validate_raw_receipt(record: CaptureRecord, receipt: RawWriteReceipt) -> None:
+    if receipt.capture_id != record.capture_id or receipt.capture_digest != record.capture_digest:
+        raise ValueError("Conflicting RAW receipt")
 
 
 class TransportPort(Protocol):
@@ -255,8 +477,21 @@ class CapturePort(Protocol):
     def confirm_processed(self, capture_id: str, raw_receipt_id: str) -> None:
         """Persist verified RAW receipt acknowledgement; raises ContractError."""
 
+    def save_failure(self, failure: FailureEvidence) -> None:
+        """Persist non-2xx, missing usage, or ambiguous outcome, never RAW; ContractError."""
+
+    def get_failure(self, request_id: str) -> FailureEvidence | None:
+        """Read persisted failed/unknown intent; raises ContractError."""
+
+    def list_unresolved_intents(self, run_id: str) -> Sequence[RequestEnvelope]:
+        """Intents without durable success or terminal reconciliation; ContractError."""
+
     def mark_outcome_unknown(self, request_id: str) -> None:
-        """Persist ambiguous HTTP outcome; raises ContractError."""
+        """Persist ambiguous HTTP outcome before manual reconciliation; ContractError."""
+
+    def reconcile_request(self, request_id: str, resolution: Literal[
+            "failed_no_retry", "manual_retry_approved"]) -> None:
+        """Operator-driven recovery only; any retry gets new request ID/retry_of."""
 
 
 class RawWriterPort(Protocol):
@@ -265,6 +500,43 @@ class RawWriterPort(Protocol):
 
     def get_raw_receipt(self, capture_id: str) -> RawWriteReceipt | None:
         """Lookup receipt for crash recovery, no network; raises ContractError."""
+
+
+def capture_from_response(
+    request: RequestEnvelope, response: ResponseEnvelope, *,
+    capture_id: str, normalized_posts: Sequence[Mapping[str, Any]],
+    account_observation: Mapping[str, Any],
+    account_fields_tested: frozenset[str],
+    carousel_completeness: Mapping[str, str],
+    source_digest: str,
+) -> CaptureRecord:
+    """Construct success evidence using *actual* response receipt time.
+    Non-2xx/missing usage raises ContractError; caller must save FailureEvidence.
+    """
+    if request.request_id != response.request_id:
+        raise ContractError(CONTRACT_VERSION, "invalid_response", "account",
+                            "Response request ID mismatch", request.request_id)
+    if not 200 <= response.http_status < 300:
+        raise ContractError(CONTRACT_VERSION, "http_error", "account",
+                            "HTTP failure cannot become success capture", request.request_id)
+    try:
+        sanitized = sanitize_meta_response(response.payload)
+        metrics = safe_usage_metrics(response.usage_headers)
+        states = field_status_for(account_observation, account_fields_tested,
+                    frozenset(("followers_count", "media_count")))
+        cursor_state = CursorState(CONTRACT_VERSION, request.request_id,
+                source_digest, request.cursor, response.next_cursor, request.page)
+        return CaptureRecord(CONTRACT_VERSION, capture_id, request,
+                requested_fields(request), sanitized, normalized_posts,
+                account_observation, states, carousel_completeness,
+                cursor_state, response.received_at,
+                response_http_status=response.http_status,
+                response_received_at=response.received_at, usage_metrics=metrics)
+    except (ValueError, TypeError, KeyError) as exc:
+        category = "usage_missing" if "usage" in str(exc).lower() else "invalid_response"
+        raise ContractError(CONTRACT_VERSION, category, CATEGORY_SCOPE[category],
+                            "Response rejected by capture validation",
+                            request.request_id) from exc
 
 
 # Coordination rules:
