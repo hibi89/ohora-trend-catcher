@@ -43,6 +43,15 @@ print(report["policy"])
 | `policy.next_phase_if_storage_verified` | front / catchup / manual_review / history_held / none. 진단 결과만으로 수집 실행 허가하지 않음 |
 | `integrity` | `not_fully_revalidated`. 전체 원본 SHA·cross-DB 정합성은 이 함수에서 재검증하지 않음 |
 
+## 윈도우 종료와 원본 수집 완료의 차이
+
+`front_window_closed`는 일일 ledger의 상태 표시일 뿐, 원본 수집 성공이나 RAW 적재 완료 증거가 아니다. `first_page_committed`는 source의 page1 증거 수이며, 이 값이 294가 아니면 모든 합성 계정의 첫 페이지가 확정된 상태가 아니다.
+
+- `daily_front.first_page_proof_gap_in_closed_windows`: 열린 상태가 **아닌** 윈도우 중 source page1 확정 증거가 없는 계정 수. 1 이상이면 윈도우가 종료된 계정이라도 수집 완료로 표시하지 않는다.
+- `daily_front.completion_warning`: 값이 모두 채워진 듯 보이더라도 합성/실운영·무결성 경계를 명시하는 고정 한국어 운영자 경고. 캡션·토큰·외부 오류 원문을 출력하지 않는다.
+- 예: `front_window_closed=294`, `first_page_committed=0`, `first_page_proof_gap_in_closed_windows=294`는 **294건 성공**이 아니라 **종료 상태와 원본 증거의 294건 불일치**다. 운영자 확인 전 완료 보고를 금지한다.
+- 정상 합성 증거가 확인돼도 `live_meta_verified=false` 및 `integrity=not_fully_revalidated`는 그대로 유지한다. 전체 SHA 검증·실 Meta 수집·스케줄러 승인 표시로 전환하지 않는다.
+
 ## 안전 원칙
 
 1. `operator_report`는 `reconcile`, `step`, Meta transport, token reader를 호출하지 않는다. 같은 호출 전·후 SQLite dump가 완전히 같은지 회귀 테스트한다.
