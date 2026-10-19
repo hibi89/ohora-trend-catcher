@@ -256,6 +256,25 @@ class JobRequestBindingTests(unittest.TestCase):
         self.assertEqual(lanes["B"]["dispatchable_now"], 144)
         self.assertEqual(lanes["C"]["dispatchable_now"], 0)
 
+    def test_recovery_diagnostics_exclude_active_lease_until_expiry(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        active = self.coordinator.recovery_ready_diagnostics(now=self.start)
+        self.assertEqual(active["lanes"][0]["recoverable_now"], 0)
+        expired = self.coordinator.recovery_ready_diagnostics(
+            now=self.start + timedelta(minutes=16))
+        self.assertEqual(expired["lanes"][0]["recoverable_now"], 1)
+
+    def test_recovery_diagnostics_persist_across_restart(self):
+        self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
+        self.coordinator.db.close()
+        self.coordinator = Coordinator(self.root / "coordinator.sqlite")
+        self.addCleanup(self.coordinator.db.close)
+        snapshot = self.coordinator.recovery_ready_diagnostics(
+            now=self.start + timedelta(minutes=16))
+        self.assertEqual(snapshot["lanes"][0]["recoverable_now"], 1)
+        self.assertEqual(snapshot["lanes"][1]["recoverable_now"], 0)
+        self.assertEqual(snapshot["lanes"][2]["recoverable_now"], 0)
+
     def test_recovery_ready_diagnostics_are_read_only_and_gate_aware(self):
         later = self.start + timedelta(minutes=16)
         before = self.coordinator.recovery_ready_diagnostics(now=later)
