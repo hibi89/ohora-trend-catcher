@@ -30,7 +30,11 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
     for index, page in enumerate(pages):
         if not isinstance(page, dict) or not page.get("receipt") or not isinstance(page.get("receipt"), str):
             return {"verified": False, "reason": "missing_receipt"}
-        if page.get("receipt_verified") is not True:\n            return {"verified": False, "reason": "receipt_unverified"}\n        if page.get("timestamps_verified") is not True:\n            return {"verified": False, "reason": "timestamps_unverified"}\n        incoming = page.get("cursor_in")
+        if page.get("receipt_verified") is not True:
+            return {"verified": False, "reason": "receipt_unverified"}
+        if page.get("timestamps_verified") is not True:
+            return {"verified": False, "reason": "timestamps_unverified"}
+        incoming = page.get("cursor_in")
         if (index == 0 and incoming != "root") or (index and incoming != prior):
             return {"verified": False, "reason": "cursor_gap"}
         outgoing = page.get("cursor_out")
@@ -48,7 +52,11 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
         if any(t > anchor for t in normalized):
             return {"verified": False, "reason": "future_publication"}
         oldest = min([oldest, *normalized]) if oldest is not None else min(normalized)
-        if outgoing is not None and (outgoing == incoming or outgoing in seen_cursors):\n            return {"verified": False, "reason": "cursor_cycle"}\n        if incoming is not None:\n            seen_cursors.add(incoming)\n        prior = outgoing
+        if outgoing is not None and (outgoing == incoming or outgoing in seen_cursors):
+            return {"verified": False, "reason": "cursor_cycle"}
+        if incoming is not None:
+            seen_cursors.add(incoming)
+        prior = outgoing
     crossing = oldest <= cutoff
     terminal = prior is None and pages[-1].get("terminal_verified") is True
     return {"verified": bool(crossing or terminal), "reason": (
