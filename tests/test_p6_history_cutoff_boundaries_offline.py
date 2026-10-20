@@ -5,7 +5,13 @@ verified timestamps and cutoff-crossing/terminal evidence. Merely creating
 a 365/730-day epoch, or observing a terminal cursor, proves none of these.
 """
 import sqlite3
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import unittest
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from datetime import datetime, timedelta, timezone
 
 from raw_v2.three_api_epochs import ThreeApiEpochStore
