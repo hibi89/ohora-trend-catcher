@@ -83,10 +83,17 @@ jobs:
         run: python tests/run_offline.py
 
   offline-windows:
-    # Independently prove the same socket-blocked fixture suite on Windows.
+    # Each Windows group runs on an isolated runner. All discovered test modules
+    # are assigned to exactly one group in tests/run_offline.py. This preserves
+    # the full socket-blocked suite while parallelizing expensive SQLite tests.
     # No repository secrets, Meta calls, or production database connections.
+    name: offline-windows (${{ matrix.group }})
     runs-on: windows-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [orchestrator, roster, report, remaining]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -94,7 +101,7 @@ jobs:
           python-version: '3.11'
       - name: Compile offline modules and tests on Windows
         run: python -m compileall -q raw_v2 tests
-      - name: Run complete offline regression suite on Windows with sockets blocked
+      - name: Run socket-blocked Windows regression group
         env:
           OFFLINE_TEST_WATCHDOG_SECONDS: '180'
-        run: python -u tests/run_offline.py
+        run: python -u tests/run_offline.py --group ${{ matrix.group }}
