@@ -927,8 +927,10 @@ class ThreeApiEpochStore:
                 # seed epoch is not persisted, so avoid false attribution.
                 parent_hash=None
             if parent_hash is not None:
+                # The checkpoint anchor may be inherited from an earlier
+                # nonempty page. Hash the latest page's actual media IDs.
                 expected_chain=_hash(parent_hash,latest_proof[0],latest_proof[3],
-                    latest_proof[4],latest_proof[5],anchored_ids,
+                    latest_proof[4],latest_proof[5],json.loads(latest_proof[6]),
                     latest_proof[7],latest_proof[8],latest_proof[9])
                 if latest_proof[10]!=expected_chain:
                     raise EpochError("History replay chain digest differs")
