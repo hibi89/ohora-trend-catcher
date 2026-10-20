@@ -120,6 +120,42 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT state FROM jobs_v2 WHERE job_id=?",
                                         (first,)).fetchone()[0],"bound")
 
+    def test_daily_replay_rejects_tampered_checkpoint_without_db_changes(self):
+        first=self.job(1,1)
+        self.store.bind_daily(first,"req-daily-checkpoint",
+            build_request_spec("A","nail_001"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["101","102"],
+            next_cursor="daily_verified_cursor",terminal_basis="continued",
+            source_evidence_id="daily-safe",raw_receipt_id="daily-raw",
+            source_digest="a"*64)
+        self.assertEqual(self.store.commit_daily_page(
+            first,"req-daily-checkpoint",**args)["status"],"committed")
+        self.assertEqual(self.store.commit_daily_page(
+            first,"req-daily-checkpoint",**args)["status"],"already_committed")
+        self.db.execute("""UPDATE cursor_checkpoints SET cursor=?
+            WHERE epoch_id=? AND account_key='KR_001' AND stream='daily'""",
+            ("forged_cursor",self.daily))
+        before=self.db.total_changes
+        with self.assertRaisesRegex(EpochError,"checkpoint differs"):
+            self.store.commit_daily_page(first,"req-daily-checkpoint",**args)
+        self.assertEqual(self.db.total_changes,before)
+
+    def test_daily_replay_rejects_tampered_immutable_observation_time(self):
+        first=self.job(1,1)
+        self.store.bind_daily(first,"req-daily-observed",
+            build_request_spec("A","nail_001"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["101","102"],
+            next_cursor="daily_observed_cursor",terminal_basis="continued",
+            source_evidence_id="daily-observed",raw_receipt_id="daily-raw-observed",
+            source_digest="a"*64)
+        self.store.commit_daily_page(first,"req-daily-observed",**args)
+        self.db.execute("""UPDATE page_evidence_v2 SET observed_at=?
+            WHERE job_id=?""",("forged_timestamp",first))
+        before=self.db.total_changes
+        with self.assertRaisesRegex(EpochError,"immutable daily page replay"):
+            self.store.commit_daily_page(first,"req-daily-observed",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
