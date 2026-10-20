@@ -100,6 +100,27 @@ class DailyGapTests(unittest.TestCase):
               "gap_day": "2026-10-19"}],
         )
 
+    def test_294_roster_front_barrier_bounded_queries(self):
+        """Full roster never scans historical gaps while any front is missing."""
+        keys = [f"KR_{i:03d}" for i in range(1, 295)]
+        for key in keys:
+            self.l.begin_day(key, "2026-10-19")
+        # Historical, unresolved gap must not outrank a pending current front.
+        self.l.seed_previous_head("KR_001", "100")
+        self.front(account="KR_001")
+        observed = []
+        self.l.db.set_trace_callback(observed.append)
+        try:
+            actions = self.l.next_actions(keys, "2026-10-19")
+        finally:
+            self.l.db.set_trace_callback(None)
+        self.assertEqual(len(actions), 293)
+        self.assertEqual(actions[0], {"account_key": "KR_002", "phase": "front"})
+        self.assertEqual(actions[-1], {"account_key": "KR_294", "phase": "front"})
+        self.assertEqual(
+            len([query for query in observed if "FROM daily_window" in query]), 1
+        )
+
     def test_front_is_first_for_all_accounts(self):
         self.seed();self.front()
         self.l.seed_previous_head("US_151","200")
