@@ -821,6 +821,37 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_history_page(second["job_id"],"skip-h2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_history_replay_rejects_cross_account_parent_link_without_writes(self):
+        history=self.open_history_fixture()
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"cross-account-h1",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        self.store.commit_history_page(first["job_id"],"cross-account-h1",
+            observed_at=NOW,ordered_ids=["501","502","503","504"],
+            next_cursor="cross_account_cursor",terminal_basis="continued",
+            source_evidence_id="cross-account-e1",raw_receipt_id="cross-account-r1",
+            source_digest="a"*64)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"cross-account-h2",
+            build_request_spec("B","nail_001",after="cross_account_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["505"],next_cursor=None,
+            terminal_basis="verified_terminal",source_evidence_id="cross-account-e2",
+            raw_receipt_id="cross-account-r2",source_digest="b"*64)
+        self.store.commit_history_page(second["job_id"],"cross-account-h2",**args)
+        other=self.job(2,1)
+        self.store.bind_daily(other,"cross-account-other",
+            build_request_spec("A","nail_002"),at=NOW)
+        self.store.commit_daily_page(other,"cross-account-other",
+            observed_at=NOW,ordered_ids=["201"],next_cursor="cross_account_cursor",
+            terminal_basis="continued",source_evidence_id="cross-account-other-e",
+            raw_receipt_id="cross-account-other-r",source_digest="a"*64)
+        self.db.execute("UPDATE jobs_v2 SET predecessor_job_id=? WHERE job_id=?",
+                        (other,second["job_id"]))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_history_page(second["job_id"],"cross-account-h2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_replay_conflict_cannot_mutate_verified_checkpoint(self):
         """Conflicting duplicate receipts must fail without losing old proof."""
         history=self.open_history_fixture()
