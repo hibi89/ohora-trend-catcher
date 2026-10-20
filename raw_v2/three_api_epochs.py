@@ -541,8 +541,8 @@ class ThreeApiEpochStore:
             raise
 
 
-    def _history_priority_open(self,history_epoch):
-        """New history HTTP needs all latest KST daily jobs resolved first."""
+    def _history_priority_open(self,history_epoch,account_key):
+        """Daily fronts are global; manual-review holds are account-scoped."""
         row=self.db.execute("SELECT kind,roster_digest FROM collection_epochs "
             "WHERE epoch_id=?",(history_epoch,)).fetchone()
         if row is None or row[0]!="history":
@@ -556,8 +556,8 @@ class ThreeApiEpochStore:
              WHERE epoch_id=? AND state IN ('pending','bound')""",
              (daily[0],)).fetchone()[0]
         unresolved=self.db.execute("""SELECT COUNT(*) FROM coverage_ledger
-            WHERE epoch_id=? AND status='needs_review'""",
-            (daily[0],)).fetchone()[0]
+            WHERE epoch_id=? AND account_key=? AND status='needs_review'""",
+            (daily[0],account_key)).fetchone()[0]
         return pending==0 and unresolved==0
 
     def schedule_one_history_page(self,history_epoch,account_key,lane,*,at):
@@ -565,7 +565,7 @@ class ThreeApiEpochStore:
         _utc(at)
         if lane not in ("A","B","C"):
             raise EpochError("Invalid 3-API history lane")
-        if not self._history_priority_open(history_epoch):
+        if not self._history_priority_open(history_epoch,account_key):
             raise EpochError("Newest KST daily front or required review has priority")
         checkpoint=self.history_checkpoint(history_epoch,account_key)
         if checkpoint is None or checkpoint["status"]!="open" or checkpoint["cursor"] is None:
@@ -611,7 +611,7 @@ class ThreeApiEpochStore:
         job=self._job_row(job_id)
         if job["phase"]!="history" or job["epoch_kind"]!="history" or job["state"]!="pending":
             raise EpochError("History job not pending")
-        if not self._history_priority_open(job["epoch_id"]):
+        if not self._history_priority_open(job["epoch_id"],job["account_key"]):
             raise EpochError("Newest daily front preempts new history HTTP")
         checkpoint=self.history_checkpoint(job["epoch_id"],job["account_key"])
         member=self.db.execute("SELECT username FROM roster_members WHERE "
