@@ -13,6 +13,20 @@ class SerialContractBridgeError(RuntimeError):
     """Safe denial without request body, token or cursor."""
 
 
+class OfflineFixtureTransport:
+    """Exact in-memory transport type; never delegates to a network sender."""
+
+    offline_fixture_only = True
+
+    def __init__(self, response):
+        self.response = response
+        self.calls = 0
+
+    def send(self, request):
+        self.calls += 1
+        return self.response
+
+
 class OfflineSerialContractBridge:
     """One bound synthetic contract attempt under a cross-process DB gate.
 
@@ -45,13 +59,12 @@ class OfflineSerialContractBridge:
         if getattr(request, "phase", None) == "history":
             raise SerialContractBridgeError("History transport is disabled")
         transport = self.executor.transport
-        if (getattr(transport, "offline_fixture_only", None) is not True
-                or callable(getattr(transport, "fetch", None))):
+        if type(transport) is not OfflineFixtureTransport:
             raise SerialContractBridgeError("Only an offline fixture transport is accepted")
         try:
             with serial_tick_lock(self.coordinator.path):
                 # Fail closed if fixture marker changed while awaiting gate.
-                if getattr(self.executor.transport, "offline_fixture_only", None) is not True:
+                if self.executor.transport is not transport or type(transport) is not OfflineFixtureTransport:
                     raise SerialContractBridgeError("Offline fixture authorization lost")
                 return self.bindings.dispatch_once(
                     job, request, evidence, self.executor, now=now)
