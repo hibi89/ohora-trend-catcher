@@ -135,6 +135,19 @@ class ThreeApiContractExecutor:
                 "outcome_unknown", "Transport result needs manual reconciliation")
             raise ContractExecutionError("Transport result is unknown; no retry was attempted") from None
 
+        # P1: retain the safe HTTP evidence BEFORE any business schema, cursor
+        # or usage validation. Rejection must not erase what Meta returned.
+        try:
+            evidence = self.capture.save_response_evidence(response)
+        except Exception:
+            self._record_failure(request, "capture_io", "global", "failed",
+                                 "Response evidence could not be stored")
+            raise ContractExecutionError("Response evidence write failed; no HTTP retry") from None
+        if evidence["classification"] != "safe":
+            self._record_failure(request, "invalid_response", "account", "failed",
+                                 "Response cannot be safely retained")
+            raise ContractExecutionError("Response evidence unavailable; manual review") from None
+
         try:
             record = capture_record_from_response(request, response)
             persist_capture_verified(self.capture, record)
