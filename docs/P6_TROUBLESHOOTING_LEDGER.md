@@ -27,6 +27,7 @@
 | P6-013 | 변경 관리 | 잦은 커밋이 in-progress CI를 cancel | 완료 전 CI PASS 주장 금지 |
 | P6-014 | 교대/지식보존 | 사건 기록은 있었으나 새 AI 작업자에 대한 명시적 의무 누락 | AGENTS + 작업 프로토콜에 기록 의무 명문화 |
 | P6-015 | 직렬 회귀/CI | 재시작 테스트 fixture 기본값 오인으로 실제 1건 저장 vs 누락 기대 | 명시적 빈 fixture를 재시작에도 전달 |
+| P6-016 | 직렬 Catch-up/한도 | A 쿨다운 중 직렬 단계가 B·C로 넘어가지 못함 | `lane_blocked`를 가용 레인 탐색 사유로 처리, 합성 회귀 |
 
 ## 사건별 상세
 
@@ -144,6 +145,16 @@
 - **데이터 영향:** 합성 독립 SQLite만 사용; 실 Meta 호출·운영 RAW 변경 없음.
 - **검증 상태:** 위 SHA의 이전 CI 실패는 확정. 수정 뒤 신규 CI는 이전 실행 일부가 `cancelled`됐으며 최종 실행 결과는 별도 확인 필요. `cancelled`를 PASS로 표기하지 않음.
 - **롤백:** 신규 synthetic 회귀 테스트 수정을 해당 커밋 단위로 revert 가능. 사용자 DB/CSV/원본은 절대 덮어쓰지 않는다.
+
+### P6-016 — 직렬 Catch-up에서 차단된 레인 이후 B/C 가용 API로 이어지지 않음 (2026-10-21)
+
+- **증상/발견:** `OfflineDailyOrchestrator.step_serial()`은 front 단계의 `front_lane_unavailable`만 다음 레인으로 건너뛰도록 구현되어 있었다. 반면 실제 Catch-up runner는 동일한 quota/cooldown 조건을 `lane_blocked`로 반환한다. 따라서 Catch-up 단계에서 A가 85% 사용량으로 중단돼도 B/C의 가용 여부를 시도하지 않는 **오프라인 제어흐름 결함을 정적 검토로 발견**했다. 실 Meta 장애를 관측했다는 뜻이 아니다.
+- **확정 원인:** 서로 다른 두 단계의 레인 불가 상태 이름을 직렬 wrapper가 하나로 통일하지 않음. 할당 계정 변경이나 cursor 오류가 아닌 상태 매핑 누락.
+- **수정:** `lane_blocked`도 다음 레인으로 진행하도록 제한적인 상태 분기를 확장 (`1e93561`). `front_fixture_missing`·`recovery_blocked`·`payload_projection_blocked`는 자동 우회하지 않는다. 기존 A/B/C 작업 배정, `limit=4`, 원본/증거·커서 불변.
+- **회귀 증거:** [`tests/test_three_api_serial_catchup.py`](../tests/test_three_api_serial_catchup.py) (`3b039fb`)에서 A만 차단→B 적용, A/B 차단→C 적용, 3레인 모두 차단→RAW·catchup 증거 0 유지의 3개 합성 시나리오를 작성. **작성됨 ≠ CI 통과**. 최종 해당 SHA의 CI/Windows 완료 상태는 별도 확인.
+- **데이터 영향:** 독립 synthetic SQLite만, HTTP/Meta·운영 원본·main 병합 없음. 운영 스케줄러에는 아직 연결하지 않음.
+- **미해결/예방:** 레인 사용량 독립성 미검증, 현재 오프라인 직렬 경로는 블록된 각 레인을 다시 호출하며 reconcile 비용이 발생한다. 추후 최적화 시 성공한 RAW 영수증/커서 순서 훼손 방지. 기술적 기록 발견성 보강 테스트 [`test_p6_troubleshooting_handoff_guard.py`](../tests/test_p6_troubleshooting_handoff_guard.py) (`b83d66c` 및 정규식 수정 `cfcc663`) 추가.
+- **안전한 롤백:** 기능 `1e93561`과 합성 회귀 `3b039fb`를 단독 revert할 수 있으나 임의 운영 DB 되돌리기 금지. 원인과 해결 기록은 유지.
 
 ## 새 사건을 추가할 때의 고정 서식
 
