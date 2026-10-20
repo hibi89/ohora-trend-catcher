@@ -352,3 +352,179 @@ class ThreeApiEpochStore:
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
+
+    def _job_row(self,job_id):
+        row=self.db.execute("""SELECT j.job_id,j.epoch_id,j.account_key,
+            j.account_ordinal,j.phase,j.page_seq,j.round_no,j.lane,
+            j.predecessor_job_id,j.state,e.kind,e.roster_digest
+            FROM jobs_v2 j JOIN collection_epochs e ON e.epoch_id=j.epoch_id
+            WHERE j.job_id=?""",(job_id,)).fetchone()
+        if row is None:
+            raise EpochError("Unknown job identity")
+        keys=("job_id","epoch_id","account_key","ordinal","phase","page_seq",
+              "round_no","lane","predecessor_job_id","state","epoch_kind","roster_digest")
+        return dict(zip(keys,row))
+
+    def bind_daily(self,job_id,request_id,spec: RequestSpec,*,at):
+        """Reserve one immutable 4-post request. Binding never sends HTTP."""
+        stamp=_utc(at)
+        if not isinstance(request_id,str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}",request_id):
+            raise EpochError("Invalid immutable request identity")
+        job=self._job_row(job_id)
+        if job["epoch_kind"]!="daily" or job["phase"]!="daily_front" or job["state"]!="pending":
+            raise EpochError("Daily job is not pending")
+        member=self.db.execute("SELECT username FROM roster_members "
+            "WHERE roster_digest=? AND account_key=?",
+            (job["roster_digest"],job["account_key"])).fetchone()
+        if member is None:
+            raise EpochError("Unregistered roster identity")
+        if not isinstance(spec,RequestSpec) or spec.limit!=4 or spec.lane!=job["lane"] or spec.username!=member[0]:
+            raise EpochError("Immutable 3-lane/4-post request specification required")
+        canonical=build_request_spec(spec.lane,spec.username,after=spec.after,limit=4,
+            include_carousel_children=spec.include_carousel_children,
+            include_account_metrics=("followers_count" in spec.account_fields))
+        if canonical!=spec:
+            raise EpochError("Request spec differs from approved field contract")
+        if job["round_no"]!=self.active_round(job["epoch_id"]):
+            raise EpochError("Daily round has not opened")
+        if job["predecessor_job_id"] is None:
+            expected_cursor=None
+        else:
+            previous=self.db.execute("""SELECT e.cursor_out,p.state
+              FROM jobs_v2 p LEFT JOIN page_evidence_v2 e ON e.job_id=p.job_id
+              WHERE p.job_id=?""",(job["predecessor_job_id"],)).fetchone()
+            if previous is None or previous[1]!="done" or previous[0] is None:
+                raise EpochError("Predecessor RAW receipt/cursor proof required")
+            expected_cursor=previous[0]
+        if spec.after!=expected_cursor:
+            raise EpochError("Requested cursor violates predecessor evidence")
+        digest=_hash(spec.__dict__)
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            row=self.db.execute("SELECT state FROM jobs_v2 WHERE job_id=?",
+                                (job_id,)).fetchone()
+            if row is None or row[0]!="pending":
+                raise EpochError("Daily job lease changed")
+            self.db.execute("""INSERT INTO request_bindings_v2(
+                job_id,request_id,request_spec_digest,requested_cursor,bound_at)
+                VALUES(?,?,?,?,?)""",(job_id,request_id,digest,expected_cursor,stamp))
+            self.db.execute("UPDATE jobs_v2 SET state='bound' WHERE job_id=?",
+                            (job_id,))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return {"job_id":job_id,"request_id":request_id,
+                "request_spec_digest":digest,"after_present":expected_cursor is not None}
+
+    def commit_daily_page(self,job_id,request_id,*,observed_at,ordered_ids,
+                          next_cursor,terminal_basis,source_evidence_id,
+                          raw_receipt_id,source_digest):
+        """Record linked synthetic proof atomically; P4 verifies raw DB receipt."""
+        stamp=_utc(observed_at)
+        next_cursor=_cursor(next_cursor)
+        if not isinstance(ordered_ids,(tuple,list)) or len(ordered_ids)>4:
+            raise EpochError("Four-post page upper bound violated")
+        ids=list(ordered_ids)
+        if any(not isinstance(v,str) or not v.isdecimal() or len(v)>64 for v in ids) or len(set(ids))!=len(ids):
+            raise EpochError("Invalid ordered media IDs")
+        if terminal_basis not in ("continued","verified_terminal"):
+            raise EpochError("Unverified page terminal basis")
+        if terminal_basis=="continued" and next_cursor is None:
+            raise EpochError("Continued page requires genuine opaque cursor")
+        if terminal_basis=="verified_terminal" and (next_cursor is not None or len(ids)>=4):
+            raise EpochError("Full page/no-cursor needs manual terminal proof")
+        if not all(isinstance(v,str) and v for v in
+                   (request_id,source_evidence_id,raw_receipt_id,source_digest)):
+            raise EpochError("Durable source and RAW receipt identity required")
+        if not re.fullmatch(r"[0-9a-f]{64}",source_digest):
+            raise EpochError("Safe source evidence digest required")
+        job=self._job_row(job_id)
+        if job["phase"]!="daily_front" or job["epoch_kind"]!="daily":
+            raise EpochError("Only daily-front page proof supported here")
+        bound=self.db.execute("SELECT request_id,requested_cursor FROM request_bindings_v2 "
+                              "WHERE job_id=?",(job_id,)).fetchone()
+        if bound is None or bound[0]!=request_id:
+            raise EpochError("No immutable matching request binding")
+        before=self.db.execute("SELECT source_digest,chain_hash FROM page_evidence_v2 "
+                               "WHERE job_id=?",(job["predecessor_job_id"],)).fetchone() if job["predecessor_job_id"] else None
+        if job["predecessor_job_id"] and before is None:
+            raise EpochError("Missing predecessor committed page")
+        parent_chain=before[1] if before else "genesis"
+        if next_cursor is not None and next_cursor==bound[1]:
+            raise EpochError("Cursor self-loop")
+        chain=_hash(parent_chain,job_id,request_id,bound[1],next_cursor,ids,
+                    source_evidence_id,raw_receipt_id,source_digest)
+        existing=self.db.execute("SELECT chain_hash FROM page_evidence_v2 "
+                                 "WHERE job_id=?",(job_id,)).fetchone()
+        if existing is not None:
+            if existing[0]!=chain:
+                raise EpochError("Conflicting immutable page proof")
+            return {"status":"already_committed","job_id":job_id}
+        if job["state"]!="bound":
+            raise EpochError("Cannot commit unbound or skipped daily page")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            if next_cursor is not None:
+                self.db.execute("""INSERT INTO cursor_seen_v2
+                    (epoch_id,account_key,cursor,request_id) VALUES(?,?,?,?)""",
+                    (job["epoch_id"],job["account_key"],next_cursor,request_id))
+            self.db.execute("""INSERT INTO page_evidence_v2(
+                request_id,job_id,cursor_in,cursor_out,observed_at,
+                ordered_ids_json,terminal_basis,source_evidence_id,
+                raw_receipt_id,source_digest,chain_hash)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (request_id,job_id,bound[1],next_cursor,stamp,_json(ids),
+                 terminal_basis,source_evidence_id,raw_receipt_id,
+                 source_digest,chain))
+            self.db.execute("UPDATE jobs_v2 SET state='done' WHERE job_id=?",
+                            (job_id,))
+            if terminal_basis=="verified_terminal":
+                # Not requested: descendant jobs retain their own audit rows
+                # but never fabricate query_observation/HTTP receipt rows.
+                self.db.execute("""UPDATE jobs_v2
+                    SET state='not_required' WHERE epoch_id=? AND account_key=?
+                    AND phase='daily_front' AND page_seq>? AND state='pending'""",
+                    (job["epoch_id"],job["account_key"],job["page_seq"]))
+            self.db.execute("""INSERT INTO cursor_checkpoints(
+                epoch_id,account_key,stream,cursor,anchor_post_id,last_receipt,
+                chain_hash,updated_at,page_seq,status)
+                VALUES(?,?,'daily',?,?,?,?,?,?,?)
+                ON CONFLICT(epoch_id,account_key,stream) DO UPDATE SET
+                    cursor=excluded.cursor,anchor_post_id=excluded.anchor_post_id,
+                    last_receipt=excluded.last_receipt,chain_hash=excluded.chain_hash,
+                    updated_at=excluded.updated_at,page_seq=excluded.page_seq,
+                    status=excluded.status""",
+                (job["epoch_id"],job["account_key"],next_cursor,
+                 ids[-1] if ids else None,raw_receipt_id,chain,
+                 stamp,job["page_seq"],
+                 "terminal" if terminal_basis=="verified_terminal" else "open"))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return {"status":"committed","job_id":job_id,"observed_count":len(ids),
+                "terminal":terminal_basis=="verified_terminal"}
+
+    def block_daily_account(self,epoch_id,account_key,*,reason):
+        """Explicit exception record; never count blocked pages as successes."""
+        if not isinstance(reason,str) or not reason.strip() or len(reason)>128:
+            raise EpochError("Explicit nonsecret block reason required")
+        row=self.db.execute("SELECT kind FROM collection_epochs WHERE epoch_id=?",
+                            (epoch_id,)).fetchone()
+        if row is None or row[0]!="daily":
+            raise EpochError("Daily epoch required")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            if self.db.execute("""SELECT 1 FROM jobs_v2 WHERE epoch_id=?
+                AND account_key=? AND state='bound'""",
+                (epoch_id,account_key)).fetchone():
+                raise EpochError("Cannot silently discard an already-bound HTTP outcome")
+            self.db.execute("""UPDATE jobs_v2 SET state='blocked',
+                blocked_reason=? WHERE epoch_id=? AND account_key=?
+                AND state='pending'""",(reason,epoch_id,account_key))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+
