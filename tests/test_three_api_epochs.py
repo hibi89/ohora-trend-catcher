@@ -835,7 +835,7 @@ class P3EpochTests(unittest.TestCase):
         self.db.execute("UPDATE page_evidence_v2 SET ordered_ids_json=? WHERE job_id=?",
                         ("{corrupt-json",page["job_id"]))
         before=self.db.total_changes
-        with self.assertRaises(EpochError):
+        with self.assertRaisesRegex(EpochError,"media evidence is invalid"):
             self.store.commit_history_page(page["job_id"],"req-json-replay",**args)
         self.assertEqual(self.db.total_changes,before)
 
@@ -857,7 +857,7 @@ class P3EpochTests(unittest.TestCase):
                 self.db.execute("UPDATE page_evidence_v2 SET ordered_ids_json=? WHERE job_id=?",
                                 (payload,page["job_id"]))
                 before=self.db.total_changes
-                with self.assertRaises(EpochError):
+                with self.assertRaisesRegex(EpochError,"media evidence is invalid"):
                     self.store.commit_history_page(page["job_id"],request_id,**args)
                 self.assertEqual(self.db.total_changes,before)
         self.db.execute("UPDATE page_evidence_v2 SET ordered_ids_json=? WHERE job_id=?",
