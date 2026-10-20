@@ -223,5 +223,21 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertFalse(result["production_coverage_verified"])
 
 
+    def test_last_receipt_checkpoint_tampering_fails_closed(self):
+        self.append(self.history,"checkpoint-receipt",
+            self.posts([6301,6302],[360,366]),
+            next_cursor=None,terminal="verified_terminal")
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        self.fixture.db.execute(
+            "UPDATE cursor_checkpoints SET last_receipt='wrong-receipt' "
+            "WHERE epoch_id=? AND account_key='KR_001' AND stream='history'",
+            (self.history,))
+        before=(self.fixture.db.total_changes,self.mirror.db.total_changes)
+        report=self.audit()
+        self.assertFalse(report["synthetic_cutoff_verified"])
+        self.assertFalse(report["production_coverage_verified"])
+        self.assertEqual((self.fixture.db.total_changes,self.mirror.db.total_changes),before)
+
+
 if __name__=="__main__":
     unittest.main()
