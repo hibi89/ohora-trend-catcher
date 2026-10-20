@@ -188,6 +188,8 @@
 
 > **P6-019 추가 회귀 (2026-10-21):** 동일한 control DB 경로를 `nested/../source.sqlite`처럼 별칭으로 표현해도 잠금을 우회하지 못하는지, lock 파일이 디스크에 남아도 다음 실행이 정상 재획득하는지 검사 2건을 `tests/test_three_api_serial_lock.py`에 추가(`67e5aa3`). 코드로 확인한 경로 정규화 `Path.resolve()` 동작을 대상으로 하며, **새 SHA CI 검증 전**이다. 잠금 파일을 지우는 stale-file 복구는 의도적으로 수행하지 않는다.
 
+> **P6-019 CI 회귀 연결 (2026-10-21):** 이전 `p6-runtime-integration-offline.yml`의 push/PR path 필터가 새 `three_api_serial_lock.py` 및 두 serial 회귀 테스트 파일을 누락했다. 이 때문에 해당 파일만 수정할 때 Runtime CI가 시작되지 않을 수 있었다. 두 path 필터에 3개 파일 추가(`c982a47`), Linux `py_compile`에 lock/serial tests 추가(`6300ee0`), 새 두 모듈을 Windows `orchestrator` shard로 명시 배정(`d81b09e`). **workflow 변경 자체가 테스트 PASS를 의미하지 않는다.** 소켓 차단 전체 `tests/run_offline.py`는 이미 discovery로 새 테스트를 찾으며, SHA별 Actions 최종 결과는 별도 확인할 것. 이전 도구 안전 검사 차단은 변경 내용을 축소·재검토한 뒤 이 단계에서 해결됐다.
+
 ## 새 사건을 추가할 때의 고정 서식
 
 ```markdown
