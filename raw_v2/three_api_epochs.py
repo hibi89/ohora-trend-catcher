@@ -558,7 +558,15 @@ class ThreeApiEpochStore:
         unresolved=self.db.execute("""SELECT COUNT(*) FROM coverage_ledger
             WHERE epoch_id=? AND account_key=? AND status='needs_review'""",
             (daily[0],account_key)).fetchone()[0]
-        return pending==0 and unresolved==0
+        # A daily job can be explicitly blocked without a coverage_ledger
+        # row. Never treat that exception as successful front evidence for
+        # the same account's history, even if it has an older valid cursor.
+        # Blocking another account must not starve this verified account.
+        blocked=self.db.execute("""SELECT COUNT(*) FROM jobs_v2
+            WHERE epoch_id=? AND account_key=? AND phase='daily_front'
+              AND state='blocked'""",
+            (daily[0],account_key)).fetchone()[0]
+        return pending==0 and unresolved==0 and blocked==0
 
     def schedule_one_history_page(self,history_epoch,account_key,lane,*,at):
         """Allocate at most one boundable history page/account, no HTTP."""
