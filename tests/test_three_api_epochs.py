@@ -533,6 +533,38 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_daily_page(second,"skip-d2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_daily_replay_rejects_cross_epoch_parent_link_without_writes(self):
+        first,second=(self.job(1,page) for page in (1,2))
+        self.store.bind_daily(first,"epoch-d1",build_request_spec("A","nail_001"),at=NOW)
+        self.store.commit_daily_page(first,"epoch-d1",observed_at=NOW,
+            ordered_ids=["101"],next_cursor="epoch_cursor",
+            terminal_basis="continued",source_evidence_id="epoch-e1",
+            raw_receipt_id="epoch-r1",source_digest="a"*64)
+        self.store.bind_daily(second,"epoch-d2",
+            build_request_spec("C","nail_001",after="epoch_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["102"],next_cursor="epoch_next",
+            terminal_basis="continued",source_evidence_id="epoch-e2",
+            raw_receipt_id="epoch-r2",source_digest="b"*64)
+        self.store.commit_daily_page(second,"epoch-d2",**args)
+        other_epoch=self.store.seed_daily(DAY+timedelta(days=1),self.digest,
+            anchor_utc=NOW+timedelta(days=1))
+        other=self.db.execute("""SELECT job_id FROM jobs_v2
+            WHERE epoch_id=? AND account_ordinal=1 AND page_seq=1""",
+            (other_epoch,)).fetchone()[0]
+        self.store.bind_daily(other,"epoch-other",
+            build_request_spec("A","nail_001"),at=NOW+timedelta(days=1))
+        self.store.commit_daily_page(other,"epoch-other",
+            observed_at=NOW+timedelta(days=1),ordered_ids=["201"],
+            next_cursor="epoch_cursor",terminal_basis="continued",
+            source_evidence_id="epoch-other-e",raw_receipt_id="epoch-other-r",
+            source_digest="a"*64)
+        self.db.execute("UPDATE jobs_v2 SET predecessor_job_id=? WHERE job_id=?",
+                        (other,second))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_daily_page(second,"epoch-d2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
