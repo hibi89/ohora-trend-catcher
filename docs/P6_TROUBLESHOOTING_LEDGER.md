@@ -182,7 +182,7 @@
 - **발견:** `step_serial()`의 순차 `for`문은 **하나의 Python 호출** 안에서만 동시 실행을 제거한다. 독립 채팅방/작업자가 각각 별도 프로세스로 같은 SQLite를 열고 tick을 실행하면 상호간 직렬성이 보장되지 않는 아키텍처 위험이 있었다. 실제 다중 프로세스 데이터 손상은 관측하지 않았음.
 - **대안 판단:** `BEGIN IMMEDIATE`를 전체 RAW·control 다중 DB 작업 동안 점유하면 내부 nested SQLite transaction 및 단계별 무결성 복구와 충돌하기 쉽다. 원자적 파일 생성 플래그는 crash 후 남은 파일의 안전한 해제 절차가 어렵다. **OS-owned 파일 잠금**은 프로세스 종료 시 자동 해제되며 DB별 전역 잠금 경계를 제공하므로 채택.
 - **구현:** `raw_v2/three_api_serial_lock.py` (`f5bc1b3`)에 POSIX `flock`/Windows `msvcrt.locking` 비차단 lock 추가. 같은 synthetic coordinator DB의 `step_serial()` **및** 기존 `step()`를 공통 lock decorator로 보호(`5defcb4`); 이미 실행 중이면 `serial_busy`, 새 RAW 저장/커서 승격·공정성 turn 갱신 없음. 잠금 파일 자체는 남을 수 있지만 잠금 권한은 OS가 소멸시키므로 수동 stale-file 삭제 금지.
-- **회귀:** `tests/test_three_api_serial_lock.py` (`5e11b76`, `a9ce108`)에서 동일 DB 중복 lock 차단, 예외 후 lock 해제, 다른 DB 독립성, 잠금 중 수집/RAW 불변, 별도 **자식 프로세스 lock 차단 및 해제 뒤 성공**을 테스트하도록 작성.
+- **회귀:** `tests/test_three_api_serial_lock.py` (`5e11b76`, `a9ce108`)에서 동일 DB 중복 lock 차단, 예외 후 lock 해제, 다른 DB 독립성, 잠금 중 수집/RAW 불변, 별도 **자식 프로세스 lock 차단 및 해제 뒤 성공**을 테스트하도록 작성. 프로세스가 lock을 보유한 채 `os._exit(17)`로 비정상 종료해 Python `finally`가 생략돼도 **운영체제 잠금이 자동 해제**되는지 확인하는 회귀(`22a9773`)를 추가했다.
 - **한계:** 이 잠금은 **새 synthetic 오케스트레이터의 두 entrypoint에만 적용**한다. 다른 legacy/운영 수집기나 향후 전송 adapter가 같은 gate를 사용한다고 가정하면 안 된다. 실제 Meta 3 API 호출 런타임 직렬화는 여전히 별도 작업/검증이 필요하다. 실 API별 quota 격리는 미검증.
 - **검증/롤백:** 현재 테스트/가드 코드 GitHub 커밋 반영, 오프라인 CI 최종 판정 대기. 필요 시 feature commit만 되돌리고 운영 데이터/동결 설계/main 병합 절대 변경 금지.
 
