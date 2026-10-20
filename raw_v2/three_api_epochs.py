@@ -728,6 +728,14 @@ class ThreeApiEpochStore:
                 WHERE j.epoch_id=? AND j.account_key=? AND j.phase='history'
                   AND j.page_seq=? AND j.state='done'""",
                 (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchone()
+            # A checkpoint must also identify the last durable history page.
+            # Otherwise a forged page_seq can point to another valid receipt.
+            if (cp["page_seq"] != self.db.execute(
+                    "SELECT MAX(page_seq) FROM jobs_v2 WHERE epoch_id=? "
+                    "AND account_key=? AND phase='history' AND state='done'",
+                    (job["epoch_id"],job["account_key"])
+                ).fetchone()[0]):
+                raise EpochError("History replay checkpoint sequence differs")
             if (latest is None or cp["cursor"]!=latest[0]
                     or cp["last_receipt"]!=latest[1]
                     or cp["chain_hash"]!=latest[2]
