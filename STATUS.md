@@ -1,3 +1,5 @@
+> **2026-10-20 P6 3단위 cutoff RAW 연동 감사 강화:** self-loop history cursor 거부 `db09cb2`, 변조 회귀 테스트 `632cda2`, 페이지 간 반복 cursor 거부 `b5fdb59`. 이전 `1649e9d` Frozen Guard SUCCESS (`39400580178`); Three API/Runtime CI 확인 당시 진행 중, 최신 전체 CI PASS 미확인. 기존 read-only synthetic audit만 수정, 실제 Meta/운영 DB/main 변경 없음.
+
 > **2026-10-20 P6 실제 합성 RAW 연동 감사 보강 (3단위):** 기존 `three_api_history_cutoff_audit.py`가 이미 실제 격리 RAW mirror receipt, immutable source digest, rooted daily chain, 발행 시각을 읽어 검증함을 확인. 중복 RAW receipt/source evidence 식별자 거부 `cde2d78`; 2페이지 receipt ID 변조 후 cutoff 불인정·읽기 전용 회귀 `1649e9d`. `cde2d78` Frozen Guard SUCCESS (`39400559079`), Three API/RAW/Runtime CI 진행 중, 최신 전체 CI 미확인. 기존 `history_cutoff_evidence.py`는 별도 합성 helper이며 운영 연결 근거 아님. 운영 coverage_ledger 변경, Meta 호출, main 병합 없음.
 
 > **2026-10-20 P6 3단위:** cutoff assessor에서 페이지별 media ID 중복/교차 중복 거부 `8e2cfdf`, 회귀 테스트 `217601d`, media ID와 발행 시각의 1:1 개수 검사 `2e480c7`. 직전 `ca7b00a` RAW CI `39400161586` SUCCESS, `8d07766` Frozen Guard `39400261545` SUCCESS; 최신 `2e480c7` 전체 CI 아직 확인 전. 합성 증거 판정기만 수정, 실제 RAW receipt 진위·운영 연동 미완료. Meta/운영 DB/main 변경 없음.
