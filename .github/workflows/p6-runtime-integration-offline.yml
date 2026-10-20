@@ -140,6 +140,8 @@ jobs:
             tests/test_three_api_reel_metrics.py \
             tests/test_three_api_p2_clone_migration.py \
             tests/test_three_api_transport.py
+      - name: Audit discovered offline test inventory
+        run: python tests/run_offline.py --list-groups
       - name: Run complete offline regression suite with sockets blocked
         run: python tests/run_offline.py
 
