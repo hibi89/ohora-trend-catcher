@@ -253,5 +253,19 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertFalse(report["production_coverage_verified"])
 
 
+    def test_checkpoint_last_media_id_tampering_fails_closed(self):
+        self.append(self.history,"checkpoint-anchor",
+            self.posts([6501,6502],[360,366]),
+            next_cursor=None,terminal="verified_terminal")
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        self.fixture.db.execute(
+            "UPDATE cursor_checkpoints SET anchor_post_id='forged-media' "
+            "WHERE epoch_id=? AND account_key='KR_001' AND stream='history'",
+            (self.history,))
+        report=self.audit()
+        self.assertFalse(report["synthetic_cutoff_verified"])
+        self.assertFalse(report["production_coverage_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
