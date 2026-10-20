@@ -267,14 +267,30 @@ class ThreeApiEpochStore:
             (epoch_id,anchor,cutoff,roster_digest))
         return epoch_id
 
-    def ready_daily(self,epoch_id,lane):
-        """Show only current round jobs with committed page predecessors."""
-        if lane not in ("A","B","C"):
-            raise EpochError("Unknown API lane")
-        epoch=self.db.execute("SELECT kind FROM collection_epochs WHERE epoch_id=?",
-                              (epoch_id,)).fetchone()
+    def _is_latest_daily(self,epoch_id):
+        """Only the newest KST day for this immutable roster can start work.
+
+        Previously bound requests retain their state and can still commit
+        after rollover; this gate applies only to *new* daily bindings.
+        """
+        epoch=self.db.execute(
+            "SELECT kind,roster_digest,day_kst FROM collection_epochs "
+            "WHERE epoch_id=?",(epoch_id,)
+        ).fetchone()
         if epoch is None or epoch[0]!="daily":
             raise EpochError("Registered daily epoch required")
+        latest=self.db.execute(
+            "SELECT MAX(day_kst) FROM collection_epochs "
+            "WHERE kind='daily' AND roster_digest=?",(epoch[1],)
+        ).fetchone()[0]
+        return epoch[2]==latest
+
+    def ready_daily(self,epoch_id,lane):
+        """Show only the latest KST round with committed predecessors."""
+        if lane not in ("A","B","C"):
+            raise EpochError("Unknown API lane")
+        if not self._is_latest_daily(epoch_id):
+            return []
         first=self.db.execute("SELECT MIN(round_no) FROM jobs_v2 "
             "WHERE epoch_id=? AND state IN ('pending','bound')",(epoch_id,)).fetchone()[0]
         if first is None:
@@ -385,6 +401,8 @@ class ThreeApiEpochStore:
         job=self._job_row(job_id)
         if job["epoch_kind"]!="daily" or job["phase"]!="daily_front" or job["state"]!="pending":
             raise EpochError("Daily job is not pending")
+        if not self._is_latest_daily(job["epoch_id"]):
+            raise EpochError("Older KST daily epoch cannot start a new request")
         member=self.db.execute("SELECT username FROM roster_members "
             "WHERE roster_digest=? AND account_key=?",
             (job["roster_digest"],job["account_key"])).fetchone()
