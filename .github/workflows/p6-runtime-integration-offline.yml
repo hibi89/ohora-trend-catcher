@@ -29,6 +29,8 @@ on:
       - 'tests/test_three_api_transport.py'
       - 'raw_v2/three_api_daily_orchestrator.py'
       - 'raw_v2/three_api_serial_lock.py'
+      - 'raw_v2/three_api_serial_contract_bridge.py'
+      - 'tests/test_three_api_serial_contract_bridge.py'
       - 'tests/test_three_api_serial_lock.py'
       - 'tests/test_three_api_serial_catchup.py'
       - 'raw_v2/three_api_daily_projection.py'
@@ -79,6 +81,8 @@ on:
       - 'tests/test_three_api_transport.py'
       - 'raw_v2/three_api_daily_orchestrator.py'
       - 'raw_v2/three_api_serial_lock.py'
+      - 'raw_v2/three_api_serial_contract_bridge.py'
+      - 'tests/test_three_api_serial_contract_bridge.py'
       - 'tests/test_three_api_serial_lock.py'
       - 'tests/test_three_api_serial_catchup.py'
       - 'raw_v2/three_api_daily_projection.py'
@@ -130,6 +134,8 @@ jobs:
             raw_v2/three_api_runtime_contract.py \
             raw_v2/three_api_raw_writer.py \
             raw_v2/three_api_serial_lock.py \
+            raw_v2/three_api_serial_contract_bridge.py \
+            tests/test_three_api_serial_contract_bridge.py \
             tests/test_three_api_serial_lock.py \
             tests/test_three_api_serial_catchup.py \
             raw_v2/three_api_epochs.py \
