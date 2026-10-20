@@ -487,6 +487,33 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_daily_page(second,"missing-proof-d2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_daily_replay_rejects_cross_account_parent_link_without_writes(self):
+        first,second=(self.job(1,page) for page in (1,2))
+        other=self.job(2,1)
+        self.store.bind_daily(first,"cross-d1",build_request_spec("A","nail_001"),at=NOW)
+        self.store.commit_daily_page(first,"cross-d1",observed_at=NOW,
+            ordered_ids=["101"],next_cursor="cross_cursor",
+            terminal_basis="continued",source_evidence_id="cross-e1",
+            raw_receipt_id="cross-r1",source_digest="a"*64)
+        self.store.bind_daily(other,"cross-other",
+            build_request_spec("A","nail_002"),at=NOW)
+        self.store.commit_daily_page(other,"cross-other",observed_at=NOW,
+            ordered_ids=["201"],next_cursor="cross_cursor",
+            terminal_basis="continued",source_evidence_id="cross-other-e",
+            raw_receipt_id="cross-other-r",source_digest="a"*64)
+        self.store.bind_daily(second,"cross-d2",
+            build_request_spec("C","nail_001",after="cross_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["102"],next_cursor="cross_next",
+            terminal_basis="continued",source_evidence_id="cross-e2",
+            raw_receipt_id="cross-r2",source_digest="b"*64)
+        self.store.commit_daily_page(second,"cross-d2",**args)
+        self.db.execute("UPDATE jobs_v2 SET predecessor_job_id=? WHERE job_id=?",
+                        (other,second))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_daily_page(second,"cross-d2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
