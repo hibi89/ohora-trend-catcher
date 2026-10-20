@@ -1,3 +1,7 @@
+> [!CAUTION]
+> **FROZEN P6 DESIGN — USER EXPLICIT APPROVAL REQUIRED TO CHANGE (2026-10-20).**
+> Read [DESIGN_FREEZE_NOTICE.md](DESIGN_FREEZE_NOTICE.md) and the complete [P6 final collection design, including section 15](docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md) **before making any design, API-lane, scheduler, storage, or workflow changes**. See [global policy Issue #7](https://github.com/hibi89/ohora-trend-catcher/issues/7). No worker/agent may alter, overwrite, delete, weaken, replace, or silently deviate from the frozen design without the owner's explicit subsequent instruction. **294 accounts; A/B/C 3 API lanes; per-request limit=4; 2 daily front rounds/3 pages×4; then catchup→durable history; immutable captured raw; all checks/change history; video/reels URL metadata.** This notice does **not** authorize P1–P5 implementation, live Meta calls, operational DB edits, unattended scheduling, or main feature merges. Old contradictory latest5/4+1 text is superseded.
+
 # AI development working agreement
 
 1. The source of truth for client objectives is `REQUIREMENTS.md` and the user's actual customer materials. **KQ3 means Key Question 3, not 2026 Q3.** Resolve ambiguous labels rather than guessing.
