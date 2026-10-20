@@ -1036,6 +1036,64 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_history_page(first["job_id"],"req-bound-cursor-one",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_history_replay_checkpoint_integrity_matrix(self):
+        """A committed history replay rejects independent checkpoint mutations."""
+        mutations=[
+            ("cursor","forged_cursor"),
+            ("anchor_post_id","999"),
+            ("last_receipt","forged_receipt"),
+            ("chain_hash","f"*64),
+            ("updated_at","forged_timestamp"),
+            ("page_seq",2),
+            ("status","terminal"),
+        ]
+        for field,payload in mutations:
+            with self.subTest(field=field):
+                db=sqlite3.connect(":memory:",isolation_level=None)
+                db.row_factory=sqlite3.Row
+                try:
+                    store=ThreeApiEpochStore(db)
+                    digest=store.register_roster(official_shape(),recorded_at=NOW)
+                    daily=store.seed_daily(DAY,digest,anchor_utc=NOW)
+                    db.execute("""UPDATE jobs_v2 SET state='blocked',
+                        blocked_reason='synthetic_fixture_only'
+                        WHERE epoch_id=? AND account_ordinal>1""",(daily,))
+                    for seq,lane,req,after,nxt in (
+                        (1,"A","matrix-front-1",None,"matrix_front_2"),
+                        (2,"C","matrix-front-2","matrix_front_2","matrix_front_3"),
+                        (3,"B","matrix-front-3","matrix_front_3","matrix_history_seed")):
+                        job=db.execute("""SELECT job_id FROM jobs_v2
+                            WHERE epoch_id=? AND account_ordinal=1 AND page_seq=?""",
+                            (daily,seq)).fetchone()[0]
+                        store.bind_daily(job,req,
+                            build_request_spec(lane,"nail_001",after=after),at=NOW)
+                        store.commit_daily_page(job,req,observed_at=NOW,
+                            ordered_ids=[str(100+seq)],next_cursor=nxt,
+                            terminal_basis="continued",source_evidence_id=req,
+                            raw_receipt_id="raw-"+req,source_digest="a"*64)
+                    history=store.create_history_epoch(digest,anchor_utc=NOW,
+                        cutoff_utc=NOW-timedelta(days=365))
+                    store.initialize_history_from_verified_daily(history,daily,"KR_001",at=NOW)
+                    page=store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+                    req="history-checkpoint-matrix"
+                    store.bind_history(page["job_id"],req,
+                        build_request_spec("A","nail_001",
+                            after="matrix_history_seed"),at=NOW)
+                    args=dict(observed_at=NOW,ordered_ids=["901","902"],
+                        next_cursor="matrix_history_next",terminal_basis="continued",
+                        source_evidence_id="history-source",
+                        raw_receipt_id="history-raw",source_digest="b"*64)
+                    store.commit_history_page(page["job_id"],req,**args)
+                    db.execute("UPDATE cursor_checkpoints SET "+field+"""=?
+                        WHERE epoch_id=? AND account_key='KR_001'
+                          AND stream='history'""",(payload,history))
+                    before=db.total_changes
+                    with self.assertRaises(EpochError):
+                        store.commit_history_page(page["job_id"],req,**args)
+                    self.assertEqual(db.total_changes,before)
+                finally:
+                    db.close()
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
