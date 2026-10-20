@@ -104,3 +104,53 @@ class OfflineSerialContractBridge:
                     job, request, evidence, capture, raw, now=now)
         except SerialTickBusy:
             return {"status": "serial_busy", "selected_lane": None}
+
+    def run_fixture_page_once(self, job, request, evidence, *, now):
+        """One offline-only entrypoint: first dispatch OR capture-only recovery.
+
+        Hold ONE cross-process gate across durable reservation, the exact
+        in-memory fixture send, Capture/RAW receipt, and page/cursor commit.
+        An existing binding can ONLY resume from a previously durable capture:
+        never re-send a request after an interrupted or uncertain attempt.
+        Job choice and quota rotation are intentionally outside this method.
+        """
+        from three_api_capture import CaptureJournal
+        from three_api_evidence import PageEvidenceStore
+        from three_api_raw_writer import ContractRawWriter
+
+        if not isinstance(now, datetime) or now.utcoffset() is None:
+            raise SerialContractBridgeError("Timezone-aware time required")
+        if (not isinstance(job, dict) or type(job.get("id")) is not int
+                or job.get("lane") not in ("A", "B", "C")):
+            raise SerialContractBridgeError("Invalid coordinator job")
+        if (getattr(request, "lane", None) != job["lane"]
+                or getattr(request, "phase", None) not in ("front", "catchup")):
+            raise SerialContractBridgeError("Invalid request lane or phase")
+        if (not isinstance(evidence, PageEvidenceStore)
+                or evidence.coordinator is not self.coordinator):
+            raise SerialContractBridgeError("Original page evidence store required")
+
+        transport = self.executor.transport
+        capture = self.executor.capture
+        raw = self.executor.raw
+        if (type(transport) is not OfflineFixtureTransport
+                or not isinstance(capture, CaptureJournal)
+                or not isinstance(raw, ContractRawWriter)):
+            raise SerialContractBridgeError("Isolated fixture transport and durable ports required")
+
+        try:
+            with serial_tick_lock(self.coordinator.path):
+                if (self.executor.transport is not transport
+                        or self.executor.capture is not capture
+                        or self.executor.raw is not raw
+                        or type(self.executor.transport) is not OfflineFixtureTransport):
+                    raise SerialContractBridgeError("Offline fixture ports changed during gate")
+                # Read only once under the gate. A reserved request is NEVER
+                # dispatched again, including after crash or lease renewal.
+                if self.bindings.lookup(job["id"]) is None:
+                    self.bindings.dispatch_once(
+                        job, request, evidence, self.executor, now=now)
+                return self.bindings.commit_captured_page(
+                    job, request, evidence, capture, raw, now=now)
+        except SerialTickBusy:
+            return {"status": "serial_busy", "selected_lane": None}
