@@ -166,8 +166,9 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
     # Each Windows group runs on an isolated runner. All discovered test modules
-    # are assigned to exactly one group in tests/run_offline.py. This preserves
-    # the full socket-blocked suite while parallelizing expensive SQLite tests.
+    # are assigned to exactly one group in tests/run_offline.py. The slow
+    # orchestrator module is split by stable unittest ID into four shards;
+    # sockets remain blocked and the 480s watchdog is unchanged.
     # No repository secrets, Meta calls, or production database connections.
     name: offline-windows (${{ matrix.group }})
     runs-on: windows-latest
@@ -175,7 +176,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [orchestrator, roster, report, observations, projection, remaining]
+        group: [orchestrator, orchestrator-2, orchestrator-3, orchestrator-4, roster, report, observations, projection, remaining]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
