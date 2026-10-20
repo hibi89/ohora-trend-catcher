@@ -273,6 +273,32 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
             (page["job_id"],)).fetchone()[0],0)
 
+    def test_history_replay_conflict_cannot_mutate_verified_checkpoint(self):
+        """Conflicting duplicate receipts must fail without losing old proof."""
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(page["job_id"],"req-history-replay",
+            build_request_spec("A","nail_001",
+                               after="history_first_cursor"),at=NOW)
+        kwargs=dict(observed_at=NOW,ordered_ids=["501","502","503","504"],
+                    next_cursor="history_second_cursor",
+                    terminal_basis="continued",source_evidence_id="safe-replay",
+                    raw_receipt_id="raw-replay",source_digest="a"*64)
+        self.assertEqual(self.store.commit_history_page(
+            page["job_id"],"req-history-replay",**kwargs)["status"],"committed")
+        original=self.store.history_checkpoint(history,"KR_001")
+        self.assertEqual(self.store.commit_history_page(
+            page["job_id"],"req-history-replay",**kwargs)["status"],
+            "already_committed")
+        with self.assertRaises(EpochError):
+            self.store.commit_history_page(
+                page["job_id"],"req-history-replay",
+                **{**kwargs,"ordered_ids":["501","502","503","999"]})
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001"),original)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
+            (page["job_id"],)).fetchone()[0],1)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
