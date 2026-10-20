@@ -140,6 +140,18 @@ def _state(values, fields, tested, *, overrides=None):
     return saved, states
 
 
+def _child_properties(child, fields):
+    """Preserve explicit NULL versus omitted media-child properties."""
+    row = {"id": child["id"]}
+    for field in fields:
+        if field in child:
+            row[field + "_status"] = "null" if child[field] is None else "returned"
+            row[field] = child[field]
+        else:
+            row[field + "_status"] = "absent"
+    return row
+
+
 def _post_components(record, post):
     spec = record.request.request_spec
     tested_media = frozenset(spec.media_fields.split(","))
@@ -155,7 +167,7 @@ def _post_components(record, post):
     tested_structure = set(tested_media) | {"coverage"}
     if "children" in post:
         structure["children"] = [
-            {"id": child["id"], "media_type": child.get("media_type")}
+            _child_properties(child, ("media_type",))
             for child in post["children"]]
     if spec.include_carousel_children or "children" in post:
         tested_structure.add("children")
@@ -164,8 +176,7 @@ def _post_components(record, post):
     locators = dict(post)
     if "children" in post:
         locators["child_locations"] = [
-            {"id": child["id"], "media_url": child.get("media_url"),
-             "thumbnail_url": child.get("thumbnail_url")}
+            _child_properties(child, ("media_url", "thumbnail_url"))
             for child in post["children"]]
     if spec.include_carousel_children or "children" in post:
         tested_media = tested_media | {"child_locations"}
@@ -230,6 +241,22 @@ def _field_map(db, kind, check):
             values, states = map(json.loads, row)
             for field, status in states.items():
                 result[component + "." + field] = (status, values.get(field))
+                # Field-level child changes complement the ordered aggregate:
+                # nested absent and explicit NULL are NOT interchangeable.
+                if status != "returned" or field not in ("children", "child_locations"):
+                    continue
+                children = values[field]
+                if component == "structure":
+                    result["structure.children_order"] = (
+                        "returned", [item["id"] for item in children])
+                    nested_fields = ("media_type",)
+                else:
+                    nested_fields = ("media_url", "thumbnail_url")
+                for child in children:
+                    for nested in nested_fields:
+                        key = component + ".child." + child["id"] + "." + nested
+                        child_status = child[nested + "_status"]
+                        result[key] = (child_status, child.get(nested))
         return result
     row = db.execute("SELECT full_values_json,field_states_json FROM account_states "
                      "WHERE state_id=?", (check[3],)).fetchone()
@@ -256,9 +283,9 @@ def _rebuild_active_comparison(db, kind, entity, check, previous):
     batch_id = _id("batch-", kind, check[0], previous_id, _SCHEMA_VERSION)
     count = 0
     if previous is not None:
-        for field_path in sorted(current):
-            new_status, new_value = current[field_path]
-            old_status, old_value = before[field_path]
+        for field_path in sorted(set(current) | set(before)):
+            new_status, new_value = current.get(field_path, ("not_tested", None))
+            old_status, old_value = before.get(field_path, ("not_tested", None))
             if (old_status, old_value) == (new_status, new_value):
                 continue
             category = _kind(field_path, old_status, new_status)
