@@ -56,5 +56,26 @@ class HistoryCutoffBoundaryContractTests(unittest.TestCase):
                 self.assertGreaterEqual(observed_at, anchor)
 
 
+    def test_unverified_coverage_stays_unverified_at_boundary(self):
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        try:
+            ThreeApiEpochStore(db)
+            anchor = datetime(2026, 10, 20, tzinfo=timezone.utc)
+            for days in (365, 730):
+                cutoff = anchor - timedelta(days=days)
+                for published_at in (
+                    cutoff - timedelta(microseconds=1),
+                    cutoff,
+                    cutoff + timedelta(microseconds=1),
+                ):
+                    self.assertIsNotNone(published_at)
+                    self.assertEqual(
+                        db.execute("SELECT COUNT(*) FROM coverage_ledger "
+                                   "WHERE status='verified'").fetchone()[0], 0
+                    )
+        finally:
+            db.close()
+
+
 if __name__ == "__main__":
     unittest.main()
