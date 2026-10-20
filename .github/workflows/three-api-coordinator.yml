@@ -7,6 +7,13 @@ on:
       - 'raw_v2/three_api_observation_versions.py'
       - 'raw_v2/three_api_epochs.py'
       - 'raw_v2/three_api_history_cutoff_audit.py'
+      - 'raw_v2/three_api_history_fixture_ingress.py'
+      - 'raw_v2/three_api_epoch_contract_projection.py'
+      - 'raw_v2/three_api_runtime_contract.py'
+      - 'raw_v2/three_api_capture.py'
+      - 'raw_v2/three_api_contract_executor.py'
+      - 'raw_v2/three_api_transport.py'
+      - 'tests/test_three_api_history_contract_offline.py'
       - 'tests/test_three_api_history_cutoff_audit.py'
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_adapter.py'
@@ -74,6 +81,13 @@ on:
       - 'raw_v2/three_api_observation_versions.py'
       - 'raw_v2/three_api_epochs.py'
       - 'raw_v2/three_api_history_cutoff_audit.py'
+      - 'raw_v2/three_api_history_fixture_ingress.py'
+      - 'raw_v2/three_api_epoch_contract_projection.py'
+      - 'raw_v2/three_api_runtime_contract.py'
+      - 'raw_v2/three_api_capture.py'
+      - 'raw_v2/three_api_contract_executor.py'
+      - 'raw_v2/three_api_transport.py'
+      - 'tests/test_three_api_history_contract_offline.py'
       - 'tests/test_three_api_history_cutoff_audit.py'
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_adapter.py'
@@ -153,6 +167,7 @@ jobs:
         run: |
           python -m py_compile raw_v2/three_api_epochs.py tests/test_three_api_epochs.py
           python -m py_compile raw_v2/three_api_history_cutoff_audit.py tests/test_three_api_history_cutoff_audit.py
+          python -m py_compile raw_v2/three_api_history_fixture_ingress.py raw_v2/three_api_epoch_contract_projection.py tests/test_three_api_history_contract_offline.py
           python -m py_compile raw_v2/three_api_observation_versions.py tests/test_three_api_p2_observations.py raw_v2/three_api_p2_clone_migration.py tests/test_three_api_p2_clone_migration.py
           python -m py_compile raw_v2/three_api_response_evidence.py tests/test_three_api_p1_response_evidence.py
           python -m py_compile raw_v2/three_api_coordinator.py raw_v2/three_api_adapter.py raw_v2/three_api_checkpoints.py raw_v2/three_api_paging.py raw_v2/three_api_evidence.py raw_v2/three_api_offline_runner.py raw_v2/three_api_meta_normalizer.py raw_v2/three_api_usage.py raw_v2/three_api_http_fixture.py raw_v2/three_api_request_spec.py raw_v2/three_api_credentials.py raw_v2/three_api_http_preflight.py raw_v2/three_api_runtime_boundary.py raw_v2/three_api_graph_http.py raw_v2/three_api_guarded_executor.py raw_v2/three_api_daily_gap.py raw_v2/three_api_daily_projection.py raw_v2/three_api_reanchor.py raw_v2/three_api_catchup_offline.py raw_v2/three_api_raw_mirror.py raw_v2/three_api_raw_projection.py raw_v2/three_api_catchup_payload.py raw_v2/three_api_daily_orchestrator.py raw_v2/three_api_live_readiness.py
@@ -161,6 +176,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_three_api_epochs.py' -v
           python -m unittest discover -s tests -p 'test_three_api_history_cutoff_audit.py' -v
+          python -m unittest discover -s tests -p 'test_three_api_history_contract_offline.py' -v
           python -m unittest discover -s tests -p 'test_three_api_p2_observations.py' -v
           python -m unittest discover -s tests -p 'test_three_api_p2_clone_migration.py' -v
           python -m unittest discover -s tests -p 'test_three_api_p1_response_evidence.py' -v
