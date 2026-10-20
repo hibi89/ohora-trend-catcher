@@ -619,6 +619,76 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=? AND phase='history'",
             (history,)).fetchone()[0],1)
 
+    def test_full_294_by_three_page_two_round_synthetic_epoch_e2e(self):
+        """All 882 fixed jobs, predecessor cursors and 365/730 roots, no HTTP.
+
+        Fake receipts test scheduler invariants only, not RAW or live capture.
+        Each daily page contains four synthetic, globally unique numeric IDs.
+        """
+        expected_slots=((1,"A",150),(1,"B",144),(1,"C",150),
+                        (2,"A",144),(2,"B",150),(2,"C",144))
+        emitted=[]
+        for round_no,lane,expected_count in expected_slots:
+            self.assertEqual(self.store.active_round(self.daily),round_no)
+            ready=self.store.ready_daily(self.daily,lane)
+            self.assertEqual(len(ready),expected_count)
+            self.assertTrue(all(job["round_no"]==round_no for job in ready))
+            for job in ready:
+                ordinal,seq=job["account_ordinal"],job["page_seq"]
+                precursor=job["predecessor_job_id"]
+                cursor=(self.db.execute(
+                    "SELECT cursor_out FROM page_evidence_v2 WHERE job_id=?",
+                    (precursor,)).fetchone()[0] if precursor is not None else None)
+                request_id=f"e2e-{ordinal:03d}-p{seq}"
+                self.store.bind_daily(job["job_id"],request_id,
+                    build_request_spec(
+                        lane,self.roster[ordinal-1]["username"],after=cursor),
+                    at=NOW)
+                ids=[str(ordinal*1000+seq*10+n) for n in (1,2,3,4)]
+                next_cursor=f"cursor_{ordinal:03d}_{seq}"
+                proof=self.store.commit_daily_page(
+                    job["job_id"],request_id,observed_at=NOW,
+                    ordered_ids=ids,next_cursor=next_cursor,
+                    terminal_basis="continued",
+                    source_evidence_id="synthetic-source-"+request_id,
+                    raw_receipt_id="synthetic-raw-"+request_id,
+                    source_digest="a"*64)
+                self.assertEqual(proof["status"],"committed")
+                emitted.append((ordinal,seq,lane,round_no))
+        self.assertEqual(len(emitted),294*3)
+        self.assertEqual(len(set((ordinal,seq) for ordinal,seq,_,_ in emitted)),882)
+        self.assertEqual(self.store.summary(self.daily)["states"],{"done":882})
+        self.assertIsNone(self.store.active_round(self.daily))
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id IN "
+            "(SELECT job_id FROM jobs_v2 WHERE epoch_id=?)",
+            (self.daily,)).fetchone()[0],882)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM cursor_checkpoints WHERE epoch_id=? "
+            "AND stream='daily' AND page_seq=3",(self.daily,)).fetchone()[0],294)
+        self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(),[])
+        # Root initialization is isolated by history target epoch; it must
+        # never fabricate 365/730-day coverage verification.
+        history_365=self.store.create_history_epoch(
+            self.digest,anchor_utc=NOW,cutoff_utc=NOW-timedelta(days=365))
+        history_730=self.store.create_history_epoch(
+            self.digest,anchor_utc=NOW,cutoff_utc=NOW-timedelta(days=730))
+        self.assertNotEqual(history_365,history_730)
+        for target in (history_365,history_730):
+            for account in ("KR_001","JP_093"):
+                init=self.store.initialize_history_from_verified_daily(
+                    target,self.daily,account,at=NOW)
+                self.assertEqual(init["status"],"initialized")
+                self.assertEqual(init["daily_page_seq"],3)
+                self.assertEqual(init["history_state"],"open")
+                self.assertIsNotNone(self.store.history_checkpoint(target,account))
+            self.assertEqual(self.db.execute(
+                "SELECT COUNT(*) FROM coverage_ledger WHERE epoch_id=? AND "
+                "status='verified'",(target,)).fetchone()[0],0)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=? AND state='done'",
+            (self.daily,)).fetchone()[0],882)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
