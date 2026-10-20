@@ -50,6 +50,8 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
         if index < len(pages) - 1 and not outgoing:
             return {"verified": False, "reason": "cursor_gap"}
         media_ids = page.get("media_ids")
+        if media_ids is None:
+            return {"verified": False, "reason": "missing_media_inventory"}
         if media_ids is not None:
             if not isinstance(media_ids, (list, tuple)) or any(
                 not isinstance(mid, str) or not mid for mid in media_ids
@@ -59,7 +61,7 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
                 return {"verified": False, "reason": "duplicate_media"}
             seen_media.update(media_ids)
         stamps = page.get("published_at")
-        if media_ids is not None and len(media_ids) != len(stamps or []):
+        if len(media_ids) != len(stamps or []):
             return {"verified": False, "reason": "media_timestamp_mismatch"}
         if not isinstance(stamps, (list, tuple)) or not stamps:
             return {"verified": False, "reason": "missing_timestamps"}
