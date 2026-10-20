@@ -445,6 +445,28 @@ class P3EpochTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_daily_replay_rejects_missing_latest_parent_link_without_writes(self):
+        first,second=(self.job(1,page) for page in (1,2))
+        self.store.bind_daily(first,"missing-parent-d1",
+            build_request_spec("A","nail_001"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["101"],
+            next_cursor="parent_cursor",terminal_basis="continued",
+            source_evidence_id="missing-parent-e1",raw_receipt_id="missing-parent-r1",
+            source_digest="a"*64)
+        self.store.commit_daily_page(first,"missing-parent-d1",**args)
+        self.store.bind_daily(second,"missing-parent-d2",
+            build_request_spec("C","nail_001",after="parent_cursor"),at=NOW)
+        self.store.commit_daily_page(second,"missing-parent-d2",
+            observed_at=NOW,ordered_ids=["102"],next_cursor="next_cursor",
+            terminal_basis="continued",source_evidence_id="missing-parent-e2",
+            raw_receipt_id="missing-parent-r2",source_digest="b"*64)
+        self.db.execute("UPDATE jobs_v2 SET parent_job_id=NULL WHERE job_id=?",
+                        (second,))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_daily_page(first,"missing-parent-d1",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
