@@ -34,5 +34,17 @@ class HistoryCutoffBoundaryContractTests(unittest.TestCase):
             db.close()
 
 
+    def test_utc_cutoff_boundaries_365_and_730(self):
+        anchor = datetime(2026, 10, 20, tzinfo=timezone.utc)
+        for days in (365, 730):
+            with self.subTest(days=days):
+                cutoff = anchor - timedelta(days=days)
+                before = cutoff - timedelta(microseconds=1)
+                after = cutoff + timedelta(microseconds=1)
+                self.assertTrue(before <= cutoff)
+                self.assertTrue(cutoff <= cutoff)
+                self.assertFalse(after <= cutoff)
+
+
 if __name__ == "__main__":
     unittest.main()
