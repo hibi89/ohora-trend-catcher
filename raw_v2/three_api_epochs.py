@@ -535,14 +535,16 @@ class ThreeApiEpochStore:
             latest_binding=self.db.execute("""SELECT e.request_id,e.cursor_in,
                 e.cursor_out,e.ordered_ids_json,e.source_evidence_id,
                 e.raw_receipt_id,e.source_digest,e.chain_hash,
-                b.requested_cursor,j.job_id,j.predecessor_job_id,j.page_seq
+                b.requested_cursor,j.job_id,j.predecessor_job_id,j.page_seq,
+                b.request_id
                 FROM page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
                 LEFT JOIN request_bindings_v2 b ON b.job_id=j.job_id
                 WHERE j.epoch_id=? AND j.account_key=? AND j.phase='daily_front'
                   AND j.state='done' ORDER BY j.page_seq DESC LIMIT 1""",
                 (job["epoch_id"],job["account_key"])).fetchone()
             if (latest_binding is None or latest_binding[1]!=latest_binding[8]
-                    or latest_binding[0] is None):
+                    or latest_binding[0] is None
+                    or latest_binding[0]!=latest_binding[12]):
                 raise EpochError("Daily replay latest request binding differs")
             if latest_binding[11]>1:
                 parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
