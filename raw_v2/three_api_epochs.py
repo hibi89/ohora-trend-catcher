@@ -892,14 +892,15 @@ class ThreeApiEpochStore:
             latest_proof=self.db.execute("""SELECT j.job_id,j.page_seq,
                 j.predecessor_job_id,e.request_id,e.cursor_in,e.cursor_out,
                 e.ordered_ids_json,e.source_evidence_id,e.raw_receipt_id,
-                e.source_digest,e.chain_hash,b.requested_cursor
+                e.source_digest,e.chain_hash,b.requested_cursor,b.request_id
                 FROM jobs_v2 j JOIN page_evidence_v2 e ON e.job_id=j.job_id
                 JOIN request_bindings_v2 b ON b.job_id=j.job_id
                 WHERE j.epoch_id=? AND j.account_key=? AND j.phase='history'
                   AND j.page_seq=? AND j.state='done'""",
                 (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchone()
             if (latest_proof is None or latest_proof[4]!=latest_proof[11]
-                    or latest_proof[3] is None):
+                    or latest_proof[3] is None
+                    or latest_proof[3]!=latest_proof[12]):
                 raise EpochError("History replay chain binding differs")
             if latest_proof[1]>1:
                 parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
