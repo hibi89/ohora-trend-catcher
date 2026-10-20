@@ -67,5 +67,23 @@ class CutoffAssessorTests(unittest.TestCase):
             365, -1, cursor_in="root", cursor_out="root")["reason"], "cursor_cycle")
 
 
+    def test_repeated_cursor_across_multiple_pages_is_rejected(self):
+        cutoff = self.anchor - timedelta(days=365)
+        pages = [
+            dict(cursor_in="root", cursor_out="a", receipt="raw:1",
+                 receipt_verified=True, timestamps_verified=True,
+                 published_at=[self.anchor - timedelta(days=1)]),
+            dict(cursor_in="a", cursor_out="b", receipt="raw:2",
+                 receipt_verified=True, timestamps_verified=True,
+                 published_at=[self.anchor - timedelta(days=2)]),
+            dict(cursor_in="b", cursor_out="a", receipt="raw:3",
+                 receipt_verified=True, timestamps_verified=True,
+                 published_at=[cutoff - timedelta(seconds=1)]),
+        ]
+        result = assess_cutoff_evidence(
+            anchor=self.anchor, cutoff=cutoff, pages=pages, rooted=True)
+        self.assertEqual(result["reason"], "cursor_cycle")
+
+
 if __name__ == "__main__":
     unittest.main()
