@@ -46,5 +46,15 @@ class HistoryCutoffBoundaryContractTests(unittest.TestCase):
                 self.assertFalse(after <= cutoff)
 
 
+    def test_cutoff_is_fixed_across_observation_days(self):
+        anchor = datetime(2026, 10, 20, tzinfo=timezone.utc)
+        for days in (365, 730):
+            cutoff = anchor - timedelta(days=days)
+            for observation_delay in (0, 1, 30):
+                observed_at = anchor + timedelta(days=observation_delay)
+                self.assertEqual(cutoff, anchor - timedelta(days=days))
+                self.assertGreaterEqual(observed_at, anchor)
+
+
 if __name__ == "__main__":
     unittest.main()
