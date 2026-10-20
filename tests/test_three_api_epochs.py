@@ -154,6 +154,106 @@ class P3EpochTests(unittest.TestCase):
         with self.assertRaises(EpochError):
             self.store.seed_daily(DAY+timedelta(days=1),self.digest,anchor_utc=NOW)
 
+    def open_history_fixture(self):
+        """Synthetic exception closure, not evidence of 294 successful API reads."""
+        self.db.execute("""UPDATE jobs_v2 SET state='blocked',
+              blocked_reason='synthetic_fixture_only'
+              WHERE epoch_id=? AND account_ordinal>1""",(self.daily,))
+        first,second,third=(self.job(1,page) for page in (1,2,3))
+        self.store.bind_daily(first,"req-hfront1",
+                              build_request_spec("A","nail_001"),at=NOW)
+        self.proof(first,"req-hfront1",nxt="history_front_page2")
+        self.store.bind_daily(second,"req-hfront2",
+             build_request_spec("C","nail_001",after="history_front_page2"),at=NOW)
+        self.proof(second,"req-hfront2",nxt="history_front_page3")
+        self.store.bind_daily(third,"req-hfront3",
+             build_request_spec("B","nail_001",after="history_front_page3"),at=NOW)
+        self.proof(third,"req-hfront3",nxt="history_first_cursor")
+        self.assertIsNone(self.store.active_round(self.daily))
+        history=self.store.create_history_epoch(
+            self.digest,anchor_utc=NOW,cutoff_utc=NOW-timedelta(days=365))
+        seeded=self.store.initialize_history_from_verified_daily(
+            history,self.daily,"KR_001",at=NOW)
+        self.assertEqual(seeded["cursor"],"history_first_cursor")
+        return history
+
+    def test_history_cursor_survives_two_backfill_pages_and_terminal(self):
+        history=self.open_history_fixture()
+        page1=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.assertEqual(page1["page_seq"],1)
+        self.assertEqual(page1["cursor"],"history_first_cursor")
+        self.store.bind_history(page1["job_id"],"req-history-1",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        receipt=self.store.commit_history_page(page1["job_id"],"req-history-1",
+            observed_at=NOW,ordered_ids=["501","502","503","504"],
+            next_cursor="history_second_cursor",terminal_basis="continued",
+            source_evidence_id="safe-r1",raw_receipt_id="raw-r1",source_digest="a"*64)
+        self.assertEqual(receipt["coverage_verified"],False)
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001")["page_seq"],1)
+        page2=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.assertEqual(page2["page_seq"],2)
+        self.store.bind_history(page2["job_id"],"req-history-2",
+            build_request_spec("B","nail_001",after="history_second_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["601","602"],next_cursor=None,
+             terminal_basis="verified_terminal",source_evidence_id="safe-r2",
+             raw_receipt_id="raw-r2",source_digest="b"*64)
+        result=self.store.commit_history_page(page2["job_id"],"req-history-2",**args)
+        self.assertFalse(result["history_cursor_present"])
+        self.assertEqual(self.store.commit_history_page(
+            page2["job_id"],"req-history-2",**args)["status"],"already_committed")
+        cp=self.store.history_checkpoint(history,"KR_001")
+        self.assertEqual(cp["page_seq"],2)
+        self.assertEqual(cp["status"],"terminal")
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(history,"KR_001","C",at=NOW)
+        self.assertEqual(self.db.execute("SELECT status FROM coverage_ledger "
+             "WHERE epoch_id=? AND account_key='KR_001'",(history,)).fetchone()[0],
+             "partial")
+        self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(),[])
+
+    def test_new_daily_day_preempts_history_but_prior_bound_response_can_finish(self):
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","C",at=NOW)
+        self.store.bind_history(page["job_id"],"req-midnight-history",
+            build_request_spec("C","nail_001",after="history_first_cursor"),at=NOW)
+        tomorrow=self.store.seed_daily(DAY+timedelta(days=1),self.digest,
+            anchor_utc=NOW+timedelta(days=1))
+        self.assertEqual(self.store.summary(tomorrow)["jobs"],882)
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(history,"KR_001","A",
+                at=NOW+timedelta(days=1))
+        self.assertEqual(self.store.commit_history_page(
+            page["job_id"],"req-midnight-history",
+            observed_at=NOW+timedelta(days=1),
+            ordered_ids=["701","702","703","704"],
+            next_cursor="persisted_after_midnight",terminal_basis="continued",
+            source_evidence_id="safe-midnight",raw_receipt_id="raw-midnight",
+            source_digest="c"*64)["status"],"committed")
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001")["cursor"],
+                         "persisted_after_midnight")
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(history,"KR_001","A",
+                at=NOW+timedelta(days=1))
+        self.assertEqual(self.store.summary(tomorrow)["jobs"],882)
+
+    def test_history_cursor_conflict_does_not_advance_checkpoint(self):
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        with self.assertRaises(EpochError):
+            self.store.bind_history(page["job_id"],"req-wronghistory",
+               build_request_spec("A","nail_001",after="guessed_cursor"),at=NOW)
+        self.store.bind_history(page["job_id"],"req-validhistory",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        with self.assertRaises(EpochError):
+            self.store.commit_history_page(page["job_id"],"req-validhistory",
+                observed_at=NOW,ordered_ids=["800","801","802","803"],
+                next_cursor="history_first_cursor",terminal_basis="continued",
+                source_evidence_id="safe-loop",raw_receipt_id="raw-loop",
+                source_digest="d"*64)
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001")["page_seq"],0)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM page_evidence_v2 "
+            "WHERE job_id=?",(page["job_id"],)).fetchone()[0],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
