@@ -115,6 +115,13 @@ class ThreeApiContractExecutor:
 
     def execute(self, request):
         """Persist intent, make one transport attempt, commit capture then RAW."""
+        # History's explicit offline-only envelope is ONLY for ingesting an
+        # already-supplied synthetic response through a no-sender adapter.
+        # Do not even persist an HTTP intent here.
+        if getattr(request, "phase", None) == "history":
+            raise ContractExecutionError(
+                "History transport remains disabled; use offline fixture ingress"
+            )
         existing_capture = self.capture.get_capture_for_request(request.request_id)
         if existing_capture is not None:
             if existing_capture.request.request_spec_digest != request.request_spec_digest:
