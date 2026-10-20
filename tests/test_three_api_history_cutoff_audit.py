@@ -210,5 +210,18 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertEqual((self.fixture.db.total_changes,self.mirror.db.total_changes),before)
 
 
+    def test_cursor_self_loop_tampering_fails_closed(self):
+        page=self.append(self.history,"cursor-tamper",
+            self.posts([6201,6202],[360,366]),
+            next_cursor=None,terminal="verified_terminal")
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        self.fixture.db.execute(
+            "UPDATE page_evidence_v2 SET cursor_out=cursor_in WHERE job_id=?",
+            (page["job_id"],))
+        result=self.audit()
+        self.assertFalse(result["synthetic_cutoff_verified"])
+        self.assertFalse(result["production_coverage_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
