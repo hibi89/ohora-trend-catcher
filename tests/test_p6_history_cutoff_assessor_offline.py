@@ -85,5 +85,25 @@ class CutoffAssessorTests(unittest.TestCase):
         self.assertEqual(result["reason"], "cursor_cycle")
 
 
+    def test_duplicate_receipt_cannot_certify_cutoff(self):
+        cutoff = self.anchor - timedelta(days=365)
+        pages = [
+            dict(cursor_in="root", cursor_out="a", receipt="same",
+                 receipt_verified=True, timestamps_verified=True,
+                 published_at=[self.anchor - timedelta(days=1)]),
+            dict(cursor_in="a", cursor_out="b", receipt="same",
+                 receipt_verified=True, timestamps_verified=True,
+                 published_at=[cutoff - timedelta(seconds=1)]),
+        ]
+        self.assertEqual(assess_cutoff_evidence(
+            anchor=self.anchor, cutoff=cutoff, pages=pages,
+            rooted=True)["reason"], "duplicate_receipt")
+
+    def test_invalid_future_publication_fails_closed(self):
+        self.assertEqual(self.check(
+            365, -1, published_at=[self.anchor + timedelta(seconds=1)]
+        )["reason"], "future_publication")
+
+
 if __name__ == "__main__":
     unittest.main()
