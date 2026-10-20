@@ -433,16 +433,24 @@ class OfflineDailyOrchestrator:
             if stage_only:
                 return {"status":"front_stage_only_unsupported"}
             return self._front_step(lane,now)
-        if any(phases.get(phase,0) for phase in ("catchup","reanchor","needs_review")):
-            if phases.get("catchup",0):
-                out=self.catchup.run_one(lane,self.day,now=now,stage_only=stage_only)
-                return {"status":out["status"],"phase":"catchup",
-                        "gap_status":out.get("gap_status")}
-            return {"status":"manual_gap_review_required"}
-        # History is only an eligibility decision. This scheduler never
-        # quietly sends history requests, even if spare API budget exists.
+        # Eligibility is a read-only decision, not a history dispatch. Review
+        # exceptions are account-scoped: preserve their count while making
+        # unrelated eligible history accounts visible to the operator.
         history_count=sum(count for phase,count in phases.items()
                           if phase.startswith("history"))
+        review_count=sum(phases.get(phase,0) for phase in
+                         ("reanchor","needs_review"))
+        if phases.get("catchup",0):
+            out=self.catchup.run_one(lane,self.day,now=now,stage_only=stage_only)
+            return {"status":out["status"],"phase":"catchup",
+                    "gap_status":out.get("gap_status")}
+        if review_count:
+            return {"status":"manual_gap_review_required",
+                    "review_accounts":review_count,
+                    "history_eligible_accounts":history_count,
+                    "history_dispatch_enabled":False}
+        # History is only an eligibility decision. This scheduler never
+        # quietly sends history requests, even if spare API budget exists.
         if history_count:
             return {"status":"history_held_for_review",
                     "eligible_accounts":history_count}
