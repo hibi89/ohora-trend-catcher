@@ -154,9 +154,9 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
         for post in posts:
             state = carousel_completeness[post["id"]]
             if post.get("media_type") == "CAROUSEL_ALBUM":
-                if state not in ("complete", "unknown"):
+                if state not in ("complete", "partial", "unknown"):
                     raise RawWriteError("Invalid carousel completeness state")
-                if state == "complete" and not isinstance(post.get("children"), list):
+                if state in ("complete", "partial") and not isinstance(post.get("children"), list):
                     raise RawWriteError("Complete carousel requires child rows")
                 if state == "unknown" and post.get("children") is not None:
                     raise RawWriteError("Unknown carousel cannot claim child rows")
