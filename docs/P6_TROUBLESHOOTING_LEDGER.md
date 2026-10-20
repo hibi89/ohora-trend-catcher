@@ -31,6 +31,7 @@
 | P6-017 | 동시 기록 충돌 | 두 작업자가 같은 P6-016 사건 번호로 각각 기록 | 사실 통합 + 중복 감지 검사·번호 할당 규칙 |
 | P6-018 | 직렬 성능 | 85% 차단 레인을 건너뛸 때마다 294계정 복구·상태 검사 반복 | 1회 재조정 후 최대 1개 합성 페이지 실행 |
 | P6-019 | 직렬 안전성 | 여러 프로세스가 각자 step_serial을 실행할 수 있음 | synthetic 단계에 OS 프로세스 공통 잠금 추가 |
+| P6-020 | 계약 직렬 경계 | OS 잠금만으로는 계약 기반 요청 예약과 오프라인 전송을 한 구역으로 묶지 못함 | fixture-only bridge·잠금·예약 검증 분리 |
 
 ## 사건별 상세
 
@@ -189,6 +190,15 @@
 > **P6-019 추가 회귀 (2026-10-21):** 동일한 control DB 경로를 `nested/../source.sqlite`처럼 별칭으로 표현해도 잠금을 우회하지 못하는지, lock 파일이 디스크에 남아도 다음 실행이 정상 재획득하는지 검사 2건을 `tests/test_three_api_serial_lock.py`에 추가(`67e5aa3`). 코드로 확인한 경로 정규화 `Path.resolve()` 동작을 대상으로 하며, **새 SHA CI 검증 전**이다. 잠금 파일을 지우는 stale-file 복구는 의도적으로 수행하지 않는다.
 
 > **P6-019 CI 회귀 연결 (2026-10-21):** 이전 `p6-runtime-integration-offline.yml`의 push/PR path 필터가 새 `three_api_serial_lock.py` 및 두 serial 회귀 테스트 파일을 누락했다. 이 때문에 해당 파일만 수정할 때 Runtime CI가 시작되지 않을 수 있었다. 두 path 필터에 3개 파일 추가(`c982a47`), Linux `py_compile`에 lock/serial tests 추가(`6300ee0`), 새 두 모듈을 Windows `orchestrator` shard로 명시 배정(`d81b09e`). **workflow 변경 자체가 테스트 PASS를 의미하지 않는다.** 소켓 차단 전체 `tests/run_offline.py`는 이미 discovery로 새 테스트를 찾으며, SHA별 Actions 최종 결과는 별도 확인할 것. 이전 도구 안전 검사 차단은 변경 내용을 축소·재검토한 뒤 이 단계에서 해결됐다.
+
+### P6-020 — 오프라인 직렬 계약 경계와 실제 HTTP 송신 분리 (2026-10-21)
+
+- **발견/위험:** 기존 `step_serial()`은 synthetic page 수집 전용이고, `ThreeApiContractExecutor`·`JobRequestBindingStore`의 계약 기반 요청 예약과 공통 OS lock 경계가 연결되지 않았다. 서로 다른 진입점의 직렬성을 혼동하면 Meta 송신 중복을 허용할 수 있다. 실제 운영 중복 송신을 관측한 것은 아님.
+- **설계 선택:** `raw_v2/three_api_serial_contract_bridge.py` (`fabdb8a`)에 격리 control DB lock을 획득한 상태에서 **기존 영속 request binding → contract executor** 순서로 단일 합성 요청을 넘기는 `OfflineSerialContractBridge` 추가. 임의의 `offline_fixture_only=True` 마커만으로 우회할 위험을 줄이기 위해 **정확한 `OfflineFixtureTransport` 타입만** 허용하도록 강화(`9a3e004`). 외부 네트워크 sender/토큰/스케줄러 생성 기능 없음.
+- **거부 정책:** 시간대 없는 `now`, A/B/C 레인 불일치, history 전송, 다른 coordinator의 binding, 이미 다른 프로세스가 lock을 보유한 경우 실행 금지. lock 경합 시 `serial_busy` 반환. 불명확한 HTTP 결과 자동 재송신 없음.
+- **회귀:** `tests/test_three_api_serial_contract_bridge.py` (`4400798`, `bced22b`)에 합성 단일 요청, 잠금 경합, 비fixture 전송 거부, `fetch` 속임수 거부, 레인/History 거부, 시간대·coordinator 검증 7건. Runtime CI path·Linux compile(`067519e`)과 Windows orchestrator shard(`075673a`) 연결. **새 SHA의 CI 최종 통과 여부는 확인 전까지 미확정.**
+- **미해결:** 이 경로는 mock binding과 in-memory fixture 기반의 오프라인 안전 어댑터일 뿐, 실제 `JobRequestBindingStore`→`CaptureJournal`→`ContractRawWriter`의 통합 end-to-end 검증 및 실제 Meta `GraphHTTPClient` 직렬 연결이 아니다. quota 사용량 독립성, 장애 후 복구, 294계정 전수 검증은 별도. 운영 DB·main·동결 원문 불변.
+- **예방/롤백:** 실제 live entrypoint 승인 전에 OS lock 경계·영속 예약·RAW receipt·HTTP 불확실 결과 차단을 통합 테스트하고, 실 Meta 호출/운영 DB 변경은 별도 승인. 문제 시 관련 feature commit만 revert하고 기존 RAW/커서는 보존.
 
 ## 새 사건을 추가할 때의 고정 서식
 
