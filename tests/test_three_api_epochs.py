@@ -383,6 +383,20 @@ class P3EpochTests(unittest.TestCase):
             "SELECT status FROM coverage_ledger WHERE epoch_id=? AND account_key='US_101'",
             (self.daily,)).fetchone()[0],"needs_review")
 
+    def test_own_manual_review_blocks_history_without_erasing_checkpoint(self):
+        """An account's unresolved review still forbids new history binding."""
+        history=self.open_history_fixture()
+        original=self.store.history_checkpoint(history,"KR_001")
+        self.db.execute("""INSERT INTO coverage_ledger(
+            epoch_id,account_key,verified_oldest,terminal_basis,status)
+            VALUES(?, 'KR_001', NULL, NULL, 'needs_review')""",(self.daily,))
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001"),original)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=?",
+            (history,)).fetchone()[0],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
