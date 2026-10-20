@@ -1,4 +1,5 @@
 """No-network, no-RAW contract dispatch gate regression."""
+from dataclasses import replace
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import sqlite3
@@ -9,7 +10,9 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 
-from three_api_contract_executor import ThreeApiContractExecutor
+from three_api_contract_executor import (
+    ThreeApiContractExecutor, ContractExecutionError,
+)
 from three_api_serial_contract_bridge import (
     OfflineSerialContractBridge, OfflineFixtureTransport, SerialContractBridgeError,
 )
@@ -230,4 +233,57 @@ class RealFixtureCaptureBridgeTests(TestCase):
         self.assertEqual(self.edge_count(), 1)
         self.assertEqual(self.transport.calls, 1)
         self.assertEqual(no_send.calls, 0)
+
+    def test_invalid_response_keeps_safe_evidence_and_never_resends(self):
+        self.transport.response = make_response(
+            self.request, account_id="17840000000000999")
+        with self.assertRaises(ContractExecutionError):
+            self.dispatch()
+        self.assertIsNotNone(
+            self.capture.get_response_evidence(self.request.request_id))
+        self.assertEqual(self.transport.calls, 1)
+        self.assertEqual(self.raw_count(), 0)
+        self.assertEqual(self.edge_count(), 0)
+        with self.assertRaises(JobBindingError):
+            self.dispatch()
+        self.assertEqual(self.transport.calls, 1)
+
+    def test_raw_ack_interruption_recovers_without_another_fixture_send(self):
+        with mock.patch.object(
+                self.capture, "confirm_processed",
+                side_effect=OSError("synthetic ack interruption")):
+            with self.assertRaises(OSError):
+                self.dispatch()
+        self.assertEqual(self.raw_count(), 1)
+        self.assertEqual(self.edge_count(), 0)
+        self.assertEqual(self.transport.calls, 1)
+        self.assertTrue(self.commit()["terminal"])
+        self.assertEqual(self.raw_count(), 1)
+        self.assertEqual(self.edge_count(), 1)
+        self.assertEqual(self.transport.calls, 1)
+
+    def test_capture_cursor_unlocks_real_second_page_job(self):
+        base = make_response(self.request)
+        payload = dict(base.payload)
+        business = dict(payload["business_discovery"])
+        media = dict(business["media"])
+        media["paging"] = {
+            "next": "https://graph.facebook.com/next",
+            "cursors": {"after": "fixture-cursor-2"},
+        }
+        business["media"] = media
+        payload["business_discovery"] = business
+        self.transport.response = replace(
+            base, payload=payload, next_cursor="fixture-cursor-2")
+        self.dispatch()
+        edge = self.commit()
+        self.assertFalse(edge["terminal"])
+        self.assertEqual(edge["next_cursor"], "fixture-cursor-2")
+        self.assertEqual(
+            self.evidence.required_cursor(1, 2), "fixture-cursor-2")
+        next_job = self.coordinator.lease("C", now=OBSERVED_AT)
+        self.assertEqual(
+            (next_job["account_ordinal"], next_job["page"], next_job["lane"]),
+            (1, 2, "C"))
+        self.assertEqual(self.transport.calls, 1)
 
