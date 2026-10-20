@@ -176,7 +176,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [orchestrator, orchestrator-2, orchestrator-3, orchestrator-4, roster, report, observations, projection, remaining]
+        group: [orchestrator, orchestrator-2, orchestrator-3, orchestrator-4, roster, roster-2, roster-3, report, observations, projection, remaining]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
