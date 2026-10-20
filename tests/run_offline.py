@@ -79,6 +79,11 @@ if __name__ == '__main__':
     if not observation_cases or any(group_for_case(case)!="observations"
                                     for case in observation_cases):
         raise RuntimeError("Observation regression shard assignment is missing")
+    case_ids=[case.id() for case in all_cases]
+    if len(case_ids)!=len(set(case_ids)):
+        raise RuntimeError("Duplicate test identities in offline discovery")
+    if sum(shard_counts.values())!=len(set(case_ids)):
+        raise RuntimeError("Offline shard partition does not cover unique tests")
     if args.list_groups:
         for name in GROUP_NAMES:
             print(f"{name}: {shard_counts[name]} tests", flush=True)
