@@ -287,6 +287,46 @@ class P2ObservationTests(unittest.TestCase):
             ("query_observations","post_checks","post_states","account_checks",
              "change_events","three_api_contract_receipts")),counts)
 
+    def test_identity_provenance_never_falsifies_legacy_first_seen(self):
+        self.db.execute("""INSERT INTO posts(post_id,account_key,caption)
+                           VALUES('888888','KR_001','Existing legacy post')""")
+        self.apply(1,post_id="888888")
+        self.apply(2,day=1,post_id="1234567890")
+        rows=dict(self.db.execute(
+            "SELECT post_id,origin FROM post_identity").fetchall())
+        self.assertEqual(rows["888888"],"legacy_row_reobserved")
+        self.assertEqual(rows["1234567890"],"p2_new_post")
+        self.assertEqual(self.count("post_identity"),2)
+        self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(),[])
+
+    def test_raw_projection_failure_rolls_back_all_p2_and_legacy_rows(self):
+        request=replace(self.base,request_id="req-p2-99")
+        transport=FakeTransport(make_response(request))
+        executor=ThreeApiContractExecutor(transport,self.journal,self.writer)
+        # Fail AFTER legacy posts/request_log but BEFORE P2 check completion.
+        # Use a trigger that is created with the observation table schema.
+        from three_api_observation_versions import ensure_observation_schema
+        self.db.execute("BEGIN IMMEDIATE")
+        ensure_observation_schema(self.db)
+        self.db.execute("COMMIT")
+        self.db.execute("""CREATE TRIGGER offline_fail_p2 BEFORE INSERT
+            ON post_checks BEGIN SELECT RAISE(ABORT,'synthetic p2 write failure'); END""")
+        with self.assertRaises(sqlite3.IntegrityError):
+            executor.execute(request)
+        for table in ("posts","post_observations","post_checks",
+                      "account_checks","query_observations","three_api_raw_receipts"):
+            self.assertEqual(self.count(table),0,table)
+        self.assertIsNotNone(self.journal.get_capture_for_request(request.request_id))
+        self.assertEqual(transport.calls,1)
+        self.db.execute("DROP TRIGGER offline_fail_p2")
+        no_http=FakeTransport(error=AssertionError("no second API call"))
+        restored=ThreeApiContractExecutor(no_http,self.journal,self.writer)
+        self.assertEqual(restored.execute(request).status,"committed")
+        self.assertEqual(no_http.calls,0)
+        self.assertEqual(self.count("post_checks"),1)
+        self.assertEqual(self.count("query_observations"),1)
+        self.assertEqual(self.db.execute("PRAGMA integrity_check").fetchone()[0],"ok")
+
     def test_preexisting_legacy_rows_remain_unmodified(self):
         self.db.execute("""INSERT INTO posts(post_id,account_key,caption)
                            VALUES('999','KR_001','legacy first-seen')""")
