@@ -48,6 +48,13 @@ def ensure_observation_schema(db):
           returned_count INTEGER NOT NULL CHECK(returned_count BETWEEN 0 AND 4),
           field_schema_version TEXT NOT NULL, quality_status TEXT NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS idx_query_account_time ON query_observations(account_key,checked_at,request_id)",
+        """CREATE TABLE IF NOT EXISTS post_identity(
+          post_id TEXT PRIMARY KEY REFERENCES posts(post_id),
+          account_key TEXT NOT NULL REFERENCES accounts(account_key),
+          first_observed_request_id TEXT NOT NULL REFERENCES query_observations(request_id),
+          first_observed_at TEXT NOT NULL,
+          origin TEXT NOT NULL CHECK(origin IN (
+             'p2_new_post','legacy_row_reobserved'))""",
         """CREATE TABLE IF NOT EXISTS post_states(
           state_id TEXT PRIMARY KEY, post_id TEXT NOT NULL REFERENCES posts(post_id),
           component TEXT NOT NULL, schema_version TEXT NOT NULL,
@@ -340,7 +347,7 @@ def _insert_and_compare(db, kind, entity, check_id):
     return changed
 
 
-def project_contract_observation(db: sqlite3.Connection, record):
+def project_contract_observation(db: sqlite3.Connection, record, *, new_post_ids=frozenset()):
     """Atomically add one successful query, all entity checks and revisions.
 
     Must be invoked inside write_capture's BEGIN IMMEDIATE transaction after
@@ -384,6 +391,14 @@ def project_contract_observation(db: sqlite3.Connection, record):
         owner = db.execute("SELECT account_key FROM posts WHERE post_id=?", (pid,)).fetchone()
         if owner is None or owner[0] != account:
             raise ValueError("Post identity cross-account conflict")
+        db.execute("""INSERT OR IGNORE INTO post_identity(
+            post_id,account_key,first_observed_request_id,first_observed_at,origin)
+            VALUES(?,?,?,?,?)""", (pid, account, rid, checked_at,
+               "p2_new_post" if pid in new_post_ids else "legacy_row_reobserved"))
+        existing_identity = db.execute(
+            "SELECT account_key FROM post_identity WHERE post_id=?", (pid,)).fetchone()
+        if existing_identity is None or existing_identity[0] != account:
+            raise ValueError("Post identity ledger conflict")
         ids = {}
         components = _post_components(record, post)
         for component, (values, states) in components.items():
