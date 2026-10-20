@@ -90,7 +90,7 @@ class OfflineEpochContractProjector:
             actual_at = record.observed_at.isoformat(timespec="microseconds").replace(
                 "+00:00", "Z"
             )
-            if (source["observed_at"] != actual_at
+            if (source["received_at"] != actual_at
                     or record.cursor_state.source_digest !=
                     digest_sha256(record.sanitized_response)
                     or record.cursor_state.current_cursor != cursor
