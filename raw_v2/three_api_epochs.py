@@ -532,6 +532,31 @@ class ThreeApiEpochStore:
                     latest[5]=="verified_terminal" and
                     (latest[0] is not None or len(latest_ids)>=4)):
                 raise EpochError("Daily replay latest terminal proof invalid")
+            latest_binding=self.db.execute("""SELECT e.request_id,e.cursor_in,
+                e.cursor_out,e.ordered_ids_json,e.source_evidence_id,
+                e.raw_receipt_id,e.source_digest,e.chain_hash,
+                b.requested_cursor,j.job_id,j.predecessor_job_id,j.page_seq
+                FROM page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
+                LEFT JOIN request_bindings_v2 b ON b.job_id=j.job_id
+                WHERE j.epoch_id=? AND j.account_key=? AND j.phase='daily_front'
+                  AND j.state='done' ORDER BY j.page_seq DESC LIMIT 1""",
+                (job["epoch_id"],job["account_key"])).fetchone()
+            if (latest_binding is None or latest_binding[1]!=latest_binding[8]
+                    or latest_binding[0] is None):
+                raise EpochError("Daily replay latest request binding differs")
+            if latest_binding[11]>1:
+                parent=self.db.execute("""SELECT e.chain_hash FROM page_evidence_v2 e
+                    WHERE e.job_id=?""",(latest_binding[10],)).fetchone()
+                if parent is None:
+                    raise EpochError("Daily replay latest parent chain missing")
+                parent_hash=parent[0]
+            else:
+                parent_hash="genesis"
+            expected_latest_chain=_hash(parent_hash,latest_binding[9],
+                latest_binding[0],latest_binding[1],latest_binding[2],
+                latest_ids,latest_binding[4],latest_binding[5],latest_binding[6])
+            if latest_binding[7]!=expected_latest_chain:
+                raise EpochError("Daily replay latest chain digest differs")
             last_seq=self.db.execute("""SELECT MAX(page_seq) FROM jobs_v2
                 WHERE epoch_id=? AND account_key=? AND phase='daily_front'
                   AND state='done'""",(job["epoch_id"],job["account_key"])).fetchone()[0]
