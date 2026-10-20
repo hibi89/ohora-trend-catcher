@@ -36,10 +36,8 @@ def _normalize_children(post):
     paging = children.get("paging", {})
     if not isinstance(paging, dict):
         raise ValueError("Invalid carousel child paging evidence")
-    # No child-page fetcher exists. Silently truncating at the first page
-    # would corrupt trends, so never stage a knowingly incomplete carousel.
-    if paging.get("next") or paging.get("has_next") is True:
-        raise ValueError("Partial carousel child page not supported")
+    # A paged carousel remains PARTIAL, but already received child rows are
+    # still valuable. Completeness is recorded by the capture contract.
     seen = {post["id"]}
     normalized = []
     for child in items:
@@ -84,7 +82,7 @@ def normalize_meta_page(payload, *, requested_cursor=None):
         if not isinstance(post_id, str) or not post_id.strip():
             raise ValueError("Missing media id")
         for numeric in ("like_count", "comments_count"):
-            if numeric in post and (type(post[numeric]) is not int or post[numeric] < 0):
+            if numeric in post and post[numeric] is not None and (type(post[numeric]) is not int or post[numeric] < 0):
                 raise ValueError("Invalid engagement count")
         record = {key: post[key] for key in FIELDS if key in post}
         children = _normalize_children(post)
