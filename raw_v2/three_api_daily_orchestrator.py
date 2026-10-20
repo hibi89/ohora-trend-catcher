@@ -433,17 +433,17 @@ class OfflineDailyOrchestrator:
             if stage_only:
                 return {"status":"front_stage_only_unsupported"}
             return self._front_step(lane,now)
-        acts=self.ledger.next_actions([a["key"] for a in self.accounts],self.day)
-        if any(a["phase"] in ("catchup","reanchor","needs_review")
-               for a in acts):
-            if any(a["phase"]=="catchup" for a in acts):
+        if any(phases.get(phase,0) for phase in ("catchup","reanchor","needs_review")):
+            if phases.get("catchup",0):
                 out=self.catchup.run_one(lane,self.day,now=now,stage_only=stage_only)
                 return {"status":out["status"],"phase":"catchup",
                         "gap_status":out.get("gap_status")}
             return {"status":"manual_gap_review_required"}
         # History is only an eligibility decision. This scheduler never
         # quietly sends history requests, even if spare API budget exists.
-        if any(a["phase"].startswith("history") for a in acts):
+        history_count=sum(count for phase,count in phases.items()
+                          if phase.startswith("history"))
+        if history_count:
             return {"status":"history_held_for_review",
-                    "eligible_accounts":len(acts)}
+                    "eligible_accounts":history_count}
         return {"status":"no_eligible_work"}
