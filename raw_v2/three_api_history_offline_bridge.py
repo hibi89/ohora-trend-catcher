@@ -58,6 +58,27 @@ class OfflineHistoryRawBridge:
         return "synthetic-history:" + job_id
 
     @staticmethod
+    def _mirror_posts(normalized):
+        """Reconstruct the RAW mirror's input-only child ID contract.
+
+        Staged immutable source stores canonical children with media_id and
+        item_order. Mirror input expects id and derives item_order from the
+        list position. A round trip must reconstruct exactly the same source.
+        """
+        converted = []
+        for post in normalized:
+            item = {key: value for key, value in post.items()
+                    if key != "children"}
+            item["children"] = [
+                {"id": child["media_id"],
+                 **{key: value for key, value in child.items()
+                    if key not in ("media_id", "item_order")}}
+                for child in post.get("children", [])
+            ]
+            converted.append(item)
+        return converted
+
+    @staticmethod
     def _digest(job_id, request_id, account_key, cursor_in, cursor_out,
                 observed_at, terminal_basis, posts_json):
         record = {
@@ -173,10 +194,11 @@ class OfflineHistoryRawBridge:
             if not isinstance(posts, list) or len(posts) > 4:
                 raise OfflineHistoryBridgeError("Invalid durable history page")
             # Canonical round trip rejects ambiguous, altered, or extra data.
-            if _canonical([_normalize_post(p) for p in posts]) != posts_json:
+            mirror_input = self._mirror_posts(posts)
+            if _canonical([_normalize_post(p) for p in mirror_input]) != posts_json:
                 raise OfflineHistoryBridgeError("Durable history payload mismatch")
             receipt_id = self._receipt(job_id)
-            self.mirror.stage_page(receipt_id, account_key, observed_at, posts)
+            self.mirror.stage_page(receipt_id, account_key, observed_at, mirror_input)
             self.mirror.promote_page(receipt_id)
             receipt = self.mirror.db.execute(
                 "SELECT account_key,observed_at,payload_json,payload_sha256,state "
