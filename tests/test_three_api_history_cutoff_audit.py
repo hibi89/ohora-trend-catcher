@@ -444,5 +444,25 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
             (self.history,)).fetchone()[0],"partial")
 
 
+    def test_tampered_staged_posts_reject_replay_before_raw_write(self):
+        checkpoint=self.fixture.store.history_checkpoint(self.history,"KR_001")
+        page=self.fixture.store.schedule_one_history_page(self.history,"KR_001","A",at=NOW)
+        request="req-tamper-staged-posts"
+        self.fixture.store.bind_history(
+            page["job_id"],request,
+            build_request_spec("A","nail_001",after=checkpoint["cursor"]),at=NOW)
+        self.bridge.stage_capture(page["job_id"],request,observed_at=NOW,
+            posts=self.posts([7501,7502],[360,366]),
+            next_cursor=None,terminal_basis="verified_terminal")
+        self.fixture.db.execute(
+            "UPDATE offline_history_capture SET posts_json='[]' WHERE job_id=?",
+            (page["job_id"],))
+        before=self.mirror.db.total_changes
+        with self.assertRaises(OfflineHistoryBridgeError):
+            self.bridge.reconcile_one(page["job_id"])
+        self.assertEqual(self.mirror.db.total_changes,before)
+        self.assertFalse(self.audit()["synthetic_cutoff_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
