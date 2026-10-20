@@ -1,5 +1,18 @@
 # P6 PR #6 병합 충돌 사전 감사 — 2026-10-20
 
+## 최종 해결 판정 (2026-10-20, 이전 '미완료' 단락보다 우선)
+
+- 기존 p6 작업 브랜치의 HEAD `5e63b52`에서 **격리 해결 브랜치** `codex/p6-pr6-merge-resolution-20261020`를 생성했다. `main` HEAD `2e55b90`와 공통 조상 `bcdb84b` 기준 8개의 main 변경 경로를 확인했다.
+- `STATUS.md` 커밋 `3928b72`, `HANDOFF.md` 커밋 `7366c67`: p6에 이미 한 번 포함된 최상위 설계 동결 공지를 각 문서 **첫머리로 이동**했다. 공지 본문과 나머지 개발 기록은 삭제·변경하지 않았고, 공지 중복도 없다.
+- `AGENTS.md`, `README.md`, `.github/CODEOWNERS`, `DESIGN_FREEZE_NOTICE.md`, 원문 동결 설계서 등 main 변경 경로 5개는 p6와 blob 동일. Guard workflow는 p6가 main에 concurrency 설정만 더한 형태. 8개 경로 모두 누락 없이 보존됨을 확인했다.
+- 위 결과의 tree를 부모 `7366c67`(p6)과 `2e55b90`(main)로 연결하는 **격리 병합 해결 커밋 `8455cc7`** 생성. 격리 브랜치의 Frozen Guard run `39408356003` SUCCESS.
+- 최신 p6 원래 브랜치를 **non-force fast-forward**로 `8455cc7`에 맞춤. GitHub PR #6 `mergeable=false/dirty` → **`mergeable=true`** 확인; `main` 대비 p6 `behind=0`. 분기 간 실제 콘텐츠 변경은 문서 2개(`STATUS.md`, `HANDOFF.md`)의 공지 위치 이동뿐임을 `compare`로 확인.
+- `main` HEAD `2e55b90a60892fb721295b1faa5207c84b48586b` **그대로**; PR은 여전히 OPEN/DRAFT/미병합. Meta 실호출·운영 DB·동결 설계·수집 코드 변경 없음.
+- 최신 HEAD 검증: Frozen Guard run `39408506323` SUCCESS, P6 C Contract `39408506294` SUCCESS, Three API `39408506203` SUCCESS; Runtime Integration run `39408506265`는 결과 확인 전에는 통과 판정하지 않음. 이전 Runtime run `39403014275` 5/5 SUCCESS와 구분.
+
+**이하 기존 사전 감사·충돌 후보 단락은 해결 전 시점의 기록이다. 실제 현재 병합 충돌 상태는 위 '최종 해결 판정'을 따른다.**
+
+
 **범위:** 승인된 오프라인 P1~P5 개발 브랜치 `codex/p6-readiness-hardening-20261019`와 `main` 비교. 이 문서는 충돌 원인 분석 및 해결 순서만 기록한다. **main 병합·동결 설계 수정·실 Meta 호출·운영 DB 변경 승인 아님.**
 
 ## 8개 독립 점검 결과
