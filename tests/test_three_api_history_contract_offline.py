@@ -61,8 +61,10 @@ class OfflineHistoryP1P2Tests(unittest.TestCase):
     def tearDown(self):
         self.capture.close()
         self.raw_db.close()
-        self.tmp.cleanup()
+        # A restart test rebinds the P3 handle to a file under self.tmp.
+        # Windows cannot remove that SQLite file until the handle is closed.
         self.fx.tearDown()
+        self.tmp.cleanup()
 
     def make_request(self,job,request_id,irrelevant_tag):
         checkpoint=self.fx.store.history_checkpoint(self.history,"KR_001")
