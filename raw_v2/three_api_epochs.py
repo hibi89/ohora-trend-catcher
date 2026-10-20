@@ -715,6 +715,26 @@ class ThreeApiEpochStore:
                       terminal_basis,source_evidence_id,raw_receipt_id,source_digest)
             if tuple(existing)!=expected:
                 raise EpochError("Conflicting immutable history page replay")
+            # Idempotent replay must not hide a lost/tampered checkpoint after
+            # a process restart. The page may be older than the current
+            # checkpoint, so verify the latest committed page for this account
+            # rather than incorrectly requiring cp.page_seq == job.page_seq.
+            cp=self.history_checkpoint(job["epoch_id"],job["account_key"])
+            if job["state"]!="done" or cp is None or cp["page_seq"]<job["page_seq"]:
+                raise EpochError("History replay checkpoint is incomplete")
+            latest=self.db.execute("""SELECT e.cursor_out,e.raw_receipt_id,
+                e.chain_hash,e.observed_at,e.terminal_basis FROM page_evidence_v2 e
+                JOIN jobs_v2 j ON j.job_id=e.job_id
+                WHERE j.epoch_id=? AND j.account_key=? AND j.phase='history'
+                  AND j.page_seq=? AND j.state='done'""",
+                (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchone()
+            if (latest is None or cp["cursor"]!=latest[0]
+                    or cp["last_receipt"]!=latest[1]
+                    or cp["chain_hash"]!=latest[2]
+                    or cp["updated_at"]!=latest[3]
+                    or cp["status"]!=("terminal" if
+                        latest[4]=="verified_terminal" else "open")):
+                raise EpochError("History replay checkpoint differs from evidence")
             return {"status":"already_committed","job_id":job_id}
         cp=self.history_checkpoint(job["epoch_id"],job["account_key"])
         if cp is None:
