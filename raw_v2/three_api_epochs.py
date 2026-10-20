@@ -850,7 +850,8 @@ class ThreeApiEpochStore:
             if cp["anchor_post_id"]!=expected_anchor:
                 raise EpochError("History replay anchor differs from evidence")
             if (latest is not None and
-                    ((latest[4]=="continued" and latest[0] is None) or
+                    (latest[4] not in ("continued","verified_terminal") or
+                     (latest[4]=="continued" and latest[0] is None) or
                      (latest[4]=="verified_terminal" and
                       (latest[0] is not None or len(anchored_ids)>=4)))):
                 raise EpochError("History replay latest terminal proof invalid")
