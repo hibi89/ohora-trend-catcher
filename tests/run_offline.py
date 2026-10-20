@@ -61,6 +61,12 @@ if __name__ == '__main__':
         faulthandler.dump_traceback_later(watchdog_seconds, repeat=True)
     suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern='test_*.py')
     total = suite.countTestCases()
+    # Fail closed if a discovered test is not assigned to exactly one CI shard.
+    all_cases = list(iter_cases(suite))
+    shard_counts = {name: sum(group_for_case(case) == name for case in all_cases)
+                    for name in GROUP_NAMES}
+    if sum(shard_counts.values()) != total or any(count == 0 for count in shard_counts.values()):
+        raise RuntimeError(f"Invalid offline shard partition: {shard_counts}, total={total}")
     suite = select_group(suite, args.group)
     print(f"Offline suite: group={args.group or 'all'} selected={suite.countTestCases()} discovered={total}",
           flush=True)
