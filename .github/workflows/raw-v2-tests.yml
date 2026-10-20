@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'raw_v2/**'
+      - 'tests/test_three_api_p2_observations.py'
       - 'tests/test_raw_v2.py'
       - 'tests/test_daily_scheduler.py'
       - 'tests/test_raw_integrity.py'
