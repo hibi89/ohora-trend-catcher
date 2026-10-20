@@ -126,13 +126,14 @@ class DailyGapTests(unittest.TestCase):
     def test_front_barrier_preserves_roster_order_after_restart(self):
         """Pending fronts stay ordered and block older catch-up after restart."""
         self.l.seed_previous_head("KR_001", "100")
+        self.l.seed_previous_head("US_151", "200")
         for key in ("KR_001", "US_151", "JP_294"):
             self.l.begin_day(key, "2026-10-19")
         self.front()
         self.l.close()
         self.l = DailyGapLedger(self.path)
         self.l.record_page("US_151", "2026-10-19",
-                           phase="front", post_ids=["201"])
+                           phase="front", post_ids=["201", "200"])
         roster = ["JP_294", "KR_001", "US_151"]
         self.assertEqual(self.l.next_actions(roster, "2026-10-19"),
                          [{"account_key": "JP_294", "phase": "front"}])
