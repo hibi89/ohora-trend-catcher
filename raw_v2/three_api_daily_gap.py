@@ -95,6 +95,8 @@ class DailyGapLedger:
                 CHECK(status IN ('front_open','catchup_pending','verified',
                                  'needs_review','bootstrap_history')),
               PRIMARY KEY(account_key,day));
+            CREATE INDEX IF NOT EXISTS idx_daily_window_account_status_day
+              ON daily_window(account_key,status,day);
             CREATE TABLE IF NOT EXISTS page_proof (
               account_key TEXT NOT NULL, day TEXT NOT NULL,
               phase TEXT NOT NULL CHECK(phase IN ('front','catchup')),
