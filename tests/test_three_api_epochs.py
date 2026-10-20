@@ -1433,6 +1433,31 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_history_page(first["job_id"],"binding-first",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_history_replay_rejects_jointly_forged_latest_cursor(self):
+        history=self.open_history_fixture()
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"joint-first",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["901"],next_cursor="joint_real",
+            terminal_basis="continued",source_evidence_id="joint-first-source",
+            raw_receipt_id="joint-first-raw",source_digest="a"*64)
+        self.store.commit_history_page(first["job_id"],"joint-first",**args)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"joint-second",
+            build_request_spec("B","nail_001",after="joint_real"),at=NOW)
+        self.store.commit_history_page(second["job_id"],"joint-second",
+            observed_at=NOW,ordered_ids=["902"],next_cursor="joint_next",
+            terminal_basis="continued",source_evidence_id="joint-second-source",
+            raw_receipt_id="joint-second-raw",source_digest="b"*64)
+        self.db.execute("""UPDATE request_bindings_v2 SET requested_cursor='joint_fake'
+            WHERE job_id=?""",(second["job_id"],))
+        self.db.execute("""UPDATE page_evidence_v2 SET cursor_in='joint_fake'
+            WHERE job_id=?""",(second["job_id"],))
+        before=self.db.total_changes
+        with self.assertRaisesRegex(EpochError,"predecessor cursor differs"):
+            self.store.commit_history_page(first["job_id"],"joint-first",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
