@@ -911,8 +911,12 @@ class ThreeApiEpochStore:
                 raise EpochError("History replay chain binding differs")
             if latest_proof[1]>1:
                 parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
-                    FROM page_evidence_v2 e WHERE e.job_id=?""",
-                    (latest_proof[2],)).fetchone()
+                    FROM page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
+                    WHERE e.job_id=? AND j.epoch_id=? AND j.account_key=?
+                      AND j.phase='history' AND j.state='done'
+                      AND j.page_seq=?""",
+                    (latest_proof[2],job["epoch_id"],job["account_key"],
+                     latest_proof[1]-1)).fetchone()
                 if parent is None:
                     raise EpochError("History replay parent chain missing")
                 if latest_proof[4]!=parent[1]:
