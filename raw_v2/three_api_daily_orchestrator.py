@@ -278,7 +278,9 @@ class OfflineDailyOrchestrator:
             "mode": "SYNTHETIC_OFFLINE_READ_ONLY_AUDIT",
             "day": self.day, "source_pages": len(pages),
             **counters, "pages_requiring_attention": pending,
-            "storage_verified": pending == 0 and
+            # This certifies existing source pages only, never 294-account
+            # collection coverage; an empty source is not a successful audit.
+            "storage_verified": bool(pages) and pending == 0 and
                                 counters["orphan_front_receipts"] == 0,
             "history_dispatch_enabled": False,
             "unattended_execution_enabled": False,
