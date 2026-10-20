@@ -787,20 +787,9 @@ class ThreeApiEpochStore:
                     raise EpochError("History replay parent chain missing")
                 parent_hash=parent[0]
             else:
-                # History page one inherits the last verified daily receipt.
-                # Reconstruct the root using that immutable daily evidence.
-                seed=self.db.execute("""SELECT e.chain_hash FROM page_evidence_v2 e
-                    JOIN jobs_v2 j ON j.job_id=e.job_id
-                    JOIN collection_epochs d ON d.epoch_id=j.epoch_id
-                    JOIN collection_epochs h ON h.roster_digest=d.roster_digest
-                    WHERE h.epoch_id=? AND d.kind='daily'
-                      AND j.account_key=? AND j.state='done'
-                      AND e.cursor_out=?
-                    ORDER BY d.day_kst DESC,j.page_seq DESC LIMIT 1""",
-                    (job["epoch_id"],job["account_key"],latest_proof[4])).fetchone()
-                if seed is None:
-                    raise EpochError("History replay daily seed missing")
-                parent_hash=seed[0]
+                # A later daily front may share a cursor string; the original
+                # seed epoch is not persisted, so avoid false attribution.
+                parent_hash=None
             if parent_hash is not None:
                 expected_chain=_hash(parent_hash,latest_proof[0],latest_proof[3],
                     latest_proof[4],latest_proof[5],anchored_ids,
