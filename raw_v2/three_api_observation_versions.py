@@ -216,18 +216,37 @@ def _write_state(db, kind, entity, component, values, states, observed_at):
     return sid
 
 
-def _checks(db, kind, entity):
+def _adjacent_checks(db, kind, entity, check_id):
+    """Seek predecessor/successor from the temporal index, never scan history.
+
+    A year of regular observations must not turn into O(N^2) full histories.
+    The exact ordering is (observed_at, request_id), with stable tie breaks.
+    """
     if kind == "post":
-        rows = db.execute("""SELECT check_id,request_id,observed_at,
-                    content_state_id,metrics_state_id,structure_state_id,locator_state_id
-              FROM post_checks WHERE post_id=?
-              ORDER BY observed_at,request_id""", (entity,)).fetchall()
+        table, id_col, state_cols = (
+            "post_checks", "post_id",
+            "content_state_id,metrics_state_id,structure_state_id,locator_state_id")
     else:
-        rows = db.execute("""SELECT check_id,request_id,observed_at,
-                    profile_state_id
-              FROM account_checks WHERE account_key=?
-              ORDER BY observed_at,request_id""", (entity,)).fetchall()
-    return rows
+        table, id_col, state_cols = "account_checks", "account_key", "profile_state_id"
+    columns = "check_id,request_id,observed_at," + state_cols
+    check = db.execute(
+        f"SELECT {columns} FROM {table} WHERE check_id=? AND {id_col}=?",
+        (check_id, entity)).fetchone()
+    if check is None:
+        raise ValueError("Observation check was not persisted")
+    before = db.execute(
+        f"""SELECT {columns} FROM {table}
+            WHERE {id_col}=? AND
+              (observed_at<? OR (observed_at=? AND request_id<?))
+            ORDER BY observed_at DESC,request_id DESC LIMIT 1""",
+        (entity, check[2], check[2], check[1])).fetchone()
+    after = db.execute(
+        f"""SELECT {columns} FROM {table}
+            WHERE {id_col}=? AND
+              (observed_at>? OR (observed_at=? AND request_id>?))
+            ORDER BY observed_at,request_id LIMIT 1""",
+        (entity, check[2], check[2], check[1])).fetchone()
+    return check, before, after
 
 
 def _field_map(db, kind, check):
@@ -313,15 +332,11 @@ def _rebuild_active_comparison(db, kind, entity, check, previous):
 
 
 def _insert_and_compare(db, kind, entity, check_id):
-    """Recompute just this check and its immediate successor for late arrivals."""
-    rows = _checks(db, kind, entity)
-    match = next((i for i, row in enumerate(rows) if row[0] == check_id), None)
-    if match is None:
-        raise ValueError("Observation check was not persisted")
-    changed = _rebuild_active_comparison(
-        db, kind, entity, rows[match], rows[match - 1] if match else None)
-    if match + 1 < len(rows):
-        _rebuild_active_comparison(db, kind, entity, rows[match + 1], rows[match])
+    """Recompute only this check and its successor after late arrivals."""
+    check, before, after = _adjacent_checks(db, kind, entity, check_id)
+    changed = _rebuild_active_comparison(db, kind, entity, check, before)
+    if after is not None:
+        _rebuild_active_comparison(db, kind, entity, after, check)
     return changed
 
 
