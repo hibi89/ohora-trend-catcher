@@ -900,7 +900,8 @@ class ThreeApiEpochStore:
                 (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchone()
             if (latest_proof is None or latest_proof[4]!=latest_proof[11]
                     or latest_proof[3] is None
-                    or latest_proof[3]!=latest_proof[12]):
+                    or latest_proof[3]!=latest_proof[12]
+                    or latest_proof[1]>1 and latest_proof[2] is None):
                 raise EpochError("History replay chain binding differs")
             if latest_proof[1]>1:
                 parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
