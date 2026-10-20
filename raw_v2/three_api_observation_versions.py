@@ -19,8 +19,8 @@ _SCHEMA_VERSION = "p6-observation-v1"
 _PARTS = ("content", "metrics", "structure", "locator")
 _POST_FIELDS = {
     "content": ("caption", "timestamp"),
-    "metrics": ("like_count", "comments_count"),
-    "structure": ("media_type", "children", "coverage"),
+    "metrics": ("like_count", "comments_count", "view_count"),
+    "structure": ("media_type", "media_product_type", "children", "coverage"),
     "locator": ("permalink", "media_url", "thumbnail_url", "child_locations"),
 }
 _ACCOUNT_FIELDS = ("id", "username", "followers_count", "media_count")
@@ -165,7 +165,10 @@ def _post_components(record, post):
     pid = post["id"]
     metric_overrides = dict(record.post_field_status[pid])
     content = _state(post, _POST_FIELDS["content"], tested_media)
-    metrics = _state(post, _POST_FIELDS["metrics"], tested_media,
+    # Preserve legacy P2 state hashes for captures that never requested views.
+    metric_fields = tuple(field for field in _POST_FIELDS["metrics"]
+                          if field != "view_count" or field in metric_overrides)
+    metrics = _state(post, metric_fields, tested_media,
                      overrides=metric_overrides)
 
     structure = dict(post)
@@ -178,8 +181,10 @@ def _post_components(record, post):
             for child in post["children"]]
     if spec.include_carousel_children or "children" in post:
         tested_structure.add("children")
-    struct_state = _state(structure, _POST_FIELDS["structure"],
-                          tested_structure)
+    structure_fields = tuple(field for field in _POST_FIELDS["structure"]
+                             if field != "media_product_type" or
+                             "media_product_type" in tested_media)
+    struct_state = _state(structure, structure_fields, tested_structure)
     locators = dict(post)
     if "children" in post:
         locators["child_locations"] = [
