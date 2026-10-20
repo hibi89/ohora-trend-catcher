@@ -204,6 +204,46 @@ class P1ResponseEvidenceTests(unittest.TestCase):
         evidence = self.journal.get_response_evidence(self.request.request_id)
         self.assertEqual(evidence["safe_body"]["business_discovery"]["followers_count"], 900)
 
+    def test_parser_repair_reprojects_persisted_response_without_network(self):
+        from three_api_runtime_contract import FailureEvidence, CONTRACT_VERSION
+        self.journal.save_intent(self.request)
+        original = make_response(self.request)
+        self.journal.save_response_evidence(original)
+        self.journal.save_failure(FailureEvidence(
+            CONTRACT_VERSION, self.request.request_id, self.request.run_id,
+            "invalid_response", "account", "failed", original.received_at,
+            "Synthetic parser version rejected response", None))
+        self.journal.close()
+        self.journal = CaptureJournal(str(Path(self.tmp.name) / "capture.sqlite"))
+        no_http = FakeTransport(error=AssertionError("No HTTP allowed"))
+        executor = ThreeApiContractExecutor(no_http, self.journal, ContractRawWriter(self.raw))
+        receipt = executor.reproject_saved_response(self.request)
+        self.assertEqual(receipt.status, "committed")
+        self.assertEqual(no_http.calls, 0)
+        self.assertEqual(self.raw.execute("SELECT COUNT(*) FROM posts").fetchone()[0], 1)
+        self.assertEqual(self.journal.get_intent_outcome(self.request.request_id), "captured")
+        repeat = executor.reproject_saved_response(self.request)
+        self.assertEqual(repeat.status, "already_committed")
+        self.assertEqual(no_http.calls, 0)
+        self.assertEqual(self.raw.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 1)
+
+    def test_unsafe_evidence_is_never_reprojected(self):
+        self.journal.save_intent(self.request)
+        response = make_response(self.request)
+        body = copy.deepcopy(response.payload)
+        body["business_discovery"]["client_secret"] = "SECRET_NEVER_STORED"
+        # A keyed secret is redacted, so safe fields still reproject; a
+        # credential-bearing value in a required field is unrecoverable.
+        body["business_discovery"]["media"]["data"][0]["caption"] = (
+            "access_token=NEVER_STORED")
+        self.journal.save_response_evidence(replace(response, payload=body))
+        executor = ThreeApiContractExecutor(
+            FakeTransport(error=AssertionError("must never send")),
+            self.journal, ContractRawWriter(self.raw))
+        with self.assertRaises(ContractExecutionError):
+            executor.reproject_saved_response(self.request)
+        self.assertEqual(self.raw.execute("SELECT COUNT(*) FROM posts").fetchone()[0], 0)
+
     def test_new_journal_after_restart_retains_observation_without_http(self):
         response = make_response(self.request, usage={})
         exe, transport = self.run_request(response)
