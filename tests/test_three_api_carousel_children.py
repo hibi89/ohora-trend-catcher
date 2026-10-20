@@ -52,14 +52,14 @@ class CarouselNormalizerTests(unittest.TestCase):
     def test_nested_children_paging_incomplete_keeps_received_children(self):
         p=parent()
         p["children"]["paging"]={"next":"https://graph.facebook.com/?access_token=LEAK"}
-        posts=normalize_meta_page({"data":[p]})["data"]
+        posts=normalize_meta_page({"data":[p]}, allow_partial_children=True)["data"]
         self.assertEqual([x["id"] for x in posts[0]["children"]], ["201","202"])
         self.assertNotIn("LEAK", str(posts))
 
     def test_nested_children_has_next_preserves_received_children(self):
         p=parent()
         p["children"]["paging"]={"has_next":True}
-        posts=normalize_meta_page({"data":[p]})["data"]
+        posts=normalize_meta_page({"data":[p]}, allow_partial_children=True)["data"]
         self.assertEqual(len(posts[0]["children"]),2)
 
     def test_20_children_allowed_21_blocked(self):
