@@ -59,12 +59,22 @@ def capture_record_from_response(request, response):
         account = {key: root[key] for key in ("id", "username", "followers_count", "media_count")
                    if key in root}
         posts = normalized["data"]
-        carousel = {
-            post["id"]: ("not_applicable" if post.get("media_type") != "CAROUSEL_ALBUM"
-                         else "complete" if isinstance(post.get("children"), list)
-                         else "unknown")
-            for post in posts
-        }
+        raw_media = root.get("media", root)
+        source_posts = raw_media.get("data", []) if isinstance(raw_media, Mapping) else []
+        raw_posts_by_id = {p.get("id"): p for p in source_posts if isinstance(p, Mapping)}
+        carousel = {}
+        for post in posts:
+            pid = post["id"]
+            if post.get("media_type") != "CAROUSEL_ALBUM":
+                carousel[pid] = "not_applicable"
+            elif not isinstance(post.get("children"), list):
+                carousel[pid] = "unknown"
+            else:
+                original = raw_posts_by_id.get(pid, {}).get("children", {})
+                paging = original.get("paging", {}) if isinstance(original, Mapping) else {}
+                carousel[pid] = ("partial" if isinstance(paging, Mapping) and
+                                 (paging.get("next") or paging.get("has_next"))
+                                 else "complete")
         sanitized = sanitize_meta_response(response.payload)
         source_digest = digest_sha256(sanitized)
         requested_post_fields = frozenset(
