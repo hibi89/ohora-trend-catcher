@@ -336,5 +336,29 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertFalse(self.audit()["production_coverage_verified"])
 
 
+    def test_reconcile_pending_second_pass_keeps_one_raw_receipt(self):
+        checkpoint=self.fixture.store.history_checkpoint(self.history,"KR_001")
+        page=self.fixture.store.schedule_one_history_page(self.history,"KR_001","A",at=NOW)
+        request="req-restart-repeat-pending"
+        self.fixture.store.bind_history(
+            page["job_id"],request,
+            build_request_spec("A","nail_001",after=checkpoint["cursor"]),at=NOW)
+        self.bridge.stage_capture(page["job_id"],request,observed_at=NOW,
+            posts=self.posts([7001,7002],[360,366]),
+            next_cursor=None,terminal_basis="verified_terminal")
+        self.bridge.reconcile_pending()
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        first=self.mirror.db.execute(
+            "SELECT COUNT(*) FROM raw_post_observations WHERE request_id=?",
+            ("history."+page["job_id"],)).fetchone()[0]
+        self.bridge.reconcile_pending()
+        second=self.mirror.db.execute(
+            "SELECT COUNT(*) FROM raw_post_observations WHERE request_id=?",
+            ("history."+page["job_id"],)).fetchone()[0]
+        self.assertEqual(first,2)
+        self.assertEqual(second,first)
+        self.assertFalse(self.audit()["production_coverage_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
