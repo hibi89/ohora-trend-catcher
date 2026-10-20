@@ -25,6 +25,7 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
     if not rooted or not pages:
         return {"verified": False, "reason": "missing_root"}
     prior = None
+    seen_cursors = set()
     oldest = None
     for index, page in enumerate(pages):
         if not isinstance(page, dict) or not page.get("receipt") or not isinstance(page.get("receipt"), str):
@@ -47,7 +48,7 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
         if any(t > anchor for t in normalized):
             return {"verified": False, "reason": "future_publication"}
         oldest = min([oldest, *normalized]) if oldest is not None else min(normalized)
-        if outgoing is not None and outgoing == incoming:\n            return {"verified": False, "reason": "cursor_cycle"}\n        prior = outgoing
+        if outgoing is not None and (outgoing == incoming or outgoing in seen_cursors):\n            return {"verified": False, "reason": "cursor_cycle"}\n        if incoming is not None:\n            seen_cursors.add(incoming)\n        prior = outgoing
     crossing = oldest <= cutoff
     terminal = prior is None and pages[-1].get("terminal_verified") is True
     return {"verified": bool(crossing or terminal), "reason": (
