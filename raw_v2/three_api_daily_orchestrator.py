@@ -286,7 +286,7 @@ class OfflineDailyOrchestrator:
             "unattended_execution_enabled": False,
         }
 
-    def operator_report(self, *, now):
+    def operator_report(self, *, now, include_storage_audit=False):
         """Read-only, bounded operational diagnosis of this synthetic snapshot.
 
         Never repairs or dispatches. Counts express *stored evidence*, not
@@ -295,6 +295,8 @@ class OfflineDailyOrchestrator:
         """
         if not isinstance(now, datetime) or now.tzinfo is None:
             raise OfflineDailyScheduleError("Timezone-aware report instant required")
+        if type(include_storage_audit) is not bool:
+            raise OfflineDailyScheduleError("include_storage_audit must be boolean")
         now = now.astimezone(timezone.utc)
         self.daily._verify_binding()
         utc_time = stamp(now)
@@ -432,7 +434,7 @@ class OfflineDailyOrchestrator:
                 "합성 수집 윈도우와 첫 페이지 증거가 확인됐습니다. "
                 "실제 Meta 수집과 전체 무결성은 미검증입니다."
             )
-        return {
+        result = {
             "mode": "SYNTHETIC_OFFLINE_MANUAL_ONLY",
             "read_only": True,
             "integrity": "not_fully_revalidated",
@@ -490,6 +492,11 @@ class OfflineDailyOrchestrator:
                 "unattended_execution_enabled": False,
             },
         }
+        if include_storage_audit:
+            # Explicit operator opt-in: expensive full source/ledger/RAW
+            # evidence audit never runs on ordinary reports or scheduler ticks.
+            result["storage_integrity"] = self.audit_storage()
+        return result
 
     def _release_unused_lease(self, job):
         # Fixture omission is not a successful attempt. Do not wait 15 mins.
