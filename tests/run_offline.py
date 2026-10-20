@@ -1,4 +1,10 @@
-"""Run the RAW suite with outbound socket connections blocked."""
+"""Run the RAW suite with outbound socket connections blocked.
+
+Optional named groups divide Windows CI by test *module*, preserving every
+case exactly once across the four independent jobs. Running without --group
+continues to execute the complete suite.
+"""
+import argparse
 import faulthandler
 import os
 from pathlib import Path
@@ -7,16 +13,57 @@ import unittest
 from unittest.mock import patch
 
 
+GROUP_NAMES = ("orchestrator", "roster", "report", "remaining")
+_MODULE_GROUPS = {
+    "test_three_api_daily_orchestrator": "orchestrator",
+    "test_three_api_full_roster_batch": "roster",
+    "test_three_api_operator_report": "report",
+}
+
+
 def no_network(*args, **kwargs):
     raise AssertionError('Network access is forbidden in offline tests')
 
 
+def iter_cases(suite):
+    """Walk arbitrary nested unittest suites without dropping individual cases."""
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from iter_cases(item)
+        else:
+            yield item
+
+
+def group_for_case(case):
+    module = case.__class__.__module__.rsplit(".", 1)[-1]
+    return _MODULE_GROUPS.get(module, "remaining")
+
+
+def select_group(suite, group):
+    """Return an independently runnable suite; reject empty shards."""
+    if group is None:
+        return suite
+    selected = [case for case in iter_cases(suite) if group_for_case(case) == group]
+    if not selected:
+        raise ValueError(f"Offline test group {group!r} has no tests")
+    return unittest.TestSuite(selected)
+
+
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--group', choices=GROUP_NAMES,
+                        help='Run exactly one module-based CI shard (default: all)')
+    args = parser.parse_args()
+
     # Opt-in stack dumps help diagnose CI stalls without touching production paths.
     watchdog_seconds = int(os.environ.get('OFFLINE_TEST_WATCHDOG_SECONDS', '0'))
     if watchdog_seconds > 0:
         faulthandler.dump_traceback_later(watchdog_seconds, repeat=True)
     suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern='test_*.py')
+    total = suite.countTestCases()
+    suite = select_group(suite, args.group)
+    print(f"Offline suite: group={args.group or 'all'} selected={suite.countTestCases()} discovered={total}",
+          flush=True)
     with patch('socket.socket.connect', no_network), \
          patch('socket.socket.connect_ex', no_network), \
          patch('socket.create_connection', no_network):
