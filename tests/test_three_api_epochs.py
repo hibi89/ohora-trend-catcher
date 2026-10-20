@@ -334,6 +334,20 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=?",(history,)
         ).fetchone()[0],0)
 
+    def test_history_wrong_lane_or_off_roster_cannot_allocate(self):
+        """Invalid API lanes and unknown accounts cannot create history jobs."""
+        history=self.open_history_fixture()
+        for account,lane in (("KR_001","D"),("KR_999","A"),
+                             ("bad account","B")):
+            with self.subTest(account=account,lane=lane):
+                with self.assertRaises(EpochError):
+                    self.store.schedule_one_history_page(
+                        history,account,lane,at=NOW)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=?",(history,)
+        ).fetchone()[0],0)
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001")["page_seq"],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
