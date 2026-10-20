@@ -7,6 +7,7 @@ Never send Meta HTTP or open the operating collection database.
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
+import json
 import sqlite3
 import sys
 import tempfile
@@ -31,6 +32,7 @@ from three_api_epochs import ThreeApiEpochStore
 from three_api_epoch_contract_projection import (
     OfflineEpochContractProjector, OfflineEpochContractError,
 )
+from three_api_response_evidence import evidence_digest
 
 
 class OfflineEpochContractProjectionTests(unittest.TestCase):
@@ -177,6 +179,47 @@ class OfflineEpochContractProjectionTests(unittest.TestCase):
         self.assertEqual(self.p3db.execute(
             "SELECT COUNT(*) FROM page_evidence_v2"
         ).fetchone()[0], 0)
+
+    def test_safe_response_and_capture_must_share_original_media_content(self):
+        """Even two independently well-formed digests cannot prove provenance."""
+        self.execute()
+        source = self.journal.get_response_evidence(self.request.request_id)
+        safe_body = source["safe_body"]
+        safe_body["business_discovery"]["media"]["data"][0]["caption"] = (
+            "a different synthetic response after capture was committed"
+        )
+        self.journal._db.execute(
+            "UPDATE response_evidence SET safe_body_json=?, body_digest=? "
+            "WHERE request_id=?",
+            (json.dumps(safe_body, ensure_ascii=False, sort_keys=True,
+                        separators=(",", ":")).encode("utf-8"),
+             evidence_digest(safe_body), self.request.request_id),
+        )
+        # The tampered retained safe body has a valid recomputed digest;
+        # only cross-file source→CaptureRecord comparison detects it.
+        self.assertEqual(
+            self.journal.get_response_evidence(self.request.request_id)["body_digest"],
+            evidence_digest(safe_body),
+        )
+        before = self.p3db.total_changes
+        with self.assertRaisesRegex(
+            OfflineEpochContractError, "response and CaptureRecord disagree"
+        ):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.p3db.total_changes, before)
+        self.assertEqual(self.state(), "bound")
+
+    def test_http_failure_evidence_cannot_be_relabelled_as_success(self):
+        self.execute()
+        self.journal._db.execute(
+            "UPDATE response_evidence SET http_status=400 WHERE request_id=?",
+            (self.request.request_id,),
+        )
+        before = self.p3db.total_changes
+        with self.assertRaises(OfflineEpochContractError):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.p3db.total_changes, before)
+        self.assertEqual(self.state(), "bound")
 
     def test_raw_observation_corruption_does_not_advance_p3(self):
         self.execute()
