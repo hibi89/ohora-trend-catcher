@@ -434,10 +434,6 @@ class OfflineDailyOrchestrator:
                 return {"status":"front_stage_only_unsupported"}
             return self._front_step(lane,now)
         acts=self.ledger.next_actions([a["key"] for a in self.accounts],self.day)
-        if any(a["phase"]=="front" for a in acts):
-            if stage_only:
-                return {"status":"front_stage_only_unsupported"}
-            return self._front_step(lane,now)
         if any(a["phase"] in ("catchup","reanchor","needs_review")
                for a in acts):
             if any(a["phase"]=="catchup" for a in acts):
