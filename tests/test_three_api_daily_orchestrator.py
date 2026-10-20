@@ -286,6 +286,36 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(runner.coordinator.db.execute(
             "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
 
+    def test_serial_dispatch_commits_one_page_per_tick(self):
+        runner=self.create()
+        first=runner.step_serial(now=NOW)
+        self.assertEqual((first["selected_lane"],first["status"]),
+                         ("A","front_committed"))
+        self.assertEqual(runner.coverage()["front_pages"],1)
+        second=runner.step_serial(now=NOW)
+        self.assertEqual(second["selected_lane"],"A")
+        self.assertEqual(second["status"],"front_fixture_missing")
+        self.assertEqual(runner.coverage()["front_pages"],1)
+
+    def test_serial_dispatch_skips_quota_stopped_lane_without_parallel_calls(self):
+        for ordinal in range(2,295):
+            self.front[(ordinal,1,None)]=fixture([30000+ordinal],None)
+        runner=self.create()
+        runner.coordinator.observe_usage("A",85,now=NOW)
+        result=runner.step_serial(now=NOW)
+        self.assertEqual((result["selected_lane"],result["status"]),
+                         ("B","front_committed"))
+        self.assertEqual(runner.coverage()["front_pages"],1)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],1)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='A'").fetchone()[0],1)
+
+    def test_serial_dispatch_rejects_duplicate_lane_order(self):
+        runner=self.create()
+        with self.assertRaises(OfflineDailyScheduleError):
+            runner.step_serial(now=NOW,lane_order=("A","A","C"))
+        self.assertEqual(runner.coverage()["front_pages"],0)
+
     def test_quota_stop_keeps_uncommitted_raw_and_evidence_empty(self):
         runner=self.create()
         self.assertTrue(runner.coordinator.observe_usage("A",85,now=NOW))
