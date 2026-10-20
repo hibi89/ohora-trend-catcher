@@ -107,7 +107,7 @@ def validate_normalized_posts(posts: Sequence[Mapping[str, Any]],
                 if not isinstance(cid, str) or not cid.isdecimal() or len(cid) > 64 or cid in child_ids:
                     raise ValueError("Invalid or duplicate child ID")
                 child_ids.add(cid)
-                if "media_type" in child and child["media_type"] not in _CHILD_MEDIA_TYPES:
+                if "media_type" in child and child["media_type"] is not None and child["media_type"] not in _CHILD_MEDIA_TYPES:
                     raise ValueError("Invalid child media type")
                 for key, value in child.items():
                     if key in _CHILD_TEXT_FIELDS and value is not None:
