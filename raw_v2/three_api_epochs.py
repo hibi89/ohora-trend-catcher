@@ -745,7 +745,15 @@ class ThreeApiEpochStore:
                 (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchone()
             if latest_ids is None:
                 raise EpochError("History replay latest media evidence missing")
-            anchored_ids=json.loads(latest_ids[0])
+            try:
+                anchored_ids=json.loads(latest_ids[0])
+            except (TypeError, ValueError) as exc:
+                raise EpochError("History replay media evidence is invalid") from exc
+            if (not isinstance(anchored_ids,list) or
+                    any(not isinstance(media_id,str) or not media_id.isdecimal()
+                        or len(media_id)>64 for media_id in anchored_ids) or
+                    len(anchored_ids)>4 or len(set(anchored_ids))!=len(anchored_ids)):
+                raise EpochError("History replay media evidence is invalid")
             if anchored_ids and cp["anchor_post_id"]!=anchored_ids[-1]:
                 raise EpochError("History replay anchor differs from evidence")
             if (latest is None or cp["cursor"]!=latest[0]
