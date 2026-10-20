@@ -1,3 +1,5 @@
+> **2026-10-20 P6 3단위 RAW history 감사:** 페이지별 outgoing cursor 추적 `b921f7f`; checkpoint.anchor_post_id 대조 및 빈 terminal 페이지 상속 예외 `dc82b67`→`d87e442`; 마지막 media ID 변조 회귀 `bb79ee6`. 이전 `7c5d231` Three API/Runtime/Frozen CI 대기 중, 최신 전체 CI PASS 미확인. 운영 DB·Meta·main 미변경.
+
 > **2026-10-20 P6 3단위 checkpoint 무결성:** 최종 checkpoint.last_receipt 변조 회귀 `167c1a3`, checkpoint.updated_at과 마지막 page_evidence_v2.observed_at 일치 검사 `17aecea`, 시각 변조 회귀 `7c5d231`. 이전 RAW CI `39400833357` (`4b920ed`) SUCCESS 및 Frozen Guard `39400833288` SUCCESS 확인. 최신 CI 대기/진행 중으로 전체 PASS 미확인. Synthetic-only read-only audit, 운영 DB/Meta/main 미변경.
 
 > **2026-10-20 P6 3단위 CI 복구·RAW 감사 보강:** 기존 `b5fdb59` RAW CI `39400706495` FAILURE 원인 `history_cutoff_evidence.py`에서 optional media_ids=None에 len(None) TypeError 확인. 수정 `4b920ed`; media ID/발행 시각 수량 회귀 `c2017df`; 실제 격리 RAW history audit 마지막 checkpoint.last_receipt 대조 `91d3b4d`. `b5fdb59` Three API CI `39400706433` SUCCESS, Frozen Guard `39400706600` SUCCESS; 최신 커밋 CI 대기 중으로 PASS 미확인. Meta/운영 DB/main 병합 없음.
