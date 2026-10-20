@@ -293,5 +293,27 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertFalse(self.audit()["production_coverage_verified"])
 
 
+    def test_reconcile_from_staged_only_after_restart(self):
+        checkpoint=self.fixture.store.history_checkpoint(self.history,"KR_001")
+        page=self.fixture.store.schedule_one_history_page(self.history,"KR_001","A",at=NOW)
+        request="req-restart-staged-only"
+        self.fixture.store.bind_history(
+            page["job_id"],request,
+            build_request_spec("A","nail_001",after=checkpoint["cursor"]),at=NOW)
+        self.bridge.stage_capture(page["job_id"],request,observed_at=NOW,
+            posts=self.posts([6801,6802],[360,366]),
+            next_cursor=None,terminal_basis="verified_terminal")
+        self.assertFalse(self.audit()["synthetic_cutoff_verified"])
+        self.assertEqual(self.mirror.db.execute(
+            "SELECT COUNT(*) FROM page_receipts WHERE request_id=?",
+            ("history."+page["job_id"],)).fetchone()[0],0)
+        self.bridge.reconcile_pending()
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        self.assertEqual(self.mirror.db.execute(
+            "SELECT COUNT(*) FROM page_receipts WHERE request_id=?",
+            ("history."+page["job_id"],)).fetchone()[0],1)
+        self.assertFalse(self.audit()["production_coverage_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
