@@ -546,7 +546,10 @@ class P3EpochTests(unittest.TestCase):
             terminal_basis="continued",source_evidence_id="account-d-e2",
             raw_receipt_id="account-d-r2",source_digest="b"*64)
         self.store.commit_daily_page(second,"account-d2",**args)
-        self.db.execute("UPDATE jobs_v2 SET account_key='US_001' WHERE job_id=?",
+        # Use an otherwise absent account key: every seeded roster account
+        # already owns page 1, so swapping to US_001 violates UNIQUE before
+        # the replay-integrity assertion can execute.
+        self.db.execute("UPDATE jobs_v2 SET account_key='TAMPERED_ACCOUNT' WHERE job_id=?",
                         (first,))
         before=self.db.total_changes
         with self.assertRaises(EpochError):
