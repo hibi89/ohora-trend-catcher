@@ -292,6 +292,48 @@ class P3EpochTests(unittest.TestCase):
                 finally:
                     db.close()
 
+    def test_daily_replay_rejects_latest_terminal_proof_corruption(self):
+        """An older valid replay must not mask an invalid latest page terminal."""
+        for terminal,cursor in (("continued",None),
+                                ("verified_terminal","forged_cursor")):
+            with self.subTest(terminal=terminal):
+                db=sqlite3.connect(":memory:",isolation_level=None)
+                db.row_factory=sqlite3.Row
+                try:
+                    store=ThreeApiEpochStore(db)
+                    digest=store.register_roster(official_shape(),recorded_at=NOW)
+                    daily=store.seed_daily(DAY,digest,anchor_utc=NOW)
+                    jobs=[db.execute("""SELECT job_id FROM jobs_v2
+                        WHERE epoch_id=? AND account_ordinal=1 AND page_seq=?""",
+                        (daily,seq)).fetchone()[0] for seq in (1,2)]
+                    first_args=dict(observed_at=NOW,ordered_ids=["101"],
+                        next_cursor="terminal_next",terminal_basis="continued",
+                        source_evidence_id="terminal-first",
+                        raw_receipt_id="terminal-first-raw",source_digest="a"*64)
+                    store.bind_daily(jobs[0],"terminal-first-request",
+                        build_request_spec("A","nail_001"),at=NOW)
+                    store.commit_daily_page(jobs[0],"terminal-first-request",**first_args)
+                    store.bind_daily(jobs[1],"terminal-second-request",
+                        build_request_spec("C","nail_001",after="terminal_next"),at=NOW)
+                    store.commit_daily_page(jobs[1],"terminal-second-request",
+                        observed_at=NOW,ordered_ids=["102"],
+                        next_cursor="terminal_third",terminal_basis="continued",
+                        source_evidence_id="terminal-second",
+                        raw_receipt_id="terminal-second-raw",source_digest="b"*64)
+                    db.execute("""UPDATE page_evidence_v2 SET terminal_basis=?,
+                        cursor_out=? WHERE job_id=?""",(terminal,cursor,jobs[1]))
+                    db.execute("""UPDATE cursor_checkpoints SET cursor=?,
+                        status=? WHERE epoch_id=? AND account_key='KR_001'
+                        AND stream='daily'""",
+                        (cursor,"terminal" if terminal=="verified_terminal" else "open",
+                         daily))
+                    before=db.total_changes
+                    with self.assertRaisesRegex(EpochError,"terminal proof invalid"):
+                        store.commit_daily_page(jobs[0],"terminal-first-request",**first_args)
+                    self.assertEqual(db.total_changes,before)
+                finally:
+                    db.close()
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
