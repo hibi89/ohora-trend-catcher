@@ -259,6 +259,15 @@ class OfflineDailyOrchestrator:
                 "expired_leases": expired,
             })
         phases = {action["phase"] for action in actions}
+        # These counts are derived from the same roster-scoped action list,
+        # never from global DB rows or unverified RAW completeness.
+        history_eligible_count=sum(
+            action["phase"].startswith("history") for action in actions
+        )
+        manual_review_count=sum(
+            action["phase"] in ("reanchor","needs_review")
+            for action in actions
+        )
         if "front" in phases:
             next_phase = "front"
         elif "catchup" in phases:
@@ -347,6 +356,9 @@ class OfflineDailyOrchestrator:
             "policy": {
                 "next_phase_if_storage_verified": next_phase,
                 "must_reconcile_before_dispatch": recovery_attention,
+                "manual_review_accounts": manual_review_count,
+                "history_eligible_accounts": history_eligible_count,
+                "history_dispatch_enabled": False,
                 "unattended_execution_enabled": False,
             },
         }
