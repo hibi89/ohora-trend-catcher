@@ -432,5 +432,17 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertTrue(self.audit()["synthetic_cutoff_verified"])
 
 
+    def test_history_replay_never_marks_production_coverage(self):
+        self.append(self.history,"production-separation",
+            self.posts([7401,7402],[360,366]),
+            next_cursor=None,terminal="verified_terminal")
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        self.bridge.reconcile_pending()
+        self.assertFalse(self.audit()["production_coverage_verified"])
+        self.assertEqual(self.fixture.db.execute(
+            "SELECT status FROM coverage_ledger WHERE epoch_id=? AND account_key='KR_001'",
+            (self.history,)).fetchone()[0],"partial")
+
+
 if __name__=="__main__":
     unittest.main()
