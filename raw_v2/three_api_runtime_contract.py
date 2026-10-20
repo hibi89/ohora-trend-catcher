@@ -188,8 +188,8 @@ def safe_usage_metrics(headers: Mapping[str, str]) -> dict[str, int]:
     value = parse_usage(headers)
     if value is None:
         raise ValueError("Usage evidence missing or unparseable")
-    if value >= 85:
-        raise ValueError("Usage limit reached")
+    # A successful threshold-crossing response is retained; the transport
+    # prohibits the NEXT send. Do not discard this observation at 85%.
     return {"max_usage_percent": ceil(value)}
 
 
