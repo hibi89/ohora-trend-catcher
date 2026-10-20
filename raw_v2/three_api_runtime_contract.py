@@ -254,8 +254,11 @@ def _canonical(value: Any) -> Any:
         # Preserve the canonical bytes/digests of previously persisted v1.0
         # RequestSpec records. Only opt-in profile fields add a new field.
         return {f.name: _canonical(getattr(value, f.name)) for f in fields(value)
-                if not (isinstance(value, RequestSpec) and f.name == "account_fields"
-                        and value.account_fields == ("id", "username"))}
+                if not ((isinstance(value, RequestSpec) and f.name == "account_fields"
+                         and value.account_fields == ("id", "username"))
+                        or (isinstance(value, RequestEnvelope) and
+                            f.name == "history_offline_only" and
+                            value.history_offline_only is False))}
     if isinstance(value, Mapping):
         if not all(isinstance(k, str) for k in value):
             raise ValueError("JSON mapping keys must be strings")
@@ -298,13 +301,22 @@ class RequestEnvelope:
     api_version: str = "UNSPECIFIED"
     target_ig_user_id: str = "UNSPECIFIED"
     retry_of: str | None = None
+    # Parse/store HISTORY only for explicitly supplied OFFLINE fixture evidence.
+    # This flag is never live Meta approval, never a transport capability.
+    history_offline_only: bool = False
 
     def __post_init__(self) -> None:
         if self.contract_version != CONTRACT_VERSION:
             raise ValueError("Unsupported contract version")
         object.__setattr__(self, "requested_at", utc(self.requested_at))
+        if type(self.history_offline_only) is not bool:
+            raise ValueError("Offline history flag must be an explicit boolean")
         if self.phase == "history":
-            raise ValueError("History lane is on hold")
+            if (self.history_offline_only is not True or self.cursor is None
+                    or self.request_spec.limit != 4):
+                raise ValueError("History lane requires explicit offline-only proof")
+        elif self.history_offline_only:
+            raise ValueError("Offline history flag is not a front/catchup grant")
         if self.lane not in ("A", "B", "C") or self.request_spec.lane != self.lane:
             raise ValueError("Lane mismatch")
         if self.request_spec.username != self.username or self.request_spec.after != self.cursor:
