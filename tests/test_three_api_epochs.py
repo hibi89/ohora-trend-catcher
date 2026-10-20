@@ -909,6 +909,29 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_history_page(second["job_id"],"skip-h2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_history_replay_accepts_empty_latest_page_with_inherited_anchor(self):
+        history=self.open_history_fixture()
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"empty-h1",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        first_args=dict(observed_at=NOW,ordered_ids=["501","502","503","504"],
+            next_cursor="empty_history_cursor",terminal_basis="continued",
+            source_evidence_id="empty-h-e1",raw_receipt_id="empty-h-r1",
+            source_digest="a"*64)
+        self.store.commit_history_page(first["job_id"],"empty-h1",**first_args)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"empty-h2",
+            build_request_spec("B","nail_001",after="empty_history_cursor"),at=NOW)
+        second_args=dict(observed_at=NOW,ordered_ids=[],next_cursor=None,
+            terminal_basis="verified_terminal",source_evidence_id="empty-h-e2",
+            raw_receipt_id="empty-h-r2",source_digest="b"*64)
+        self.store.commit_history_page(second["job_id"],"empty-h2",**second_args)
+        before=self.db.total_changes
+        self.assertEqual(
+            self.store.commit_history_page(first["job_id"],"empty-h1",**first_args)["status"],
+            "already_committed")
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_replay_rejects_predecessor_epoch_corruption_without_writes(self):
         history=self.open_history_fixture()
         first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
