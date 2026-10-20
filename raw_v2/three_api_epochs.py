@@ -713,6 +713,17 @@ class ThreeApiEpochStore:
         if existing is not None:
             expected=(request_id,bound[1],next_cursor,stamp,_json(ids),
                       terminal_basis,source_evidence_id,raw_receipt_id,source_digest)
+            # Validate stored media evidence before the equality shortcut:
+            # otherwise a corrupt JSON row is rejected only as a generic
+            # replay conflict and the integrity check is never exercised.
+            try:
+                replay_ids=json.loads(existing[4])
+            except (TypeError, ValueError) as exc:
+                raise EpochError("History replay media evidence is invalid") from exc
+            if (not isinstance(replay_ids,list) or len(replay_ids)>4 or
+                    any(not isinstance(v,str) or not v.isdecimal() or len(v)>64
+                        for v in replay_ids) or len(set(replay_ids))!=len(replay_ids)):
+                raise EpochError("History replay media evidence is invalid")
             if tuple(existing)!=expected:
                 raise EpochError("Conflicting immutable history page replay")
             # Idempotent replay must not hide a lost/tampered checkpoint after
