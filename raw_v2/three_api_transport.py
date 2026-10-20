@@ -73,6 +73,11 @@ class MetaTransport:
         # The sole HTTP sender is the existing gated GraphHTTPClient. Its
         # default is disabled; no token is read from disk or environment here.
         version, response_type, _ = _contract()
+        # Defence in depth: offline HISTORY records must never gain Graph
+        # transport authorization by constructing a valid RequestEnvelope.
+        if getattr(request, "phase", None) == "history":
+            _fail(request.request_id, "approval_denied", "global",
+                  "History Graph transport is not authorized")
         if self._halt_reason is not None:
             _fail(request.request_id, self._halt_reason, "global",
                   "Further transport requests are halted")
