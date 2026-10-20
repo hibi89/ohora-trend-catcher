@@ -334,6 +334,38 @@ class P3EpochTests(unittest.TestCase):
                 finally:
                     db.close()
 
+    def test_daily_replay_rejects_unknown_latest_terminal_basis(self):
+        db=sqlite3.connect(":memory:",isolation_level=None)
+        db.row_factory=sqlite3.Row
+        try:
+            store=ThreeApiEpochStore(db)
+            digest=store.register_roster(official_shape(),recorded_at=NOW)
+            daily=store.seed_daily(DAY,digest,anchor_utc=NOW)
+            jobs=[db.execute("""SELECT job_id FROM jobs_v2 WHERE epoch_id=?
+                AND account_ordinal=1 AND page_seq=?""",(daily,seq)).fetchone()[0]
+                for seq in (1,2)]
+            args=dict(observed_at=NOW,ordered_ids=["101"],
+                next_cursor="unknown_terminal_2",terminal_basis="continued",
+                source_evidence_id="unknown-first",raw_receipt_id="unknown-first-raw",
+                source_digest="a"*64)
+            store.bind_daily(jobs[0],"unknown-first-request",
+                build_request_spec("A","nail_001"),at=NOW)
+            store.commit_daily_page(jobs[0],"unknown-first-request",**args)
+            store.bind_daily(jobs[1],"unknown-second-request",
+                build_request_spec("C","nail_001",after="unknown_terminal_2"),at=NOW)
+            store.commit_daily_page(jobs[1],"unknown-second-request",
+                observed_at=NOW,ordered_ids=["102"],next_cursor="unknown_terminal_3",
+                terminal_basis="continued",source_evidence_id="unknown-second",
+                raw_receipt_id="unknown-second-raw",source_digest="b"*64)
+            db.execute("""UPDATE page_evidence_v2 SET terminal_basis='unverified'
+                WHERE job_id=?""",(jobs[1],))
+            before=db.total_changes
+            with self.assertRaisesRegex(EpochError,"terminal proof invalid"):
+                store.commit_daily_page(jobs[0],"unknown-first-request",**args)
+            self.assertEqual(db.total_changes,before)
+        finally:
+            db.close()
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
