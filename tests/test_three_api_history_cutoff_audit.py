@@ -239,5 +239,19 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertEqual((self.fixture.db.total_changes,self.mirror.db.total_changes),before)
 
 
+    def test_checkpoint_observed_at_tampering_fails_closed(self):
+        self.append(self.history,"checkpoint-time",
+            self.posts([6401,6402],[360,366]),
+            next_cursor=None,terminal="verified_terminal")
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        self.fixture.db.execute(
+            "UPDATE cursor_checkpoints SET updated_at='2020-01-01T00:00:00Z' "
+            "WHERE epoch_id=? AND account_key='KR_001' AND stream='history'",
+            (self.history,))
+        report=self.audit()
+        self.assertFalse(report["synthetic_cutoff_verified"])
+        self.assertFalse(report["production_coverage_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
