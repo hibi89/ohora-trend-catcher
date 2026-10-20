@@ -460,7 +460,7 @@ class P3EpochTests(unittest.TestCase):
             observed_at=NOW,ordered_ids=["102"],next_cursor="next_cursor",
             terminal_basis="continued",source_evidence_id="missing-parent-e2",
             raw_receipt_id="missing-parent-r2",source_digest="b"*64)
-        self.db.execute("UPDATE jobs_v2 SET parent_job_id=NULL WHERE job_id=?",
+        self.db.execute("UPDATE jobs_v2 SET predecessor_job_id=NULL WHERE job_id=?",
                         (second,))
         before=self.db.total_changes
         with self.assertRaises(EpochError):
@@ -642,7 +642,7 @@ class P3EpochTests(unittest.TestCase):
             terminal_basis="verified_terminal",
             source_evidence_id="missing-hparent-e2",raw_receipt_id="missing-hparent-r2",
             source_digest="b"*64)
-        self.db.execute("UPDATE jobs_v2 SET parent_job_id=NULL WHERE job_id=?",
+        self.db.execute("UPDATE jobs_v2 SET predecessor_job_id=NULL WHERE job_id=?",
                         (second["job_id"],))
         before=self.db.total_changes
         with self.assertRaises(EpochError):
