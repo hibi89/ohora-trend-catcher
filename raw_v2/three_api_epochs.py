@@ -736,6 +736,18 @@ class ThreeApiEpochStore:
                     (job["epoch_id"],job["account_key"])
                 ).fetchone()[0]):
                 raise EpochError("History replay checkpoint sequence differs")
+            # A replay must not accept a forged last-media anchor even when
+            # cursor, receipt and chain fields still match the latest page.
+            latest_ids=self.db.execute("""SELECT e.ordered_ids_json
+                FROM page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
+                WHERE j.epoch_id=? AND j.account_key=? AND j.phase='history'
+                  AND j.page_seq=? AND j.state='done'""",
+                (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchone()
+            if latest_ids is None:
+                raise EpochError("History replay latest media evidence missing")
+            anchored_ids=json.loads(latest_ids[0])
+            if anchored_ids and cp["anchor_post_id"]!=anchored_ids[-1]:
+                raise EpochError("History replay anchor differs from evidence")
             if (latest is None or cp["cursor"]!=latest[0]
                     or cp["last_receipt"]!=latest[1]
                     or cp["chain_hash"]!=latest[2]
