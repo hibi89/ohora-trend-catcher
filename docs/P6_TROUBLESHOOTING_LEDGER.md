@@ -26,6 +26,7 @@
 | P6-012 | 아키텍처 | 사용자 승인: 3 API 호출 직렬화 | 오프라인 수동 경로만 추가, 실 HTTP 미전환 |
 | P6-013 | 변경 관리 | 잦은 커밋이 in-progress CI를 cancel | 완료 전 CI PASS 주장 금지 |
 | P6-014 | 교대/지식보존 | 사건 기록은 있었으나 새 AI 작업자에 대한 명시적 의무 누락 | AGENTS + 작업 프로토콜에 기록 의무 명문화 |
+| P6-015 | 직렬 회귀/CI | 재시작 테스트 fixture 기본값 오인으로 실제 1건 저장 vs 누락 기대 | 명시적 빈 fixture를 재시작에도 전달 |
 
 ## 사건별 상세
 
@@ -115,7 +116,8 @@
 - **변경 동기:** 사용자 실측 판단상 배치 호출의 처리시간은 충분하고, **API 사용량 소진 후 한 시간대 대기**가 병목. API 추가 때 동시성 관리 비용도 피하고자 요청 순서를 직렬화하도록 명시 승인.
 - **범위:** A/B/C 3개 호출 주체, 기존 할당, `limit=4`, 2라운드, RAW/커서/복구 안전성을 유지. 동시 발송을 제거하되 불확실한 응답 재전송·쿼터 정책은 완화하지 않음.
 - **구현:** `raw_v2/three_api_daily_orchestrator.py`의 **synthetic manual** `step_serial(now=...)` (`ddb7abb`); 테스트 `1d98e02`, `STATUS.md`/`HANDOFF.md` 동기화 `d48fd7d`, `5bcff81`.
-- **현재 제한:** **실 Meta HTTP 호출 경로 또는 운영 스케줄러가 직렬화된 것은 아님.** `step_serial`은 한 호출에서 최대 한 페이지를 선택하는 수동 wrapper. 현재 구현은 사용량 중단(`front_lane_unavailable`) 레인만 다음 레인으로 건너뜀. `front_fixture_missing`/복구 실패는 교차 레인 재시도의 근거가 아니므로 결과를 노출·중단. 따라서 작업 분배의 최종 직렬 정책/계정 순서는 실운영 연결 전에 명시적으로 검증해야 함.
+- **현재 제한:** **실 Meta HTTP 호출 경로 또는 운영 스케줄러가 직렬화된 것은 아님.** `step_serial`은 한 호출에서 최대 한 합성 페이지를 처리하며, 여러 프로세스 사이의 실제 HTTP 동시 실행을 막는 전역 잠금은 아직 없다. `front_fixture_missing`/복구 실패는 교차 레인 재시도의 근거가 아니므로 결과를 노출·중단. 따라서 실운영 연결 전에는 실제 호출 경로의 동시 실행 방지와 데이터/쿼터 증거를 별도로 검증해야 함.
+- **2026-10-21 후속 설계 결정:** A만 먼저 반복 처리하면 B/C가 불필요하게 지연되므로 **성공한 synthetic 페이지마다 A→B→C 순환**하고 마지막 성공 레인을 격리 source SQLite의 `offline_serial_turn`에 기록해 재시작 후에도 순서를 이어감 (`db32b06`). 대안은 항상 A 우선(간단하지만 레인 편중) 및 프로세스별 메모리 커서(재시작 시 우선순위 초기화)였으며 모두 채택하지 않음. 기존 계정/페이지 A/B/C **고정 배정과 커서 선행 증거는 변경하지 않음**. `front_lane_unavailable` 및 catch-up의 `lane_blocked`는 다음 레인으로 넘어가되, 실패한 fixture나 복구는 사용자 검토용으로 정지. 신규 회귀 `1be6e01`, `3b039fb`(Catch-up). **최신 SHA 전체 CI 결과 확인 전이며 라이브 검증 아님.**
 - **검증:** `5bcff81` CI 기준 Frozen Design Guard / C Contract **SUCCESS**, Three API / Runtime 확인 당시 `in_progress`. 이후 완료 결과 별도 확인 필요.
 - **되돌리기:** 이력 보존 상태에서 feature branch의 `step_serial` 코드·테스트만 역커밋 가능. **사용자 RAW나 운영 DB를 원복 목적으로 덮어쓰지 않는다.**
 
@@ -133,6 +135,15 @@
 - **검증:** GitHub 파일 업데이트 결과 커밋 확인; 실제 새 채팅방/타 에이전트가 수행하는지는 **미검증**. 규칙은 사회적·절차적 구속이며 GitHub가 기록 누락을 자동 감지·강제하는 것은 아님.
 - **재발 방지:** 시작 전 `AGENTS → 현재 브랜치 HANDOFF/STATUS → p6 ledger → RAW v2 chronology` 조회, 사건 발생 때 본 장부 갱신, 세션 종료 전 저장소 재조회; 기록 실패 시 미반영 명시. 미래에 CI/PR로 기록 검증을 강화하려면 별도 신뢰성 검토가 필요함.
 - **롤백:** 기능·운영 데이터와 분리된 문서 변경이므로 승인된 경우 해당 문서 커밋만 revert. Frozen 설계와 기존 사고 이력은 보존.
+
+### P6-015 — 직렬 재시작 회귀 테스트의 fixture 경계 오류 (2026-10-21)
+
+- **증상/CI 증거:** `1be6e01`의 Three API workflow run `39493808092`, test `test_serial_missing_fixture_does_not_advance_durable_turn` 한 건 **FAIL**. 기대 `(A, front_fixture_missing)`, 실제 `(A, front_committed)`.
+- **확인된 원인:** 재시작 fixture 전달에서 `self.create()`를 호출해 테스트 기본 사전(계정 1 첫 페이지 데이터 포함)이 적용됐다. 첫 실행의 의도적인 빈 fixture(`front={}`)가 재시작에는 전달되지 않았음. 실제 수집 엔진의 잘못된 API 호출/데이터 누락으로 볼 근거 없음.
+- **수정/예방:** 재시작 호출을 `self.create(front={})`로 명시 (`cd6a1ff`). 동일 증상 재현 때 코드 수정 전에 fixture·mock·expected cardinality부터 확인하고, 런타임 버그와 분리할 것.
+- **데이터 영향:** 합성 독립 SQLite만 사용; 실 Meta 호출·운영 RAW 변경 없음.
+- **검증 상태:** 위 SHA의 이전 CI 실패는 확정. 수정 뒤 신규 CI는 이전 실행 일부가 `cancelled`됐으며 최종 실행 결과는 별도 확인 필요. `cancelled`를 PASS로 표기하지 않음.
+- **롤백:** 신규 synthetic 회귀 테스트 수정을 해당 커밋 단위로 revert 가능. 사용자 DB/CSV/원본은 절대 덮어쓰지 않는다.
 
 ## 새 사건을 추가할 때의 고정 서식
 
