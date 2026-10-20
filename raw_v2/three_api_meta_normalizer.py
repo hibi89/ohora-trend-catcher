@@ -14,8 +14,8 @@ import re
 
 from three_api_paging import validate_page_edge
 
-FIELDS = ("id", "caption", "media_type", "media_url", "permalink",
-          "timestamp", "like_count", "comments_count", "thumbnail_url")
+FIELDS = ("id", "caption", "media_type", "media_product_type", "media_url", "permalink",
+          "timestamp", "like_count", "comments_count", "thumbnail_url", "view_count")
 CHILD_FIELDS = ("id", "media_type", "media_url", "thumbnail_url")
 _MEDIA_ID = re.compile(r"[0-9]{1,64}\Z")
 _MAX_CHILDREN = 20
@@ -83,7 +83,7 @@ def normalize_meta_page(payload, *, requested_cursor=None, allow_partial_childre
         post_id = post.get("id")
         if not isinstance(post_id, str) or not post_id.strip():
             raise ValueError("Missing media id")
-        for numeric in ("like_count", "comments_count"):
+        for numeric in ("like_count", "comments_count", "view_count"):
             if numeric in post and post[numeric] is not None and (type(post[numeric]) is not int or post[numeric] < 0):
                 raise ValueError("Invalid engagement count")
         record = {key: post[key] for key in FIELDS if key in post}
