@@ -126,7 +126,7 @@ class OfflineDailyOrchestrator:
         # The caller only needs recovery to finish before dispatch. Avoid a
         # second roster-wide coverage scan on every manual scheduler tick;
         # coverage() remains available explicitly for reporting and tests.
-        return None
+        return self.coverage()
 
     def coverage(self):
         """Readable phase/coverage counters, never a completeness guarantee."""
@@ -423,7 +423,7 @@ class OfflineDailyOrchestrator:
             raise OfflineDailyScheduleError("stage_only must be boolean")
         now=now.astimezone(timezone.utc)
         try:
-            status=self.reconcile()
+            self.reconcile()
         except Exception:
             return {"status":"recovery_blocked","lane":lane}
         acts=self.ledger.next_actions([a["key"] for a in self.accounts],self.day)
