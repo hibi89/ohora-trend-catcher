@@ -7,6 +7,7 @@ on:
       - 'raw_v2/three_api_response_evidence.py'
       - 'raw_v2/three_api_contract_executor.py'
       - 'raw_v2/three_api_runtime_contract.py'
+      - 'raw_v2/three_api_p2_clone_migration.py'
       - 'raw_v2/three_api_observation_versions.py'
       - 'raw_v2/three_api_raw_writer.py'
       - 'raw_v2/three_api_transport.py'
@@ -21,6 +22,7 @@ on:
       - 'tests/test_three_api_contract_executor.py'
       - 'tests/test_three_api_p1_response_evidence.py'
       - 'tests/test_three_api_runtime_contract.py'
+      - 'tests/test_three_api_p2_clone_migration.py'
       - 'tests/test_three_api_p2_observations.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
@@ -37,6 +39,7 @@ on:
       - 'raw_v2/three_api_response_evidence.py'
       - 'raw_v2/three_api_contract_executor.py'
       - 'raw_v2/three_api_runtime_contract.py'
+      - 'raw_v2/three_api_p2_clone_migration.py'
       - 'raw_v2/three_api_observation_versions.py'
       - 'raw_v2/three_api_raw_writer.py'
       - 'raw_v2/three_api_transport.py'
@@ -51,6 +54,7 @@ on:
       - 'tests/test_three_api_contract_executor.py'
       - 'tests/test_three_api_p1_response_evidence.py'
       - 'tests/test_three_api_runtime_contract.py'
+      - 'tests/test_three_api_p2_clone_migration.py'
       - 'tests/test_three_api_p2_observations.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
@@ -84,12 +88,14 @@ jobs:
             raw_v2/three_api_runtime_contract.py \
             raw_v2/three_api_raw_writer.py \
             raw_v2/three_api_observation_versions.py \
+            raw_v2/three_api_p2_clone_migration.py \
             raw_v2/three_api_transport.py \
             tests/test_three_api_contract_executor.py \
             tests/test_three_api_p1_response_evidence.py \
             tests/test_three_api_runtime_contract.py \
             tests/test_three_api_raw_writer.py \
             tests/test_three_api_p2_observations.py \
+            tests/test_three_api_p2_clone_migration.py \
             tests/test_three_api_transport.py
       - name: Run complete offline regression suite with sockets blocked
         run: python tests/run_offline.py
