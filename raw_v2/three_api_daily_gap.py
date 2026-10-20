@@ -322,6 +322,8 @@ class DailyGapLedger:
                 history.append({"account_key":account,"phase":"history"})
         if catchups:
             return reviews + catchups
-        if reviews:
-            return reviews
-        return history
+        # Manual-review gaps block only the affected account. Once no
+        # recoverable catch-up remains, unrelated verified accounts may be
+        # reported as history-eligible without treating the gaps as resolved.
+        # This is a decision-only API: it never dispatches history requests.
+        return reviews + history
