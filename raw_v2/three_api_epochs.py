@@ -550,8 +550,12 @@ class ThreeApiEpochStore:
                 raise EpochError("Daily replay latest parent job link missing")
             if latest_binding[11]>1:
                 parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
-                    FROM page_evidence_v2 e WHERE e.job_id=?""",
-                    (latest_binding[10],)).fetchone()
+                    FROM page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
+                    WHERE e.job_id=? AND j.epoch_id=? AND j.account_key=?
+                      AND j.phase='daily_front' AND j.state='done'
+                      AND j.page_seq=?""",
+                    (latest_binding[10],job["epoch_id"],job["account_key"],
+                     latest_binding[11]-1)).fetchone()
                 if parent is None:
                     raise EpochError("Daily replay latest parent chain missing")
                 if latest_binding[1]!=parent[1]:
