@@ -90,12 +90,12 @@ class OfflineEpochContractProjectionTests(unittest.TestCase):
             self.projector.project_front_page(self.job)["status"], "committed"
         )
         self.assertEqual(self.state(), "done")
-        self.assertEqual(self.p3db.execute(
-            "SELECT state FROM jobs_v2 WHERE epoch_id=? AND account_ordinal=1 "
-            "ORDER BY page_seq", (self.day,)
-        ).fetchall(), [
-            ("done",), ("not_required",), ("not_required",)
-        ])
+        self.assertEqual([
+            row[0] for row in self.p3db.execute(
+                "SELECT state FROM jobs_v2 WHERE epoch_id=? AND account_ordinal=1 "
+                "ORDER BY page_seq", (self.day,)
+            )
+        ], ["done", "not_required", "not_required"])
         proof = self.p3db.execute(
             "SELECT source_evidence_id,raw_receipt_id,source_digest,"
             "ordered_ids_json FROM page_evidence_v2 WHERE job_id=?", (self.job,)
