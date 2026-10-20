@@ -354,6 +354,48 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
                          ("A","front_fixture_missing"))
         self.assertEqual(retry.coverage()["front_pages"],0)
 
+    def test_serial_restart_replays_durable_source_before_next_lane(self):
+        self.front[(151,1,None)]=fixture([30151],None)
+        runner=self.create()
+        with mock.patch.object(runner.raw,"project_page",
+                               side_effect=RuntimeError("synthetic crash")):
+            first=runner.step_serial(now=NOW)
+        self.assertEqual((first["selected_lane"],first["status"]),
+                         ("A","front_blocked"))
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
+        runner.close()
+        recovered=self.create(front={(151,1,None):fixture([30151],None)})
+        next_page=recovered.step_serial(now=NOW)
+        self.assertEqual((next_page["selected_lane"],next_page["status"]),
+                         ("B","front_committed"))
+        self.assertEqual(recovered.mirror.summary()["raw_posts"],5)
+        self.assertEqual(recovered.coverage()["front_pages"],2)
+        self.assertEqual(recovered.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],2)
+        self.assertEqual(recovered.reconcile()["mirror_posts"],5)
+        self.assertEqual(recovered.mirror.summary()["raw_post_observations"],5)
+
+    def test_serial_invalid_b_page_never_silently_falls_through_to_c(self):
+        self.front[(151,1,None)]=fixture([30151],None,like_count=-1)
+        self.front[(1,2,"p2")]=fixture([111],None)
+        runner=self.create()
+        self.assertEqual(runner.step_serial(now=NOW)["selected_lane"],"A")
+        result=runner.step_serial(now=NOW)
+        self.assertEqual((result["selected_lane"],result["status"]),
+                         ("B","front_blocked"))
+        self.assertEqual(runner.coverage()["front_pages"],1)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],4)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone()[0],"A")
+
     def test_serial_all_quota_lanes_stop_without_new_proof(self):
         runner=self.create()
         for lane in ("A","B","C"):
