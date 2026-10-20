@@ -59,7 +59,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Opt-in stack dumps help diagnose CI stalls without touching production paths.
-    watchdog_seconds = int(os.environ.get('OFFLINE_TEST_WATCHDOG_SECONDS', '0'))
+    watchdog_raw=os.environ.get('OFFLINE_TEST_WATCHDOG_SECONDS', '0')
+    try:
+        watchdog_seconds=int(watchdog_raw)
+    except ValueError as exc:
+        raise SystemExit("OFFLINE_TEST_WATCHDOG_SECONDS must be an integer") from exc
+    if watchdog_seconds < 0:
+        raise SystemExit("OFFLINE_TEST_WATCHDOG_SECONDS cannot be negative")
     if watchdog_seconds > 0:
         faulthandler.dump_traceback_later(watchdog_seconds, repeat=True)
     suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern='test_*.py')
