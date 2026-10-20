@@ -32,6 +32,7 @@
 | P6-018 | 직렬 성능 | 85% 차단 레인을 건너뛸 때마다 294계정 복구·상태 검사 반복 | 1회 재조정 후 최대 1개 합성 페이지 실행 |
 | P6-019 | 직렬 안전성 | 여러 프로세스가 각자 step_serial을 실행할 수 있음 | synthetic 단계에 OS 프로세스 공통 잠금 추가 |
 | P6-020 | 계약 직렬 경계 | OS 잠금만으로는 계약 기반 요청 예약과 오프라인 전송을 한 구역으로 묶지 못함 | fixture-only bridge·잠금·예약 검증 분리 |
+| P6-021 | CI·인수인계 | 최신 오프라인 Runtime 실패: STATUS/HANDOFF 상단 AGENTS 링크 누락, Windows 8분 watchdog | 문서 링크 복구; Windows orchestrator 실행시간 별도 추적 |
 
 ## 사건별 상세
 
@@ -199,6 +200,17 @@
 - **회귀:** `tests/test_three_api_serial_contract_bridge.py` (`4400798`, `bced22b`)에 합성 단일 요청, 잠금 경합, 비fixture 전송 거부, `fetch` 속임수 거부, 레인/History 거부, 시간대·coordinator 검증 7건. Runtime CI path·Linux compile(`067519e`)과 Windows orchestrator shard(`075673a`) 연결. **새 SHA의 CI 최종 통과 여부는 확인 전까지 미확정.**
 - **미해결:** 이 경로는 mock binding과 in-memory fixture 기반의 오프라인 안전 어댑터일 뿐, 실제 `JobRequestBindingStore`→`CaptureJournal`→`ContractRawWriter`의 통합 end-to-end 검증 및 실제 Meta `GraphHTTPClient` 직렬 연결이 아니다. quota 사용량 독립성, 장애 후 복구, 294계정 전수 검증은 별도. 운영 DB·main·동결 원문 불변.
 - **예방/롤백:** 실제 live entrypoint 승인 전에 OS lock 경계·영속 예약·RAW receipt·HTTP 불확실 결과 차단을 통합 테스트하고, 실 Meta 호출/운영 DB 변경은 별도 승인. 문제 시 관련 feature commit만 revert하고 기존 RAW/커서는 보존.
+
+### P6-021 — CI 최신 실패 판정: 인수인계 링크 누락 및 Windows 장시간 실행 (2026-10-21 KST)
+
+- **증상/확정 근거:** feature SHA `bcb335dc687950754ee221bc5ebd847483e898f6`의 [Runtime Integration Offline #39499556675](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556675)은 **completed/failure**. Linux 792 tests 중 2건 실패; Windows remaining 667 tests 중 동일 2건 실패; Windows orchestrator는 8분 watchdog timeout. 세 그룹의 정확한 결과를 완료/성공으로 바꿔 적지 않는다.
+- **인수인계 결함 확정:** `tests/test_p6_troubleshooting_handoff_guard.py::test_current_handoff_links_survive_chat_restart`가 STATUS.md 및 HANDOFF.md의 **맨 앞 2,000문자** 안에서 `AGENTS.md`와 `docs/P6_TROUBLESHOOTING_LEDGER.md`를 찾도록 강제한다. 여러 상단 요약을 추가하면서 `AGENTS.md` 링크가 잘려 두 파일 각각 AssertionError가 발생했다. 원인은 실행 코드/RAW 변조가 아니라 상단 탐색 규칙 미준수.
+- **수정 전략:** STATUS/HANDOFF 첫 문단 앞에 짧은 필독 연결 인덱스를 각각 넣고 최신 CI 실패와 Meta/운영 DB·main 미변경 상태를 구분한다. 테스트 자체를 느슨하게 하거나 테스트를 제외하지 않는다.
+- **Windows 별도 문제:** [Runtime #39499556675](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556675) Windows orchestrator 70개 테스트를 실행하다 8분 timeout. 마지막 로그 `test_p4_three_db_audit_staged_receipt_is_not_auto_promoted` 다음 stack trace는 `three_api_evidence.py::commit_page`에서 실행 중이었음을 보여준다. **데드락·논리 결함으로 확정하지 않는다.** Windows 전체 테스트가 지속적으로 10초 이상 걸리는 항목 다수 포함, 원인(실행시간/잠금/파일 I/O) 정밀 측정은 별도.
+- **이미 확인된 통과:** 같은 SHA의 [Three API #39499556645](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556645), [C Contract #39499556483](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556483), [Frozen Guard #39499556744](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556744)는 SUCCESS. 이는 **Runtime 성공 증거가 아님**.
+- **예방:** 새로운 STATUS/HANDOFF 상단을 편집하면 반드시 동일한 cross-chat 링크 검사를 Linux/Windows에서 실행한다. CI가 실패하면 로그상 실패 위치·SHA를 적고 이전 성공 체크를 새 SHA의 결과로 사용하지 않는다.
+- **미해결/검증:** 문서 수정 후 새로운 SHA에서 `python -m unittest discover -s tests -p 'test_p6_troubleshooting_handoff_guard.py' -v` 및 전체 Runtime CI 확인. Windows timeout은 별도 작업으로 원인 측정·shard/timeout 변경 대안 비교 후 안전한 최소 변경. 해결 전 Runtime 최종 PASS를 주장하지 않는다.
+- **롤백:** 상단 필독 인덱스와 이 사건 추가만 feature branch에서 revert 가능. 동결 설계·운영 collection.sqlite/RAW/CSV·main/Meta HTTP 변경 없음.
 
 ## 새 사건을 추가할 때의 고정 서식
 
