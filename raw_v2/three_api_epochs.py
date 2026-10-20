@@ -767,6 +767,35 @@ class ThreeApiEpochStore:
                 raise EpochError("History replay media evidence is invalid")
             if anchored_ids and cp["anchor_post_id"]!=anchored_ids[-1]:
                 raise EpochError("History replay anchor differs from evidence")
+            # The latest stored hash must also be derivable from its immutable
+            # request and parent receipt, not merely equal to the checkpoint.
+            latest_proof=self.db.execute("""SELECT j.job_id,j.page_seq,
+                j.predecessor_job_id,e.request_id,e.cursor_in,e.cursor_out,
+                e.ordered_ids_json,e.source_evidence_id,e.raw_receipt_id,
+                e.source_digest,e.chain_hash,b.requested_cursor
+                FROM jobs_v2 j JOIN page_evidence_v2 e ON e.job_id=j.job_id
+                JOIN request_bindings_v2 b ON b.job_id=j.job_id
+                WHERE j.epoch_id=? AND j.account_key=? AND j.phase='history'
+                  AND j.page_seq=? AND j.state='done'""",
+                (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchone()
+            if latest_proof is None or latest_proof[4]!=latest_proof[11]:
+                raise EpochError("History replay chain binding differs")
+            if latest_proof[1]>1:
+                parent=self.db.execute("""SELECT e.chain_hash FROM page_evidence_v2 e
+                    WHERE e.job_id=?""",(latest_proof[2],)).fetchone()
+                if parent is None:
+                    raise EpochError("History replay parent chain missing")
+                parent_hash=parent[0]
+            else:
+                # Page one is anchored to the receipted daily front; its
+                # seed is deliberately not recreated from untrusted history.
+                parent_hash=None
+            if parent_hash is not None:
+                expected_chain=_hash(parent_hash,latest_proof[0],latest_proof[3],
+                    latest_proof[4],latest_proof[5],anchored_ids,
+                    latest_proof[7],latest_proof[8],latest_proof[9])
+                if latest_proof[10]!=expected_chain:
+                    raise EpochError("History replay chain digest differs")
             if (latest is None or cp["cursor"]!=latest[0]
                     or cp["last_receipt"]!=latest[1]
                     or cp["chain_hash"]!=latest[2]
