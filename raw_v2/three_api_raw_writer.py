@@ -115,7 +115,15 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
     if not all(isinstance(value, str) and value for value in (request_id, run)):
         raise RawWriteError("Request and run identities required")
     if phase not in ("front", "catchup"):
-        raise RawWriteError("Unsupported capture phase")
+        # A historical RAW write is allowed ONLY for a previously validated,
+        # explicitly OFFLINE CaptureRecord. Bare/synthetic dict envelopes
+        # still cannot masquerade as history receipts.
+        from three_api_runtime_contract import CaptureRecord
+        if (phase != "history" or
+                not isinstance(contract_record, CaptureRecord) or
+                contract_record.request.phase != "history" or
+                contract_record.request.history_offline_only is not True):
+            raise RawWriteError("Unsupported capture phase")
     if api_version is not None and (not isinstance(api_version, str) or not api_version):
         raise RawWriteError("Invalid API version")
     posts = capture["posts"]
