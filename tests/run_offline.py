@@ -1,7 +1,7 @@
 """Run the RAW suite with outbound socket connections blocked.
 
 Optional named groups divide Windows CI by test *module*, preserving every
-case exactly once across the five independent jobs. Running without --group
+case exactly once across the six independent jobs. Running without --group
 continues to execute the complete suite.
 """
 import argparse
@@ -13,12 +13,13 @@ import unittest
 from unittest.mock import patch
 
 
-GROUP_NAMES = ("orchestrator", "roster", "report", "observations", "remaining")
+GROUP_NAMES = ("orchestrator", "roster", "report", "observations", "projection", "remaining")
 _MODULE_GROUPS = {
     "test_three_api_daily_orchestrator": "orchestrator",
     "test_three_api_full_roster_batch": "roster",
     "test_three_api_operator_report": "report",
     "test_three_api_p2_observations": "observations",
+    "test_three_api_epoch_contract_projection": "projection",
 }
 
 
