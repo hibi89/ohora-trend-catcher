@@ -822,6 +822,13 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.db.total_changes,before)
 
     def test_history_replay_rejects_cross_account_parent_link_without_writes(self):
+        other=self.job(2,1)
+        self.store.bind_daily(other,"cross-account-other",
+            build_request_spec("A","nail_002"),at=NOW)
+        self.store.commit_daily_page(other,"cross-account-other",
+            observed_at=NOW,ordered_ids=["201"],next_cursor="cross_account_cursor",
+            terminal_basis="continued",source_evidence_id="cross-account-other-e",
+            raw_receipt_id="cross-account-other-r",source_digest="a"*64)
         history=self.open_history_fixture()
         first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
         self.store.bind_history(first["job_id"],"cross-account-h1",
@@ -838,13 +845,6 @@ class P3EpochTests(unittest.TestCase):
             terminal_basis="verified_terminal",source_evidence_id="cross-account-e2",
             raw_receipt_id="cross-account-r2",source_digest="b"*64)
         self.store.commit_history_page(second["job_id"],"cross-account-h2",**args)
-        other=self.job(2,1)
-        self.store.bind_daily(other,"cross-account-other",
-            build_request_spec("A","nail_002"),at=NOW)
-        self.store.commit_daily_page(other,"cross-account-other",
-            observed_at=NOW,ordered_ids=["201"],next_cursor="cross_account_cursor",
-            terminal_basis="continued",source_evidence_id="cross-account-other-e",
-            raw_receipt_id="cross-account-other-r",source_digest="a"*64)
         self.db.execute("UPDATE jobs_v2 SET predecessor_job_id=? WHERE job_id=?",
                         (other,second["job_id"]))
         before=self.db.total_changes
