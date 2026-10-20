@@ -457,6 +457,84 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         dump="\n".join(runner.coordinator.db.iterdump())
         self.assertNotIn("DROP",dump)
 
+    def test_p4_three_db_audit_proves_existing_media_without_writes(self):
+        page=fixture([115],"p2",like_count=0,media_type="CAROUSEL_ALBUM")
+        page["payload"]["data"][0]["children"]={
+            "data":[{"id":"116","media_type":"IMAGE",
+                     "media_url":"https://cdn.example.invalid/nail.jpg"}]
+        }
+        runner=self.create(front={(1,1,None):page})
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        before=tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db))
+        audit=runner.audit_storage()
+        self.assertEqual(audit["mode"],"SYNTHETIC_OFFLINE_READ_ONLY_AUDIT")
+        self.assertEqual(audit["source_pages"],1)
+        self.assertEqual(audit["verified_pages"],1)
+        self.assertEqual(audit["pages_requiring_attention"],0)
+        self.assertTrue(audit["storage_verified"])
+        self.assertFalse(audit["history_dispatch_enabled"])
+        self.assertFalse(audit["unattended_execution_enabled"])
+        self.assertEqual(tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db)),before)
+
+    def test_p4_three_db_audit_refuses_empty_collection_claim(self):
+        runner=self.create(front={})
+        audit=runner.audit_storage()
+        self.assertEqual(audit["source_pages"],0)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+
+    def test_p4_three_db_audit_detects_mirror_payload_tampering(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        request="front.2026-10-19.001.p1"
+        runner.mirror.db.execute(
+            "UPDATE page_receipts SET payload_json='[]' WHERE request_id=?",
+            (request,))
+        audit=runner.audit_storage()
+        self.assertEqual(audit["receipt_mismatch"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+        self.assertEqual(runner.mirror.summary()["raw_posts"],4)
+
+    def test_p4_three_db_audit_detects_missing_raw_observation(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.mirror.db.execute(
+            "DELETE FROM raw_post_observations WHERE request_id=? AND post_id=?",
+            ("front.2026-10-19.001.p1","115"))
+        audit=runner.audit_storage()
+        self.assertEqual(audit["observation_mismatch"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+
+    def test_p4_three_db_audit_staged_receipt_is_not_auto_promoted(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.mirror.db.execute(
+            "UPDATE page_receipts SET state='staged' WHERE request_id=?",
+            ("front.2026-10-19.001.p1",))
+        before=runner.mirror.db.total_changes
+        audit=runner.audit_storage()
+        self.assertEqual(audit["staged_receipts"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+        self.assertEqual(runner.mirror.db.total_changes,before)
+
+    def test_p4_three_db_audit_separates_clock_loss_and_orphan_receipt(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.coordinator.db.execute("DELETE FROM offline_fixture_clock")
+        runner.mirror.stage_page(
+            "front.2026-10-19.294.p3","KR_294",
+            "2026-10-19T18:00:00+09:00",[{"id":"999999"}])
+        audit=runner.audit_storage()
+        self.assertEqual(audit["missing_clock"],1)
+        self.assertEqual(audit["orphan_front_receipts"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+
     def test_manual_review_not_masked_as_verified(self):
         runner=self.create(front={})
         for account in accounts():
