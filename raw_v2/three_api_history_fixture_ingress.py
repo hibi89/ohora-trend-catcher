@@ -48,6 +48,7 @@ class OfflineHistoryFixtureIngress:
                 or request.phase != "history"
                 or request.history_offline_only is not True):
             raise OfflineHistoryFixtureError("Explicit offline history fixture required")
+        stage = "p3_binding"
         try:
             job = self.epochs._job_row(job_id)
             if (job["epoch_kind"]!="history" or job["phase"]!="history"
@@ -76,21 +77,26 @@ class OfflineHistoryFixtureIngress:
                 raise OfflineHistoryFixtureError(
                     "Offline history fixture is not bound to P3"
                 )
+            stage = "intent"
             outcome = self.capture.get_intent_outcome(request.request_id)
             if outcome not in (None,"pending","captured"):
                 raise OfflineHistoryFixtureError(
                     "Unresolved or failed request is not replayable"
                 )
             self.capture.save_intent(request)
+            stage = "source_evidence"
             evidence = self.capture.save_response_evidence(response)
             if evidence["classification"]!="safe":
                 raise OfflineHistoryFixtureError(
                     "Cannot retain a safe history response"
                 )
+            stage = "normalization"
             record = capture_record_from_response(request,response)
+            stage = "durable_capture"
             persist_capture_verified(self.capture,record)
             # May fail after P1 commit. Only an explicit local replay of this
             # durable record can complete P2 without fetching a new response.
+            stage = "raw_receipt"
             receipt = commit_raw_and_confirm(self.capture,self.raw,record)
             return {
                 "status":receipt.status,
@@ -104,5 +110,5 @@ class OfflineHistoryFixtureIngress:
             raise
         except (ValueError,TypeError,LookupError,AttributeError):
             raise OfflineHistoryFixtureError(
-                "Offline history fixture proof was rejected"
+                "Offline history fixture proof was rejected at " + stage
             ) from None
