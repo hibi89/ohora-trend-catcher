@@ -47,7 +47,8 @@ def capture_record_from_response(request, response):
                             "Response request identity mismatch", request.request_id)
     try:
         normalized = normalize_meta_page(
-            response.payload, requested_cursor=request.request_spec.after)
+            response.payload, requested_cursor=request.request_spec.after,
+            allow_partial_children=True)
         paging = normalized.get("paging", {})
         cursors = paging.get("cursors", {}) if isinstance(paging, Mapping) else {}
         next_cursor = cursors.get("after") if isinstance(cursors, Mapping) else None
