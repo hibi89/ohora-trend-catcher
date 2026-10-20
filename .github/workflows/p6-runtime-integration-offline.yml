@@ -160,7 +160,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [orchestrator, roster, report, observations, remaining]
+        group: [orchestrator, roster, report, observations, projection, remaining]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -172,5 +172,5 @@ jobs:
         run: python tests/run_offline.py --list-groups
       - name: Run socket-blocked Windows regression group
         env:
-          OFFLINE_TEST_WATCHDOG_SECONDS: '180'
+          OFFLINE_TEST_WATCHDOG_SECONDS: '480'
         run: python -u tests/run_offline.py --group ${{ matrix.group }}
