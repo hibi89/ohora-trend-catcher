@@ -54,7 +54,7 @@ _FORBIDDEN = frozenset(("access_token", "token", "authorization",
     "client_secret", "app_secret", "paging.next", "next", "password",
     "secret", "cookie", "set-cookie", "headers", "usage_headers"))
 _FIELD_STATES = frozenset(("returned", "null", "absent", "not_tested"))
-_CAROUSEL_STATES = frozenset(("complete", "unknown", "not_applicable"))
+_CAROUSEL_STATES = frozenset(("complete", "partial", "unknown", "not_applicable"))
 _MAX_POSTS = 4  # approved RequestSpec page size
 _MAX_CHILDREN = 20
 _MAX_TEXT = 8192
@@ -165,8 +165,8 @@ def sanitize_meta_response(payload: Mapping[str, Any]) -> dict[str, Any]:
             paging = children.get("paging", {})
             if not isinstance(paging, Mapping):
                 raise ValueError("Invalid carousel paging")
-            if paging.get("next") or paging.get("has_next"):
-                raise ValueError("Incomplete carousel children")
+            # Store all returned child rows, without falsely declaring the
+            # page complete. Per-post coverage is checked by CaptureRecord.
             post["children"] = {"data": [
                 {k: child[k] for k in _CHILD_FIELDS if k in child}
                 for child in children["data"]]}
@@ -449,8 +449,8 @@ class CaptureRecord:
                 raise ValueError("Non-carousel must be not_applicable")
             if post.get("media_type") == "CAROUSEL_ALBUM":
                 children = post.get("children")
-                if status == "complete" and not isinstance(children, list):
-                    raise ValueError("Complete carousel requires children")
+                if status in ("complete", "partial") and not isinstance(children, list):
+                    raise ValueError("Observed carousel children are required")
                 if status == "unknown" and children is not None:
                     raise ValueError("Unknown carousel cannot claim children")
 
