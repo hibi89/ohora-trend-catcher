@@ -119,12 +119,14 @@ class P3EpochTests(unittest.TestCase):
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
-        self.proof(first,"req-seed",nxt="history_cursor_one")
+        self.proof(first,"req-seed",ids=["100"],nxt=None,
+                   terminal="verified_terminal")
         hist=self.store.create_history_epoch(self.digest,anchor_utc=NOW,
                                               cutoff_utc=NOW-timedelta(days=365))
         saved=self.store.initialize_history_from_verified_daily(
             hist,self.daily,"KR_001",at=NOW)
-        self.assertEqual(saved["cursor"],"history_cursor_one")
+        self.assertIsNone(saved["cursor"])
+        self.assertEqual(saved["history_state"],"terminal")
         second=self.store.seed_daily(DAY+timedelta(days=1),self.digest,
                                      anchor_utc=NOW+timedelta(days=1))
         self.assertNotEqual(second,self.daily)
@@ -133,9 +135,24 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.store.initialize_history_from_verified_daily(
             hist,second,"KR_001",at=NOW+timedelta(days=1))["status"],
             "already_initialized")
-        self.assertEqual(self.store.history_checkpoint(hist,"KR_001")["cursor"],
-                         "history_cursor_one")
+        self.assertIsNone(self.store.history_checkpoint(hist,"KR_001")["cursor"])
         self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(),[])
+
+    def test_history_seed_rejects_unfinished_front_chain(self):
+        first=self.job(1,1)
+        self.store.bind_daily(first,"req-incomplete",
+            build_request_spec("A","nail_001"),at=NOW)
+        self.proof(first,"req-incomplete",nxt="cursor_for_page2")
+        hist=self.store.create_history_epoch(self.digest,anchor_utc=NOW,
+            cutoff_utc=NOW-timedelta(days=365))
+        with self.assertRaises(EpochError):
+            self.store.initialize_history_from_verified_daily(
+                hist,self.daily,"KR_001",at=NOW)
+        self.assertIsNone(self.store.history_checkpoint(hist,"KR_001"))
+
+    def test_anchor_must_correspond_to_explicit_kst_day(self):
+        with self.assertRaises(EpochError):
+            self.store.seed_daily(DAY+timedelta(days=1),self.digest,anchor_utc=NOW)
 
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
