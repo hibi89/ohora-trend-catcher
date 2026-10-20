@@ -23,6 +23,27 @@ class PagingTests(unittest.TestCase):
         self.assertTrue(result["terminal"])
         self.assertIsNone(result["next_cursor"])
 
+    def test_full_page_without_paging_is_terminal_but_ambiguous_for_collection(self):
+        result = mod.validate_page_edge({"data": [{"id": str(i)} for i in range(4)]})
+        self.assertTrue(result["terminal"])
+        self.assertIsNone(result["next_cursor"])
+        self.assertEqual(result["records"], 4)
+
+    def test_after_cursor_without_next_is_not_resumable(self):
+        result = mod.validate_page_edge({
+            "data": [{"id": str(i)} for i in range(4)],
+            "paging": {"cursors": {"after": "abc123"}},
+        })
+        self.assertTrue(result["terminal"])
+        self.assertIsNone(result["next_cursor"])
+
+    def test_full_page_next_without_after_fails_closed(self):
+        with self.assertRaises(ValueError):
+            mod.validate_page_edge({
+                "data": [{"id": str(i)} for i in range(4)],
+                "paging": {"next": "https://graph.facebook.com/page"},
+            })
+
     def test_next_without_cursor_fails(self):
         with self.assertRaises(ValueError):
             mod.validate_page_edge({"data": [], "paging": {"next": "https://example.org"}})
