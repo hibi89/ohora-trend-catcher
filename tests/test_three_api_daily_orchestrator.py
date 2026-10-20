@@ -287,15 +287,23 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
             "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
 
     def test_serial_dispatch_commits_one_page_per_tick(self):
+        self.front[(151,1,None)]=fixture([30151],None)
+        self.front[(1,2,"p2")]=fixture([111,110,109,108],None)
         runner=self.create()
-        first=runner.step_serial(now=NOW)
-        self.assertEqual((first["selected_lane"],first["status"]),
-                         ("A","front_committed"))
-        self.assertEqual(runner.coverage()["front_pages"],1)
-        second=runner.step_serial(now=NOW)
-        self.assertEqual(second["selected_lane"],"A")
-        self.assertEqual(second["status"],"front_fixture_missing")
-        self.assertEqual(runner.coverage()["front_pages"],1)
+        expected=(("A",1,1),("B",151,1),("C",1,2))
+        for index,(lane,ordinal,page) in enumerate(expected,1):
+            with self.subTest(tick=index):
+                result=runner.step_serial(now=NOW)
+                self.assertEqual((result["selected_lane"],result["status"]),
+                                 (lane,"front_committed"))
+                self.assertEqual((result["account_ordinal"],result["page"]),
+                                 (ordinal,page))
+                self.assertEqual(runner.coverage()["front_pages"],index)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],9)
+        blocked=runner.step_serial(now=NOW)
+        self.assertEqual((blocked["selected_lane"],blocked["status"]),
+                         ("A","front_fixture_missing"))
+        self.assertEqual(runner.coverage()["front_pages"],3)
 
     def test_serial_dispatch_skips_quota_stopped_lane_without_parallel_calls(self):
         for ordinal in range(2,295):
@@ -315,6 +323,62 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         with self.assertRaises(OfflineDailyScheduleError):
             runner.step_serial(now=NOW,lane_order=("A","A","C"))
         self.assertEqual(runner.coverage()["front_pages"],0)
+
+    def test_serial_lane_turn_survives_process_restart(self):
+        self.front[(151,1,None)]=fixture([30151],None)
+        runner=self.create()
+        self.assertEqual(runner.step_serial(now=NOW)["selected_lane"],"A")
+        runner.close()
+        resumed=self.create()
+        result=resumed.step_serial(now=NOW)
+        self.assertEqual((result["selected_lane"],result["status"]),
+                         ("B","front_committed"))
+        self.assertEqual(resumed.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone()[0],"B")
+        self.assertEqual(resumed.coverage()["front_pages"],2)
+        self.assertEqual(resumed.mirror.summary()["raw_posts"],5)
+
+    def test_serial_missing_fixture_does_not_advance_durable_turn(self):
+        runner=self.create(front={})
+        first=runner.step_serial(now=NOW)
+        self.assertEqual((first["selected_lane"],first["status"]),
+                         ("A","front_fixture_missing"))
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
+        runner.close()
+        retry=self.create()
+        second=retry.step_serial(now=NOW)
+        self.assertEqual((second["selected_lane"],second["status"]),
+                         ("A","front_fixture_missing"))
+        self.assertEqual(retry.coverage()["front_pages"],0)
+
+    def test_serial_all_quota_lanes_stop_without_new_proof(self):
+        runner=self.create()
+        for lane in ("A","B","C"):
+            self.assertTrue(runner.coordinator.observe_usage(lane,85,now=NOW))
+        self.assertEqual(runner.step_serial(now=NOW),
+                         {"status":"all_lanes_unavailable","selected_lane":None})
+        self.assertEqual(runner.coverage()["front_pages"],0)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
+
+    def test_serial_invalid_lane_values_are_rejected_without_mutation(self):
+        runner=self.create()
+        for bad in (("A","A","C"), ("A",[], "C"), ("A","D","C"),
+                    ("A","B"), ("A",None,"C")):
+            with self.subTest(bad=str(bad)):
+                with self.assertRaises(OfflineDailyScheduleError):
+                    runner.step_serial(now=NOW,lane_order=bad)
+        with self.assertRaises(OfflineDailyScheduleError):
+            runner.step_serial(now=datetime(2026,10,19))
+        self.assertEqual(runner.coverage()["front_pages"],0)
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
 
     def test_quota_stop_keeps_uncommitted_raw_and_evidence_empty(self):
         runner=self.create()
