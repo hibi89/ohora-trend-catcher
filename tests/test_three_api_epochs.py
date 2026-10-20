@@ -897,19 +897,26 @@ class P3EpochTests(unittest.TestCase):
 
     def test_history_replay_rejects_latest_request_cursor_tampering(self):
         history=self.open_history_fixture()
-        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
-        self.store.bind_history(page["job_id"],"req-bound-cursor",
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"req-bound-cursor-one",
             build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
         args=dict(observed_at=NOW,ordered_ids=["901"],
             next_cursor="after_bound_cursor",terminal_basis="continued",
             source_evidence_id="cursor-proof",raw_receipt_id="raw-cursor",
             source_digest="a"*64)
-        self.store.commit_history_page(page["job_id"],"req-bound-cursor",**args)
+        self.store.commit_history_page(first["job_id"],"req-bound-cursor-one",**args)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"req-bound-cursor-two",
+            build_request_spec("B","nail_001",after="after_bound_cursor"),at=NOW)
+        self.store.commit_history_page(second["job_id"],"req-bound-cursor-two",
+            observed_at=NOW,ordered_ids=["902"],next_cursor="third_cursor",
+            terminal_basis="continued",source_evidence_id="cursor-proof-two",
+            raw_receipt_id="raw-cursor-two",source_digest="b"*64)
         self.db.execute("""UPDATE request_bindings_v2 SET requested_cursor=?
-            WHERE job_id=?""",("forged_cursor",page["job_id"]))
+            WHERE job_id=?""",("forged_cursor",second["job_id"]))
         before=self.db.total_changes
         with self.assertRaisesRegex(EpochError,"chain binding differs"):
-            self.store.commit_history_page(page["job_id"],"req-bound-cursor",**args)
+            self.store.commit_history_page(first["job_id"],"req-bound-cursor-one",**args)
         self.assertEqual(self.db.total_changes,before)
 
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
