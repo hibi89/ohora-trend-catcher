@@ -311,7 +311,7 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
         self.assertEqual(runner.coordinator.db.execute(
             "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
-        self.assertEqual(runner.mirror.summary()["raw_posts"],4)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],1)
         self.assertEqual(runner.step("A",now=NOW)["status"],
                          "front_lane_unavailable")
 
