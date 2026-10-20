@@ -129,6 +129,73 @@ class OfflineHistoryP1P2Tests(unittest.TestCase):
         ).fetchone()[0],0)
         self.assertEqual(self.fx.db.execute("PRAGMA foreign_key_check").fetchall(),[])
 
+    def _commit_one_offline_history_page(self):
+        self.ingress.save_supplied_response(
+            self.job["job_id"], self.request, self.response
+        )
+        self.assertEqual(
+            self.projector.project_history_page(self.job["job_id"])["status"],
+            "committed",
+        )
+
+    def test_replay_rejects_corrupted_latest_history_checkpoint(self):
+        """An immutable page is not enough when the P3 recovery head is wrong."""
+        self._commit_one_offline_history_page()
+        original=self.fx.store.history_checkpoint(self.history,"KR_001")
+        corruptions=(
+            ("cursor","altered_history_cursor"),
+            ("last_receipt","rawv2:wrong-receipt"),
+            ("chain_hash","f"*64),
+            ("updated_at","2026-10-19T00:00:00.000000Z"),
+            ("status","open"),
+        )
+        for field,wrong in corruptions:
+            with self.subTest(field=field):
+                self.fx.db.execute(
+                    "UPDATE cursor_checkpoints SET "+field+"=? "
+                    "WHERE epoch_id=? AND account_key=? AND stream='history'",
+                    (wrong,self.history,"KR_001"),
+                )
+                before=self.fx.db.total_changes
+                with self.assertRaisesRegex(
+                    OfflineEpochContractError,
+                    "Stored epoch/Capture/RAW proof rejected at epoch_commit",
+                ):
+                    self.projector.project_history_page(self.job["job_id"])
+                self.assertEqual(self.fx.db.total_changes,before)
+                self.fx.db.execute(
+                    "UPDATE cursor_checkpoints SET "+field+"=? "
+                    "WHERE epoch_id=? AND account_key=? AND stream='history'",
+                    (original[field],self.history,"KR_001"),
+                )
+        self.assertEqual(
+            self.projector.project_history_page(self.job["job_id"])["status"],
+            "already_committed",
+        )
+
+    def test_replay_rejects_missing_history_checkpoint(self):
+        self._commit_one_offline_history_page()
+        self.fx.db.execute(
+            "DELETE FROM cursor_checkpoints "
+            "WHERE epoch_id=? AND account_key=? AND stream='history'",
+            (self.history,"KR_001"),
+        )
+        before=self.fx.db.total_changes
+        with self.assertRaises(OfflineEpochContractError):
+            self.projector.project_history_page(self.job["job_id"])
+        self.assertEqual(self.fx.db.total_changes,before)
+
+    def test_replay_rejects_job_state_inconsistent_with_durable_page(self):
+        self._commit_one_offline_history_page()
+        self.fx.db.execute(
+            "UPDATE jobs_v2 SET state='bound' WHERE job_id=?",
+            (self.job["job_id"],),
+        )
+        before=self.fx.db.total_changes
+        with self.assertRaises(OfflineEpochContractError):
+            self.projector.project_history_page(self.job["job_id"])
+        self.assertEqual(self.fx.db.total_changes,before)
+
     def test_existing_front_canonical_bytes_are_unchanged(self):
         from test_three_api_contract_executor import make_request
         front=make_request()
@@ -306,6 +373,12 @@ class OfflineHistoryP1P2Tests(unittest.TestCase):
         checkpoint_before=dict(after)
         self.assertEqual(
             self.projector.project_history_page(second["job_id"])["status"],
+            "already_committed"
+        )
+        # Replaying an older P1/P2 source after page 2 must still work:
+        # the checkpoint legitimately points to page 2, not page 1.
+        self.assertEqual(
+            self.projector.project_history_page(self.job["job_id"])["status"],
             "already_committed"
         )
         self.assertEqual(
