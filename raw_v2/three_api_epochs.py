@@ -497,6 +497,14 @@ class ThreeApiEpochStore:
             expected=(request_id,bound[1],next_cursor,stamp,_json(ids),
                       terminal_basis,source_evidence_id,raw_receipt_id,
                       source_digest,chain)
+            try:
+                stored_ids=json.loads(stored[4])
+            except (TypeError,ValueError) as exc:
+                raise EpochError("Daily replay media evidence invalid") from exc
+            if (not isinstance(stored_ids,list) or len(stored_ids)>4 or
+                    any(not isinstance(v,str) or not v.isdecimal() or len(v)>64
+                        for v in stored_ids) or len(set(stored_ids))!=len(stored_ids)):
+                raise EpochError("Daily replay media evidence invalid")
             if tuple(stored)!=expected:
                 raise EpochError("Conflicting immutable daily page replay")
             cp=self.db.execute("""SELECT cursor,anchor_post_id,last_receipt,
