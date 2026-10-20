@@ -182,6 +182,12 @@ class DailyGapTests(unittest.TestCase):
             self.l.db.set_trace_callback(None)
         self.assertEqual(statements, [])
 
+    def test_empty_roster_returns_no_actions(self):
+        """An empty requested roster must never schedule off-roster accounts."""
+        self.seed()
+        self.front()
+        self.assertEqual(self.l.next_actions([], "2026-10-19"), [])
+
     def test_front_is_first_for_all_accounts(self):
         self.seed();self.front()
         self.l.seed_previous_head("US_151","200")
