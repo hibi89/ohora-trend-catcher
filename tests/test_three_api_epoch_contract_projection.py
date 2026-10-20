@@ -113,6 +113,89 @@ class OfflineEpochContractProjectionTests(unittest.TestCase):
             self.epochs, self.journal, self.raw
         )
 
+    def _save_synthetic_reel(self, *, views=42, include_views=True):
+        """Exercise the real P1/P2 receipt writer, never the Meta network."""
+        response = make_response(self.request)
+        post = response.payload["business_discovery"]["media"]["data"][0]
+        post["media_type"] = "VIDEO"
+        post["media_product_type"] = "REELS"
+        if include_views:
+            post["view_count"] = views
+        transport = FakeTransport(response)
+        ThreeApiContractExecutor(
+            transport, self.journal, self.raw, clock=lambda: OBSERVED_AT
+        ).execute(self.request)
+        self.assertEqual(transport.calls, 1)
+        self.assertEqual(self.state(), "bound")
+
+    def test_reel_view_count_zero_and_field_receipt_project_p3(self):
+        self._save_synthetic_reel(views=0)
+        fields = self.rawdb.execute(
+            "SELECT status FROM field_observations "
+            "WHERE request_id=? AND field_name='view_count'",
+            (self.request.request_id,),
+        ).fetchall()
+        self.assertEqual(fields, [("returned",)])
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"], "committed"
+        )
+        self.assertEqual(self.state(), "done")
+
+    def test_reel_missing_views_remains_absent_not_zero(self):
+        self._save_synthetic_reel(include_views=False)
+        row = self.rawdb.execute(
+            "SELECT s.full_values_json,s.field_states_json FROM post_checks c "
+            "JOIN post_states s ON c.metrics_state_id=s.state_id "
+            "WHERE c.request_id=?", (self.request.request_id,),
+        ).fetchone()
+        self.assertNotIn("view_count", json.loads(row[0]))
+        self.assertEqual(json.loads(row[1])["view_count"], "absent")
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"], "committed"
+        )
+
+    def test_reel_explicit_null_views_remains_null(self):
+        self._save_synthetic_reel(views=None)
+        row = self.rawdb.execute(
+            "SELECT status FROM field_observations "
+            "WHERE request_id=? AND field_name='view_count'",
+            (self.request.request_id,),
+        ).fetchone()
+        self.assertEqual(row[0], "null")
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"], "committed"
+        )
+
+    def test_reel_view_field_status_tampering_blocks_p3(self):
+        self._save_synthetic_reel(views=123)
+        self.rawdb.execute(
+            "UPDATE field_observations SET status='absent' "
+            "WHERE request_id=? AND field_name='view_count'",
+            (self.request.request_id,),
+        )
+        previous = self.p3db.total_changes
+        with self.assertRaisesRegex(
+            OfflineEpochContractError, "RAW metric field observations incomplete"
+        ):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.state(), "bound")
+        self.assertEqual(self.p3db.total_changes, previous)
+
+    def test_reel_missing_field_observation_blocks_p3(self):
+        self._save_synthetic_reel(views=77)
+        self.rawdb.execute(
+            "DELETE FROM field_observations "
+            "WHERE request_id=? AND field_name='view_count'",
+            (self.request.request_id,),
+        )
+        previous = self.p3db.total_changes
+        with self.assertRaisesRegex(
+            OfflineEpochContractError, "RAW metric field observations incomplete"
+        ):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.state(), "bound")
+        self.assertEqual(self.p3db.total_changes, previous)
+
     def test_durable_capture_and_raw_receipt_advance_p3_only_once(self):
         transport, receipt = self.execute()
         self.assertEqual(transport.calls, 1)
