@@ -103,6 +103,23 @@ class ReelMetricTests(unittest.TestCase):
             "WHERE field_name='view_count' ORDER BY rowid"
         ).fetchall(), [("returned",), ("null",)])
 
+    def test_reels_views_support_large_counts_without_truncation(self):
+        self.collect(1, views=2**31-1)
+        self.collect(2, views=2**31, hour=1)
+        rows = self.db.execute(
+            "SELECT s.full_values_json FROM post_checks c "
+            "JOIN post_states s ON s.state_id=c.metrics_state_id "
+            "ORDER BY c.observed_at"
+        ).fetchall()
+        self.assertEqual(
+            [json.loads(row[0])["view_count"] for row in rows],
+            [2**31-1, 2**31],
+        )
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM current_change_events "
+            "WHERE field_path='metrics.view_count'"
+        ).fetchone()[0], 1)
+
     def test_invalid_views_fail_closed_without_raw_receipt(self):
         for value in (True, -1, "100"):
             with self.subTest(value=value):
