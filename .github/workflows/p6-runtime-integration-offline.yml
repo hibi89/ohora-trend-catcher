@@ -129,6 +129,9 @@ jobs:
             raw_v2/three_api_contract_executor.py \
             raw_v2/three_api_runtime_contract.py \
             raw_v2/three_api_raw_writer.py \
+            raw_v2/three_api_serial_lock.py \
+            tests/test_three_api_serial_lock.py \
+            tests/test_three_api_serial_catchup.py \
             raw_v2/three_api_epochs.py \
             raw_v2/three_api_history_cutoff_audit.py \
             raw_v2/three_api_epoch_contract_projection.py \
