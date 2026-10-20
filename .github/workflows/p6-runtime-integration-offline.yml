@@ -20,6 +20,12 @@ on:
       - 'tests/test_three_api_runtime_contract.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
+      - 'raw_v2/three_api_coordinator.py'
+      - 'raw_v2/three_api_evidence.py'
+      - 'raw_v2/three_api_job_binding.py'
+      - 'raw_v2/three_api_adapter_guard.py'
+      - 'tests/test_three_api_job_binding.py'
+      - 'tests/run_offline.py'
       - '.github/workflows/p6-runtime-integration-offline.yml'
   push:
     paths:
@@ -40,6 +46,12 @@ on:
       - 'tests/test_three_api_runtime_contract.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
+      - 'raw_v2/three_api_coordinator.py'
+      - 'raw_v2/three_api_evidence.py'
+      - 'raw_v2/three_api_job_binding.py'
+      - 'raw_v2/three_api_adapter_guard.py'
+      - 'tests/test_three_api_job_binding.py'
+      - 'tests/run_offline.py'
       - '.github/workflows/p6-runtime-integration-offline.yml'
   workflow_dispatch:
 
@@ -68,4 +80,19 @@ jobs:
             tests/test_three_api_raw_writer.py \
             tests/test_three_api_transport.py
       - name: Run complete offline regression suite with sockets blocked
+        run: python tests/run_offline.py
+
+  offline-windows:
+    # Independently prove the same socket-blocked fixture suite on Windows.
+    # No repository secrets, Meta calls, or production database connections.
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile offline modules and tests on Windows
+        run: python -m compileall -q raw_v2 tests
+      - name: Run complete offline regression suite on Windows with sockets blocked
         run: python tests/run_offline.py
