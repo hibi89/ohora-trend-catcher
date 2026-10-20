@@ -67,11 +67,15 @@ class MetaTransport:
         self._caller_ig_id = caller_ig_id
         self._token = token
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._halt_reason = None  # Local stop; persistent lane gate remains coordinator-owned.
 
     def send(self, request):
         # The sole HTTP sender is the existing gated GraphHTTPClient. Its
         # default is disabled; no token is read from disk or environment here.
         version, response_type, _ = _contract()
+        if self._halt_reason is not None:
+            _fail(request.request_id, self._halt_reason, "global",
+                  "Further transport requests are halted")
         if request.contract_version != version:
             _fail(request.request_id, "approval_denied", "global", "Contract mismatch")
         if request.lane != self._credentials.lane:
@@ -106,25 +110,25 @@ class MetaTransport:
             _fail(request.request_id, "permission", "account", "Permission rejected", status=status)
         if not 200 <= status < 300 or "error" in result["body"]:
             _fail(request.request_id, "http_error", "account", "HTTP rejected", status=status)
-        # The current GraphHTTPClient retains only allowlisted usage headers.
-        # Never silently accept missing headers; C's final parser must be used
-        # before any capture is committed.
+        # Keep the successfully received body available for P1's durable
+        # response-evidence journal, even at >=85% usage or malformed paging.
+        # The following request is blocked; a received response is not lost.
         headers = result.get("headers")
-        if not isinstance(headers, dict) or not headers:
-            _fail(request.request_id, "usage_missing", "global", "Usage evidence missing")
+        headers = headers if isinstance(headers, dict) else {}
         try:
             usage = parse_meta_usage(headers)
         except ValueError:
-            _fail(request.request_id, "usage_missing", "global", "Unverifiable usage")
-        if usage >= 85:
-            _fail(request.request_id, "usage_limit", "global", "Usage threshold reached")
+            usage = None
+        if usage is None:
+            self._halt_reason = "usage_missing"
+        elif usage >= 85:
+            self._halt_reason = "usage_limit"
         try:
             next_cursor = extract_next_cursor(
                 result["body"], requested_cursor=request.request_spec.after)
-            received_at = self._clock()
-            return response_type(
-                version, request.request_id, status, result["body"], headers,
-                received_at, next_cursor)
         except (ValueError, TypeError):
-            _fail(request.request_id, "invalid_response", "account",
-                  "Meta response rejected by cursor validation", status=status)
+            # Executor validates the cursor AFTER response evidence persists.
+            next_cursor = None
+        return response_type(
+            version, request.request_id, status, result["body"], headers,
+            self._clock(), next_cursor)
