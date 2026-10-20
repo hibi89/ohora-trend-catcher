@@ -38,18 +38,28 @@ class OfflineEpochContractProjector:
         self.raw = raw
 
     def project_front_page(self, job_id):
-        """Finish a bound daily P3 job using ONLY already-committed P1/P2 proof.
+        """Project one stored daily-front P1/P2 proof, never send HTTP."""
+        return self._project_verified_page(job_id, history=False)
 
-        This never calls a transport, retries a request, supplies an
-        observation clock, repairs RAW, or marks unresolved outcomes as done.
-        Already-bound previous-day responses can complete after KST rollover.
+    def project_history_page(self, job_id):
+        """Project OFFLINE-only history proof into an already-bound P3 job.
+
+        This never authorizes the Meta transport, never schedules history,
+        never writes a new capture/RAW, and never verifies a 365/730 cutoff.
         """
+        return self._project_verified_page(job_id, history=True)
+
+    def _project_verified_page(self, job_id, *, history):
+        """Require durable P1 response, Capture, RAW v2, ACK and P2 state proof."""
         stage = "bound_job"
         try:
             job = self.epochs._job_row(job_id)
-            if (job["epoch_kind"] != "daily" or job["phase"] != "daily_front"
-                    or job["state"] not in ("bound", "done")):
-                raise OfflineEpochContractError("Bound daily front proof required")
+            expected_kind = "history" if history else "daily"
+            expected_phase = "history" if history else "daily_front"
+            if (job["epoch_kind"] != expected_kind or
+                    job["phase"] != expected_phase or
+                    job["state"] not in ("bound", "done")):
+                raise OfflineEpochContractError("Bound epoch page proof required")
             binding = self.epochs.db.execute(
                 "SELECT request_id,requested_cursor,request_spec_digest "
                 "FROM request_bindings_v2 WHERE job_id=?", (job_id,)
@@ -70,8 +80,10 @@ class OfflineEpochContractProjector:
                 "SELECT username FROM roster_members WHERE roster_digest=? "
                 "AND account_key=?", (job["roster_digest"], job["account_key"])
             ).fetchone()
-            if (epoch is None or member is None or request.phase != "front"
-                    or request.day_kst != date.fromisoformat(epoch[0])
+            if (epoch is None or member is None
+                    or request.phase != ("history" if history else "front")
+                    or (history and request.history_offline_only is not True)
+                    or (not history and request.day_kst != date.fromisoformat(epoch[0]))
                     or request.roster_digest != epoch[1]
                     or request.account_key != job["account_key"]
                     or request.account_ordinal != job["ordinal"]
@@ -225,8 +237,8 @@ class OfflineEpochContractProjector:
                             "RAW media ownership or identity differs"
                         )
             stage = "epoch_commit"
-            return self.epochs.commit_daily_page(
-                job_id, request_id, observed_at=record.observed_at,
+            fields = dict(
+                observed_at=record.observed_at,
                 ordered_ids=[post["id"] for post in record.normalized_posts],
                 next_cursor=record.cursor_state.next_cursor,
                 terminal_basis=("continued" if
@@ -236,6 +248,11 @@ class OfflineEpochContractProjector:
                 raw_receipt_id=receipt.raw_receipt_id,
                 source_digest=record.cursor_state.source_digest,
             )
+            if history:
+                return self.epochs.commit_history_page(
+                    job_id, request_id, **fields
+                )
+            return self.epochs.commit_daily_page(job_id, request_id, **fields)
         except OfflineEpochContractError:
             raise
         except (EpochError, RawWriteError, sqlite3.Error, ValueError, KeyError, TypeError, AttributeError):
