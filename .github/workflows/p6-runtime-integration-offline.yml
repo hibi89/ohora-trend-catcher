@@ -26,10 +26,12 @@ on:
       - 'tests/test_three_api_p2_observations.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
+      - 'raw_v2/three_api_epochs.py'
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_evidence.py'
       - 'raw_v2/three_api_job_binding.py'
       - 'raw_v2/three_api_adapter_guard.py'
+      - 'tests/test_three_api_epochs.py'
       - 'tests/test_three_api_job_binding.py'
       - 'tests/run_offline.py'
       - '.github/workflows/p6-runtime-integration-offline.yml'
@@ -58,10 +60,12 @@ on:
       - 'tests/test_three_api_p2_observations.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
+      - 'raw_v2/three_api_epochs.py'
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_evidence.py'
       - 'raw_v2/three_api_job_binding.py'
       - 'raw_v2/three_api_adapter_guard.py'
+      - 'tests/test_three_api_epochs.py'
       - 'tests/test_three_api_job_binding.py'
       - 'tests/run_offline.py'
       - '.github/workflows/p6-runtime-integration-offline.yml'
@@ -87,6 +91,7 @@ jobs:
             raw_v2/three_api_contract_executor.py \
             raw_v2/three_api_runtime_contract.py \
             raw_v2/three_api_raw_writer.py \
+            raw_v2/three_api_epochs.py \
             raw_v2/three_api_observation_versions.py \
             raw_v2/three_api_p2_clone_migration.py \
             raw_v2/three_api_transport.py \
@@ -94,6 +99,7 @@ jobs:
             tests/test_three_api_p1_response_evidence.py \
             tests/test_three_api_runtime_contract.py \
             tests/test_three_api_raw_writer.py \
+            tests/test_three_api_epochs.py \
             tests/test_three_api_p2_observations.py \
             tests/test_three_api_p2_clone_migration.py \
             tests/test_three_api_transport.py
