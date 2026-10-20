@@ -16,7 +16,7 @@ class DailyGapTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name)/"three_api_daily_gap.sqlite"
         self.l = DailyGapLedger(self.path)
-        self.addCleanup(self.l.close)
+        self.addCleanup(lambda: self.l.close())
 
     def seed(self, account="KR_001"):
         self.l.seed_previous_head(account,"100")
