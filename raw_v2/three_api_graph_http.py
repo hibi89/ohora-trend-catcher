@@ -67,7 +67,8 @@ def _validate_prepared(prepared):
     try:
         spec = build_request_spec(prepared.lane, prepared.username,
                                   after=prepared.after, limit=4,
-                                  include_carousel_children=prepared.include_carousel_children)
+                                  include_carousel_children=prepared.include_carousel_children,
+                                  include_account_metrics=prepared.include_account_metrics)
     except (ValueError, TypeError):
         raise GraphHTTPBlocked("Invalid Graph request specification") from None
     if (prepared.after_present != (prepared.after is not None)
