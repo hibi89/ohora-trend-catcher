@@ -64,6 +64,22 @@ class RequestSpecTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_request_spec("A", "nails", include_account_metrics=1)
 
+    def test_every_lane_uses_fixed_four_for_first_and_cursor_pages(self):
+        for lane in ("A", "B", "C"):
+            for cursor in (None, "cursor_123"):
+                with self.subTest(lane=lane, cursor=cursor):
+                    spec = build_request_spec(lane, "nails", after=cursor)
+                    self.assertEqual(spec.limit, 4)
+                    field = business_discovery_field(spec)
+                    self.assertIn("media.limit(4)", field) if cursor is None else self.assertIn("limit(4)", field)
+                    self.assertIn("view_count", field)
+                    self.assertNotIn("access_token", field)
+
+    def test_fixed_four_rejects_numeric_equivalents_and_overrides(self):
+        for value in (None, 0, 3, 5, 4.0, True, False, "4"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                build_request_spec("A", "nails", limit=value)
+
     def test_fixed_page_size_and_lane(self):
         for limit in (0, 5, True):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
