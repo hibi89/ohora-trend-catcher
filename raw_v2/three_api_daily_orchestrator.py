@@ -26,7 +26,11 @@ from three_api_daily_gap import DailyGapLedger, _day
 from three_api_daily_projection import DailyEvidenceProjector
 from three_api_evidence import PageEvidenceStore
 from three_api_meta_normalizer import normalize_meta_page
-from three_api_raw_mirror import OfflineRawMirror, _observation_time
+from three_api_raw_mirror import (
+    OfflineRawMirror, OfflineRawMirrorError, _observation_time,
+    _normalize_post, _canonical,
+)
+from three_api_raw_projection import OfflineRawProjectionError
 from three_api_raw_projection import OfflineRawEvidenceProjector
 from three_api_catchup_offline import OfflineCatchupRunner, OfflineCatchupError
 from three_api_catchup_payload import (
@@ -156,6 +160,128 @@ class OfflineDailyOrchestrator:
             "day_status_counts":statuses,
             "mirror_posts":self.mirror.summary()["raw_posts"],
             "mirror_pending_pages":self.mirror.summary()["pending_pages"]
+        }
+
+    def audit_storage(self):
+        """Read-only cross-DB proof audit for the synthetic offline P4 boundary.
+
+        This does not reconcile, fetch, promote, or mark work complete.
+        It checks immutable source/ledger proof, capture clock, staged RAW
+        digest, committed observations, and parent/child media identity.
+        Failure counters intentionally never disclose posts or cursors.
+        """
+        self.daily._verify_binding()
+        counters = {
+            "verified_pages": 0, "missing_clock": 0,
+            "unverified_source": 0, "missing_receipt": 0,
+            "staged_receipts": 0, "receipt_mismatch": 0,
+            "observation_mismatch": 0, "orphan_front_receipts": 0,
+        }
+        pages = list(self.coordinator.db.execute(
+            "SELECT account_ordinal,page,job_id FROM page_evidence "
+            "ORDER BY account_ordinal,page"
+        ))
+        known = set()
+        for page in pages:
+            ordinal, sequence, job_id = (
+                page["account_ordinal"], page["page"], page["job_id"]
+            )
+            receipt_id = f"front.{self.day}.{ordinal:03d}.p{sequence}"
+            known.add(receipt_id)
+            clock = self.coordinator.db.execute(
+                "SELECT observed_at FROM offline_fixture_clock WHERE job_id=?",
+                (job_id,)
+            ).fetchone()
+            if clock is None:
+                counters["missing_clock"] += 1
+                continue
+            try:
+                account, posts = self.raw._validated_page(ordinal, sequence)
+                normalized = [_normalize_post(post) for post in posts]
+                payload = _canonical(normalized)
+                digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                observed = _observation_time(clock["observed_at"])
+            except (OfflineRawProjectionError, OfflineRawMirrorError,
+                    TypeError, ValueError):
+                counters["unverified_source"] += 1
+                continue
+            receipt = self.mirror.db.execute(
+                "SELECT account_key,observed_at,payload_sha256,payload_json,state "
+                "FROM page_receipts WHERE request_id=?", (receipt_id,)
+            ).fetchone()
+            if receipt is None:
+                counters["missing_receipt"] += 1
+                continue
+            if (receipt["account_key"] != account or
+                    receipt["observed_at"] != observed or
+                    receipt["payload_sha256"] != digest or
+                    receipt["payload_json"] != payload):
+                counters["receipt_mismatch"] += 1
+                continue
+            if receipt["state"] == "staged":
+                counters["staged_receipts"] += 1
+                continue
+            if receipt["state"] != "committed":
+                counters["receipt_mismatch"] += 1
+                continue
+            observations = list(self.mirror.db.execute(
+                "SELECT post_id,observed_at,like_count,comments_count,"
+                "like_present,comments_present FROM raw_post_observations "
+                "WHERE request_id=?", (receipt_id,)
+            ))
+            expected_ids = {post["id"] for post in normalized}
+            got_ids = {row["post_id"] for row in observations}
+            verified = len(observations) == len(expected_ids) and got_ids == expected_ids
+            if verified:
+                by_id = {post["id"]: post for post in normalized}
+                for observation in observations:
+                    post = by_id[observation["post_id"]]
+                    if (observation["observed_at"] != observed or
+                            observation["like_count"] != post.get("like_count") or
+                            observation["comments_count"] != post.get("comments_count") or
+                            observation["like_present"] != int("like_count" in post) or
+                            observation["comments_present"] != int("comments_count" in post)):
+                        verified = False
+                        break
+                    stored = self.mirror.db.execute(
+                        "SELECT account_key FROM raw_posts WHERE post_id=?",
+                        (post["id"],)
+                    ).fetchone()
+                    if stored is None or stored["account_key"] != account:
+                        verified = False
+                        break
+                    media = list(self.mirror.db.execute(
+                        "SELECT media_id,account_key,media_role,item_order "
+                        "FROM raw_post_media WHERE post_id=?", (post["id"],)
+                    ))
+                    expected_media = {
+                        (post["id"],account,"parent",0),
+                        *((child["media_id"],account,"child",child["item_order"])
+                          for child in post["children"]),
+                    }
+                    if {tuple(m) for m in media} != expected_media or len(media) != len(expected_media):
+                        verified = False
+                        break
+            if verified:
+                counters["verified_pages"] += 1
+            else:
+                counters["observation_mismatch"] += 1
+        other_receipts = self.mirror.db.execute(
+            "SELECT request_id FROM page_receipts WHERE request_id LIKE ?",
+            (f"front.{self.day}.%",)
+        )
+        counters["orphan_front_receipts"] = sum(
+            row["request_id"] not in known for row in other_receipts
+        )
+        pending = len(pages) - counters["verified_pages"]
+        return {
+            "mode": "SYNTHETIC_OFFLINE_READ_ONLY_AUDIT",
+            "day": self.day, "source_pages": len(pages),
+            **counters, "pages_requiring_attention": pending,
+            "storage_verified": pending == 0 and
+                                counters["orphan_front_receipts"] == 0,
+            "history_dispatch_enabled": False,
+            "unattended_execution_enabled": False,
         }
 
     def operator_report(self, *, now):
