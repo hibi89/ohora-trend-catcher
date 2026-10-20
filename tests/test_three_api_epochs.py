@@ -840,31 +840,30 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.db.total_changes,before)
 
     def test_history_replay_rejects_invalid_media_shapes(self):
-        """A durable replay cannot trust a parseable but invalid JSON list."""
+        """A durable replay cannot trust parseable but invalid JSON lists."""
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        request_id="req-shape"
+        self.store.bind_history(page["job_id"],request_id,
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["901"],
+                  next_cursor="shape_next_cursor",terminal_basis="continued",
+                  source_evidence_id="safe-shape",raw_receipt_id="raw-shape",
+                  source_digest="a"*64)
+        self.store.commit_history_page(page["job_id"],request_id,**args)
         for payload in ('null','{}','"901"','[901]','["901","901"]',
                         '["901","902","903","904","905"]','["not-a-media-id"]'):
             with self.subTest(payload=payload):
-                history=self.open_history_fixture()
-                page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
-                request_id="req-shape-"+str(len(payload))
-                self.store.bind_history(page["job_id"],request_id,
-                    build_request_spec("A","nail_001",after="history_first_cursor"),
-                    at=NOW)
-                args=dict(observed_at=NOW,ordered_ids=["901"],
-                          next_cursor="shape_next_cursor",terminal_basis="continued",
-                          source_evidence_id="safe-shape",raw_receipt_id="raw-shape",
-                          source_digest="a"*64)
-                self.store.commit_history_page(page["job_id"],request_id,**args)
                 self.db.execute("UPDATE page_evidence_v2 SET ordered_ids_json=? WHERE job_id=?",
                                 (payload,page["job_id"]))
                 before=self.db.total_changes
                 with self.assertRaises(EpochError):
                     self.store.commit_history_page(page["job_id"],request_id,**args)
                 self.assertEqual(self.db.total_changes,before)
-                self.db.execute("UPDATE page_evidence_v2 SET ordered_ids_json=? WHERE job_id=?",
-                                ('["901"]',page["job_id"]))
-                self.assertEqual(self.store.commit_history_page(
-                    page["job_id"],request_id,**args)["status"],"already_committed")
+        self.db.execute("UPDATE page_evidence_v2 SET ordered_ids_json=? WHERE job_id=?",
+                        ('["901"]',page["job_id"]))
+        self.assertEqual(self.store.commit_history_page(
+            page["job_id"],request_id,**args)["status"],"already_committed")
 
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
