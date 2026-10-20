@@ -84,6 +84,35 @@ class OfflineEpochContractProjectionTests(unittest.TestCase):
             "SELECT state FROM jobs_v2 WHERE job_id=?", (self.job,)
         ).fetchone()[0]
 
+    def restart_three_stores(self):
+        """Snapshot the two in-memory databases, reopen all three on disk.
+
+        GitHub actions and test runners stay offline. No transport object is
+        retained, and this helper does not run any recovery automatically.
+        """
+        raw_path = Path(self.tmp.name) / "raw_v2_snapshot.sqlite"
+        p3_path = Path(self.tmp.name) / "p3_epoch_snapshot.sqlite"
+        raw_copy = sqlite3.connect(raw_path, isolation_level=None)
+        p3_copy = sqlite3.connect(p3_path, isolation_level=None)
+        try:
+            self.rawdb.backup(raw_copy)
+            self.p3db.backup(p3_copy)
+        finally:
+            raw_copy.close()
+            p3_copy.close()
+        self.journal.close()
+        self.rawdb.close()
+        self.p3db.close()
+        self.journal = CaptureJournal(str(Path(self.tmp.name) / "capture.sqlite"))
+        self.rawdb = sqlite3.connect(raw_path, isolation_level=None)
+        self.raw = ContractRawWriter(self.rawdb)
+        self.p3db = sqlite3.connect(p3_path, isolation_level=None)
+        self.p3db.row_factory = sqlite3.Row
+        self.epochs = ThreeApiEpochStore(self.p3db)
+        self.projector = OfflineEpochContractProjector(
+            self.epochs, self.journal, self.raw
+        )
+
     def test_durable_capture_and_raw_receipt_advance_p3_only_once(self):
         transport, receipt = self.execute()
         self.assertEqual(transport.calls, 1)
@@ -318,6 +347,83 @@ class OfflineEpochContractProjectionTests(unittest.TestCase):
                 "SELECT media_id FROM media_structure_members ORDER BY position"
             )
         ], ["88011", "88012"])
+
+    def test_three_database_restore_commits_only_p3_without_http_replay(self):
+        """Capture and RAW success survive a coordinated offline restart."""
+        first_transport, receipt = self.execute()
+        self.assertEqual(first_transport.calls, 1)
+        self.assertEqual(self.state(), "bound")
+        self.restart_three_stores()
+        before = (self.rawdb.total_changes,self.journal._db.total_changes)
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"], "committed"
+        )
+        self.assertEqual(self.state(), "done")
+        self.assertEqual(self.rawdb.total_changes, before[0])
+        self.assertEqual(self.journal._db.total_changes, before[1])
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"],
+            "already_committed",
+        )
+        self.assertEqual(self.p3db.execute(
+            "SELECT raw_receipt_id FROM page_evidence_v2 WHERE job_id=?",
+            (self.job,)
+        ).fetchone()[0],receipt.raw_receipt_id)
+        self.assertEqual(self.rawdb.execute(
+            "PRAGMA integrity_check").fetchone()[0],"ok")
+        self.assertEqual(self.rawdb.execute("PRAGMA foreign_key_check").fetchall(),[])
+        self.assertEqual(self.p3db.execute("PRAGMA foreign_key_check").fetchall(),[])
+
+    def test_three_database_restore_preserves_unconfirmed_raw_hold(self):
+        """Crash after RAW but before Capture ACK requires manual local replay."""
+        response=make_response(self.request)
+        sender=FakeTransport(response)
+        executor=ThreeApiContractExecutor(
+            sender,self.journal,self.raw,clock=lambda:OBSERVED_AT
+        )
+        with mock.patch.object(
+            self.journal, "confirm_processed",side_effect=OSError("injected")
+        ):
+            with self.assertRaises(OSError):
+                executor.execute(self.request)
+        self.assertEqual(sender.calls,1)
+        self.assertEqual(self.state(),"bound")
+        self.restart_three_stores()
+        with self.assertRaises(OfflineEpochContractError):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.state(),"bound")
+        transport_after=FakeTransport(error=AssertionError("network forbidden"))
+        recovered=ThreeApiContractExecutor(
+            transport_after,self.journal,self.raw,clock=lambda:OBSERVED_AT
+        ).recover(self.request.run_id)
+        self.assertEqual(recovered["raw_receipts_recovered"],1)
+        self.assertEqual(transport_after.calls,0)
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"],"committed")
+        self.assertEqual(self.state(),"done")
+        self.assertEqual(self.rawdb.execute(
+            "SELECT COUNT(*) FROM post_observations").fetchone()[0],1)
+
+    def test_three_database_restore_missing_raw_never_auto_writes(self):
+        """A retained source alone can never advance a recovered P3 cursor."""
+        response=make_response(self.request)
+        self.journal.save_intent(self.request)
+        self.journal.save_response_evidence(response)
+        record=capture_record_from_response(self.request,response)
+        self.journal.save_capture(record)
+        self.restart_three_stores()
+        before=self.rawdb.total_changes
+        with self.assertRaises(OfflineEpochContractError):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.state(),"bound")
+        self.assertEqual(self.rawdb.total_changes,before)
+        recovered_record=self.journal.get_capture_for_request(
+            self.request.request_id)
+        from three_api_runtime_contract import commit_raw_and_confirm
+        commit_raw_and_confirm(self.journal,self.raw,recovered_record)
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"],"committed")
+        self.assertEqual(self.state(),"done")
 
     def test_raw_observation_corruption_does_not_advance_p3(self):
         self.execute()
