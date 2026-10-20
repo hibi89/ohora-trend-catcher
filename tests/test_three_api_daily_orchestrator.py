@@ -286,6 +286,31 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(runner.coordinator.db.execute(
             "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
 
+    def test_quota_stop_keeps_uncommitted_raw_and_evidence_empty(self):
+        runner=self.create()
+        self.assertTrue(runner.coordinator.observe_usage("A",85,now=NOW))
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                self.assertEqual(runner.step("A",now=NOW)["status"],
+                                 "front_lane_unavailable")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],0)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        self.assertEqual(runner.coverage()["front_pages"],0)
+        self.assertEqual(runner.coverage()["front_incomplete"],294)
+
+    def test_quota_stop_does_not_prevent_other_lane_commits(self):
+        runner=self.create()
+        self.assertTrue(runner.coordinator.observe_usage("A",85,now=NOW))
+        self.assertEqual(runner.step("A",now=NOW)["status"],
+                         "front_lane_unavailable")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],4)
+        self.assertEqual(runner.step("A",now=NOW)["status"],
+                         "front_lane_unavailable")
+
     def test_lane_missing_usage_halts_only_one_lane(self):
         runner=self.create()
         self.assertTrue(runner.coordinator.observe_usage("A",None,now=NOW))
