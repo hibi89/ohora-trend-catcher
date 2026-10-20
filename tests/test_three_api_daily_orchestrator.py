@@ -535,6 +535,45 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(audit["verified_pages"],0)
         self.assertFalse(audit["storage_verified"])
 
+    def test_p4_operator_report_explicitly_opts_in_to_integrity(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        ordinary=runner.operator_report(now=NOW)
+        self.assertNotIn("storage_integrity",ordinary)
+        before=tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db))
+        checked=runner.operator_report(now=NOW,include_storage_audit=True)
+        self.assertEqual(checked["storage_integrity"]["source_pages"],1)
+        self.assertEqual(checked["storage_integrity"]["verified_pages"],1)
+        self.assertEqual(checked["storage_integrity"]["pages_requiring_attention"],0)
+        self.assertEqual(tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db)),before)
+        with self.assertRaises(OfflineDailyScheduleError):
+            runner.operator_report(now=NOW,include_storage_audit="true")
+
+    def test_p4_audit_detects_missing_media_parent(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.mirror.db.execute(
+            "DELETE FROM raw_post_media WHERE media_id='115' AND media_role='parent'")
+        report=runner.operator_report(now=NOW,include_storage_audit=True)
+        self.assertEqual(report["storage_integrity"]["observation_mismatch"],1)
+        self.assertEqual(report["storage_integrity"]["verified_pages"],0)
+        self.assertFalse(report["storage_integrity"]["storage_verified"])
+
+    def test_p4_audit_survives_restart_without_fixture_refetch(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.close()
+        restarted=self.create(front={},catchup={})
+        before=restarted.mirror.db.total_changes
+        audit=restarted.audit_storage()
+        self.assertTrue(audit["storage_verified"])
+        self.assertEqual(audit["verified_pages"],1)
+        self.assertEqual(restarted.mirror.db.total_changes,before)
+        self.assertEqual(restarted.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+
     def test_manual_review_not_masked_as_verified(self):
         runner=self.create(front={})
         for account in accounts():
