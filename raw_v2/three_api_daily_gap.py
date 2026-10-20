@@ -320,8 +320,6 @@ class DailyGapLedger:
                 history.append({"account_key":account,"phase":"history_unverified"})
             else:
                 history.append({"account_key":account,"phase":"history"})
-        if fronts:
-            return fronts
         if catchups:
             return reviews + catchups
         if reviews:
