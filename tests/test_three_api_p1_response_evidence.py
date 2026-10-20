@@ -165,6 +165,45 @@ class P1ResponseEvidenceTests(unittest.TestCase):
         self.assertNotIn(b"NEVER_STORE_THIS_VALUE", raw_bytes)
         self.assertEqual(self.raw.execute("SELECT COUNT(*) FROM posts").fetchone()[0], 0)
 
+    def test_opt_in_account_fields_are_observed_and_survive_restart(self):
+        from three_api_request_spec import build_request_spec
+        spec = build_request_spec("A", "nails_1", include_account_metrics=True)
+        request = replace(self.request, request_spec=spec,
+            request_spec_digest=digest_sha256({
+                "api_version": "v26.0", "target_ig_user_id": self.request.target_ig_user_id,
+                "spec": spec,
+            }))
+        response = make_response(request)
+        body = copy.deepcopy(response.payload)
+        body["business_discovery"]["followers_count"] = 1500
+        body["business_discovery"]["media_count"] = 123
+        response = replace(response, payload=body)
+        executor, _ = self.run_request(response)
+        executor.execute(request)
+        record = self.journal.get_capture_for_request(request.request_id)
+        self.assertEqual(record.field_status["followers_count"], "returned")
+        self.assertEqual(record.field_status["media_count"], "returned")
+        self.assertEqual(record.account_observation["followers_count"], 1500)
+        self.journal.close()
+        self.journal = CaptureJournal(str(Path(self.tmp.name) / "capture.sqlite"))
+        restored = self.journal.get_capture_for_request(request.request_id)
+        self.assertEqual(restored.request.request_spec.account_fields,
+                         ("id", "username", "followers_count", "media_count"))
+        self.assertEqual(restored.account_observation["followers_count"], 1500)
+
+    def test_unrequested_account_metrics_are_evidence_only(self):
+        response = make_response(self.request)
+        body = copy.deepcopy(response.payload)
+        body["business_discovery"]["followers_count"] = 900
+        response = replace(response, payload=body)
+        executor, _ = self.run_request(response)
+        executor.execute(self.request)
+        record = self.journal.get_capture_for_request(self.request.request_id)
+        self.assertEqual(record.field_status["followers_count"], "not_tested")
+        self.assertNotIn("followers_count", record.account_observation)
+        evidence = self.journal.get_response_evidence(self.request.request_id)
+        self.assertEqual(evidence["safe_body"]["business_discovery"]["followers_count"], 900)
+
     def test_new_journal_after_restart_retains_observation_without_http(self):
         response = make_response(self.request, usage={})
         exe, transport = self.run_request(response)
