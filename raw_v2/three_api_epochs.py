@@ -13,7 +13,7 @@ KST date rollover. Cross-DB RAW receipt verification is reserved for P4.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from hashlib import sha256
 import json
 import re
@@ -219,6 +219,8 @@ class ThreeApiEpochStore:
         """New KST day creates 882 fresh jobs without resetting history state."""
         day=_day(day_kst)
         anchor=_utc(anchor_utc)
+        if anchor_utc.astimezone(timezone(timedelta(hours=9))).date()!=day_kst:
+            raise EpochError("Daily epoch anchor does not belong to KST date")
         self._require_roster(roster_digest)
         epoch_id="daily-"+_hash(day,roster_digest)
         self.db.execute("BEGIN IMMEDIATE")
@@ -338,6 +340,10 @@ class ThreeApiEpochStore:
             if rows is None:
                 raise EpochError("Verified daily page receipt required")
             _,cursor,ids_json,receipt,chain,terminal,page=rows
+            # Without page3 or an earlier PROVEN terminal, page2/3 might
+            # contain unseen posts. Never start history from page1 alone.
+            if page<3 and terminal!="verified_terminal":
+                raise EpochError("History root requires the full daily chain or verified terminal")
             ids=json.loads(ids_json)
             anchor=ids[-1] if ids else None
             state="terminal" if cursor is None else "open"
