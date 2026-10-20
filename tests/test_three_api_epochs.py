@@ -1140,6 +1140,43 @@ class P3EpochTests(unittest.TestCase):
                 finally:
                     db.close()
 
+    def test_history_invalid_receipt_input_matrix(self):
+        """Reject twelve malformed history proofs without advancing cursor."""
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        request="req-history-invalid-matrix"
+        self.store.bind_history(page["job_id"],request,
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["901"],
+            next_cursor="history_valid_next",terminal_basis="continued",
+            source_evidence_id="safe-history",raw_receipt_id="safe-history-raw",
+            source_digest="a"*64)
+        cases=[
+            ("ordered_ids",None),
+            ("ordered_ids","901"),
+            ("ordered_ids",["1","2","3","4","5"]),
+            ("ordered_ids",["901","901"]),
+            ("ordered_ids",["invalid"]),
+            ("ordered_ids",[901]),
+            ("ordered_ids",["9"*65]),
+            ("next_cursor","bad cursor"),
+            ("terminal_basis","unsupported"),
+            ("source_evidence_id",""),
+            ("raw_receipt_id",""),
+            ("source_digest","not-a-digest"),
+        ]
+        before_cp=self.store.history_checkpoint(history,"KR_001")
+        for field,payload in cases:
+            with self.subTest(field=field,payload=repr(payload)):
+                invalid={**args,field:payload}
+                before=self.db.total_changes
+                with self.assertRaises((EpochError,TypeError)):
+                    self.store.commit_history_page(page["job_id"],request,**invalid)
+                self.assertEqual(self.db.total_changes,before)
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001"),before_cp)
+        self.assertEqual(self.db.execute("""SELECT COUNT(*) FROM page_evidence_v2
+            WHERE job_id=?""",(page["job_id"],)).fetchone()[0],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
