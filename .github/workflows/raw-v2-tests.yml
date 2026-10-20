@@ -25,6 +25,10 @@ on:
       - 'tests/test_three_api_full_roster_batch.py'
       - '.github/workflows/raw-v2-tests.yml'
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     runs-on: ubuntu-latest
