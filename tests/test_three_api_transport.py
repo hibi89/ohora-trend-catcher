@@ -158,14 +158,18 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(ctx.exception.category, "approval_denied")
         self.assertEqual(calls, [])
 
-    def test_missing_or_high_usage_fails_closed(self):
+    def test_missing_or_high_usage_preserves_received_response_then_halts(self):
         for headers, category in (
             ({}, "usage_missing"),
             ({"X-App-Usage": '{"call_count":85}'}, "usage_limit"),
         ):
             with self.subTest(category=category):
+                t = transport(headers=headers)
+                response = t.send(request_envelope())
+                self.assertEqual(response.http_status, 200)
+                self.assertIn("business_discovery", response.payload)
                 with self.assertRaises(TransportFailure) as ctx:
-                    transport(headers=headers).send(request_envelope())
+                    t.send(request_envelope())
                 self.assertEqual(ctx.exception.category, category)
 
     def test_lane_and_target_identity_are_bound_before_send(self):
