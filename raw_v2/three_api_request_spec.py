@@ -8,7 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-_FIELDS = "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count,thumbnail_url"
+_FIELDS = "id,caption,media_type,media_product_type,media_url,permalink,timestamp,like_count,comments_count,thumbnail_url,view_count"
+# Owner-required collection fields; old persisted RequestSpec objects remain readable.
+_REQUIRED_NEW_FIELDS = frozenset(("media_type", "media_product_type", "view_count"))
 # Explicit opt-in only. Nested field grammar is unverified against live Meta API.
 _CAROUSEL_CHILDREN = "children{id,media_type,media_url,thumbnail_url}"
 _USERNAME = re.compile(r"^[A-Za-z0-9._]{1,30}$")
@@ -56,6 +58,8 @@ def build_request_spec(lane, username, *, after=None, limit=4,
     ):
         raise ValueError("Invalid opaque cursor")
     fields = _FIELDS + ("," + _CAROUSEL_CHILDREN if include_carousel_children else "")
+    if not _REQUIRED_NEW_FIELDS.issubset(fields.split(",")):
+        raise ValueError("New P6 collection must request Reels view_count")
     return RequestSpec(lane, username, limit, fields, after,
                        include_carousel_children=include_carousel_children,
                        account_fields=(_METRIC_ACCOUNT_FIELDS if include_account_metrics
