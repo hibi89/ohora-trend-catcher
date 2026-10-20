@@ -1374,6 +1374,29 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_history_page(first["job_id"],"unknown-history-first",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_history_replay_rejects_latest_request_binding_corruption(self):
+        history=self.open_history_fixture()
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"binding-first",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["901"],next_cursor="binding_next",
+            terminal_basis="continued",source_evidence_id="binding-first-source",
+            raw_receipt_id="binding-first-raw",source_digest="a"*64)
+        self.store.commit_history_page(first["job_id"],"binding-first",**args)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"binding-second",
+            build_request_spec("B","nail_001",after="binding_next"),at=NOW)
+        self.store.commit_history_page(second["job_id"],"binding-second",
+            observed_at=NOW,ordered_ids=["902"],next_cursor="binding_third",
+            terminal_basis="continued",source_evidence_id="binding-second-source",
+            raw_receipt_id="binding-second-raw",source_digest="b"*64)
+        self.db.execute("""UPDATE page_evidence_v2 SET request_id='forged'
+            WHERE job_id=?""",(second["job_id"],))
+        before=self.db.total_changes
+        with self.assertRaisesRegex(EpochError,"chain digest differs"):
+            self.store.commit_history_page(first["job_id"],"binding-first",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
