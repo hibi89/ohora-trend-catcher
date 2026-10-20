@@ -733,7 +733,8 @@ class ThreeApiEpochStore:
             raise EpochError("History must continue with a verified cursor")
         if terminal_basis=="verified_terminal" and (next_cursor is not None or len(ids)>=4):
             raise EpochError("Ambiguous full history page cannot be terminal")
-        if (not all(isinstance(v, str) and v for v in
+        if (not isinstance(request_id,str) or not request_id or
+                not all(isinstance(v, str) and v for v in
                     (source_evidence_id, raw_receipt_id, source_digest))
                 or not re.fullmatch("[0-9a-f]{64}", source_digest)):
             raise EpochError("History page requires durable sanitized evidence")
