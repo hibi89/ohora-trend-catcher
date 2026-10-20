@@ -1177,6 +1177,25 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.db.execute("""SELECT COUNT(*) FROM page_evidence_v2
             WHERE job_id=?""",(page["job_id"],)).fetchone()[0],0)
 
+    def test_history_invalid_request_id_matrix(self):
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        request="history-request-id-matrix"
+        self.store.bind_history(page["job_id"],request,
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["901"],
+            next_cursor="history_id_next",terminal_basis="continued",
+            source_evidence_id="history-id-source",raw_receipt_id="history-id-raw",
+            source_digest="a"*64)
+        for invalid in (None,0,False,[],{},b"bytes","", "different-request"):
+            with self.subTest(request=repr(invalid)):
+                before=self.db.total_changes
+                with self.assertRaises(EpochError):
+                    self.store.commit_history_page(page["job_id"],invalid,**args)
+                self.assertEqual(self.db.total_changes,before)
+        self.assertEqual(self.db.execute("""SELECT COUNT(*) FROM page_evidence_v2
+            WHERE job_id=?""",(page["job_id"],)).fetchone()[0],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
