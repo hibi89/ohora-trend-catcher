@@ -534,3 +534,202 @@ class ThreeApiEpochStore:
             self.db.execute("ROLLBACK")
             raise
 
+
+    def _history_priority_open(self,history_epoch):
+        """New history HTTP needs all latest KST daily jobs resolved first."""
+        row=self.db.execute("SELECT kind,roster_digest FROM collection_epochs "
+            "WHERE epoch_id=?",(history_epoch,)).fetchone()
+        if row is None or row[0]!="history":
+            raise EpochError("Registered history epoch required")
+        daily=self.db.execute("""SELECT epoch_id FROM collection_epochs
+            WHERE kind='daily' AND roster_digest=?
+            ORDER BY day_kst DESC LIMIT 1""",(row[1],)).fetchone()
+        if daily is None:
+            return False
+        pending=self.db.execute("""SELECT COUNT(*) FROM jobs_v2
+             WHERE epoch_id=? AND state IN ('pending','bound')""",
+             (daily[0],)).fetchone()[0]
+        unresolved=self.db.execute("""SELECT COUNT(*) FROM coverage_ledger
+            WHERE epoch_id=? AND status='needs_review'""",
+            (daily[0],)).fetchone()[0]
+        return pending==0 and unresolved==0
+
+    def schedule_one_history_page(self,history_epoch,account_key,lane,*,at):
+        """Allocate at most one boundable history page/account, no HTTP."""
+        _utc(at)
+        if lane not in ("A","B","C"):
+            raise EpochError("Invalid 3-API history lane")
+        if not self._history_priority_open(history_epoch):
+            raise EpochError("Newest KST daily front or required review has priority")
+        checkpoint=self.history_checkpoint(history_epoch,account_key)
+        if checkpoint is None or checkpoint["status"]!="open" or checkpoint["cursor"] is None:
+            raise EpochError("No verified resumable history cursor")
+        roster=self.db.execute("SELECT roster_digest FROM collection_epochs "
+                               "WHERE epoch_id=?",(history_epoch,)).fetchone()[0]
+        member=self.db.execute("SELECT ordinal FROM roster_members "
+            "WHERE roster_digest=? AND account_key=?",
+            (roster,account_key)).fetchone()
+        if member is None:
+            raise EpochError("History account missing from official roster")
+        prior=self.db.execute("""SELECT job_id,state FROM jobs_v2
+            WHERE epoch_id=? AND account_key=? AND phase='history'
+            ORDER BY page_seq DESC LIMIT 1""",
+            (history_epoch,account_key)).fetchone()
+        if prior is not None and prior[1]!="done":
+            raise EpochError("Unfinished history page must recover before new dispatch")
+        page=checkpoint["page_seq"]+1
+        if prior is not None and prior[0]!="job-"+_hash(history_epoch,account_key,"history",page-1):
+            raise EpochError("History page chain differs from durable checkpoint")
+        job_id="job-"+_hash(history_epoch,account_key,"history",page)
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            if self.db.execute("SELECT 1 FROM jobs_v2 WHERE job_id=?",
+                               (job_id,)).fetchone():
+                raise EpochError("History page already exists")
+            self.db.execute("""INSERT INTO jobs_v2(
+                job_id,epoch_id,account_key,account_ordinal,phase,page_seq,
+                round_no,lane,predecessor_job_id,state)
+                VALUES(?,?,?,?,?,?,?,?,?,'pending')""",
+                (job_id,history_epoch,account_key,member[0],"history",
+                 page,page,lane,prior[0] if prior else None))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return {"job_id":job_id,"account_key":account_key,"lane":lane,
+                "page_seq":page,"cursor":checkpoint["cursor"]}
+
+    def bind_history(self,job_id,request_id,spec:RequestSpec,*,at):
+        """History intent binding does not bypass daily/usage authorization."""
+        stamp=_utc(at)
+        job=self._job_row(job_id)
+        if job["phase"]!="history" or job["epoch_kind"]!="history" or job["state"]!="pending":
+            raise EpochError("History job not pending")
+        if not self._history_priority_open(job["epoch_id"]):
+            raise EpochError("Newest daily front preempts new history HTTP")
+        checkpoint=self.history_checkpoint(job["epoch_id"],job["account_key"])
+        member=self.db.execute("SELECT username FROM roster_members WHERE "
+            "roster_digest=? AND account_key=?",
+            (job["roster_digest"],job["account_key"])).fetchone()
+        if (checkpoint is None or checkpoint["status"]!="open" or member is None or
+                not isinstance(spec,RequestSpec) or spec.lane!=job["lane"] or
+                spec.username!=member[0] or spec.limit!=4 or
+                spec.after!=checkpoint["cursor"] or
+                job["page_seq"]!=checkpoint["page_seq"]+1):
+            raise EpochError("History binding differs from verified persisted cursor")
+        canonical=build_request_spec(spec.lane,spec.username,after=spec.after,
+            limit=4,include_carousel_children=spec.include_carousel_children,
+            include_account_metrics=("followers_count" in spec.account_fields))
+        if spec!=canonical:
+            raise EpochError("Unsupported history request specification")
+        if not isinstance(request_id,str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}",request_id):
+            raise EpochError("Invalid history immutable request ID")
+        digest=_hash(spec.__dict__)
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("""INSERT INTO request_bindings_v2(
+                job_id,request_id,request_spec_digest,requested_cursor,bound_at)
+                VALUES(?,?,?,?,?)""",
+                (job_id,request_id,digest,spec.after,stamp))
+            changed=self.db.execute("UPDATE jobs_v2 SET state='bound' "
+                "WHERE job_id=? AND state='pending'",(job_id,)).rowcount
+            if changed!=1:
+                raise EpochError("History state changed during binding")
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return {"job_id":job_id,"request_id":request_id,"after_present":True}
+
+    def commit_history_page(self,job_id,request_id,*,observed_at,ordered_ids,
+                            next_cursor,terminal_basis,source_evidence_id,
+                            raw_receipt_id,source_digest):
+        """Advance ONLY the stored history cursor using an immutable page receipt.
+
+        Already bound pages may finish after KST rollover; fresh history binds
+        are blocked until the new daily front is resolved. This does not prove
+        the 365-day cutoff, and never fabricates retroactive engagement.
+        """
+        stamp=_utc(observed_at)
+        next_cursor=_cursor(next_cursor)
+        if not isinstance(ordered_ids,(tuple,list)) or len(ordered_ids)>4:
+            raise EpochError("Fixed history page limit=4")
+        ids=list(ordered_ids)
+        if any(not isinstance(v,str) or not v.isdecimal() or len(v)>64 for v in ids) or len(set(ids))!=len(ids):
+            raise EpochError("Invalid history media IDs")
+        if terminal_basis not in ("continued","verified_terminal"):
+            raise EpochError("Unsupported history terminal proof")
+        if terminal_basis=="continued" and next_cursor is None:
+            raise EpochError("History must continue with a verified cursor")
+        if terminal_basis=="verified_terminal" and (next_cursor is not None or len(ids)>=4):
+            raise EpochError("Ambiguous full history page cannot be terminal")
+        if not all(isinstance(v,str) and v for v in
+                   (source_evidence_id,raw_receipt_id,source_digest)) or
+                not re.fullmatch("[0-9a-f]{64}",source_digest):
+            raise EpochError("History page requires durable sanitized evidence")
+        job=self._job_row(job_id)
+        if job["phase"]!="history" or job["epoch_kind"]!="history":
+            raise EpochError("History page/epoch mismatch")
+        bound=self.db.execute("SELECT request_id,requested_cursor FROM request_bindings_v2 "
+                              "WHERE job_id=?",(job_id,)).fetchone()
+        if bound is None or bound[0]!=request_id:
+            raise EpochError("Missing immutable history request binding")
+        existing=self.db.execute("SELECT chain_hash FROM page_evidence_v2 WHERE job_id=?",
+                                  (job_id,)).fetchone()
+        cp=self.history_checkpoint(job["epoch_id"],job["account_key"])
+        if cp is None:
+            raise EpochError("Lost durable history checkpoint")
+        parent_chain=cp["chain_hash"] if cp["page_seq"]==job["page_seq"]-1 else None
+        if parent_chain is None and job["page_seq"]>1:
+            previous=self.db.execute("SELECT e.chain_hash FROM page_evidence_v2 e "
+                "WHERE e.job_id=?",(job["predecessor_job_id"],)).fetchone()
+            parent_chain=previous[0] if previous else None
+        if parent_chain is None:
+            raise EpochError("History cursor chain continuity is unverified")
+        chain=_hash(parent_chain,job_id,request_id,bound[1],next_cursor,ids,
+                    source_evidence_id,raw_receipt_id,source_digest)
+        if existing is not None:
+            if existing[0]!=chain:
+                raise EpochError("Conflicting immutable history page replay")
+            return {"status":"already_committed","job_id":job_id}
+        if job["state"]!="bound" or cp["page_seq"]!=job["page_seq"]-1 or cp["cursor"]!=bound[1]:
+            raise EpochError("History cursor changed; do not dispatch or skip")
+        if next_cursor is not None and next_cursor==bound[1]:
+            raise EpochError("History cursor self-loop")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            if next_cursor is not None:
+                self.db.execute("""INSERT INTO cursor_seen_v2(
+                    epoch_id,account_key,cursor,request_id) VALUES(?,?,?,?)""",
+                    (job["epoch_id"],job["account_key"],next_cursor,request_id))
+            self.db.execute("""INSERT INTO page_evidence_v2(
+                request_id,job_id,cursor_in,cursor_out,observed_at,ordered_ids_json,
+                terminal_basis,source_evidence_id,raw_receipt_id,source_digest,chain_hash)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (request_id,job_id,bound[1],next_cursor,stamp,_json(ids),
+                 terminal_basis,source_evidence_id,raw_receipt_id,source_digest,chain))
+            changed=self.db.execute("UPDATE jobs_v2 SET state='done' "
+                "WHERE job_id=? AND state='bound'",(job_id,)).rowcount
+            if changed!=1:
+                raise EpochError("History job ceased to be bound")
+            self.db.execute("""UPDATE cursor_checkpoints SET
+                cursor=?,anchor_post_id=?,last_receipt=?,chain_hash=?,
+                updated_at=?,page_seq=?,status=?
+                WHERE epoch_id=? AND account_key=? AND stream='history'""",
+                (next_cursor,ids[-1] if ids else cp["anchor_post_id"],
+                 raw_receipt_id,chain,stamp,job["page_seq"],
+                 "terminal" if terminal_basis=="verified_terminal" else "open",
+                 job["epoch_id"],job["account_key"]))
+            self.db.execute("""INSERT INTO coverage_ledger(
+                epoch_id,account_key,verified_oldest,terminal_basis,status)
+                VALUES(?,?,NULL,?,'partial')
+                ON CONFLICT(epoch_id,account_key) DO UPDATE SET
+                terminal_basis=excluded.terminal_basis,status='partial'""",
+                (job["epoch_id"],job["account_key"],terminal_basis))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return {"status":"committed","job_id":job_id,
+                "history_cursor_present":next_cursor is not None,
+                "coverage_verified":False}
