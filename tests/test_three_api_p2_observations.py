@@ -157,6 +157,75 @@ class P2ObservationTests(unittest.TestCase):
             "SELECT media_id FROM media_structure_members "
             "WHERE structure_state_id=? ORDER BY position", (states[1],))], ["102","101"])
 
+    def test_child_media_field_null_vs_absent_has_independent_revision(self):
+        def first(_body, posts):
+            posts[:] = [{"id":"1234567890", "media_type":"CAROUSEL_ALBUM",
+                         "children":{"data":[{"id":"301", "media_type":"VIDEO",
+                           "media_url":None, "thumbnail_url":"https://cdn.test/thumb.jpg"}]}}]
+        self.apply(1,edits=first)
+        def missing(body, posts):
+            first(body,posts)
+            posts[0]["children"]["data"][0].pop("media_url")
+        self.apply(2,day=1,edits=missing)
+        current = self.db.execute("""
+            SELECT field_path,previous_field_status,new_field_status,kind
+            FROM current_change_events
+            WHERE field_path='locator.child.301.media_url'
+        """).fetchall()
+        self.assertEqual(current,
+            [("locator.child.301.media_url","null","absent","availability_change")])
+        rows = self.db.execute("""SELECT s.full_values_json FROM post_states s
+          JOIN post_checks c ON c.locator_state_id=s.state_id
+          ORDER BY c.observed_at""").fetchall()
+        import json
+        a,b = [json.loads(row[0])["child_locations"][0] for row in rows]
+        self.assertEqual(a["media_url_status"],"null")
+        self.assertIsNone(a["media_url"])
+        self.assertEqual(b["media_url_status"],"absent")
+        self.assertNotIn("media_url",b)
+
+    def test_url_only_change_is_locator_not_new_nail_content(self):
+        def link(_body, posts):
+            posts[0]["media_url"] = "https://cdn.test/image-2026-10-21.jpg"
+        self.apply(1)
+        self.apply(2,day=1,edits=link)
+        kinds=self.db.execute("SELECT field_path,kind FROM current_change_events").fetchall()
+        self.assertIn(("locator.media_url","locator_change"),kinds)
+        self.assertFalse(any(kind=="content_change" for _,kind in kinds))
+        self.assertEqual(self.count("posts"),1)
+        # Historical first-seen locator remains; current locator is a new state.
+        self.assertIsNone(self.db.execute("SELECT media_url FROM posts").fetchone()[0])
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(DISTINCT locator_state_id) FROM post_checks").fetchone()[0],2)
+
+    def test_account_profile_opt_in_tracks_followers_and_unchanged_check(self):
+        from three_api_request_spec import build_request_spec
+        from three_api_runtime_contract import digest_sha256
+        spec=build_request_spec("A","nails_1",include_account_metrics=True)
+        self.base=replace(self.base,request_spec=spec,
+            request_spec_digest=digest_sha256({
+                "api_version":"v26.0",
+                "target_ig_user_id":self.base.target_ig_user_id,
+                "spec":spec}))
+        def a(body,_posts):
+            body["business_discovery"]["followers_count"]=1500
+            body["business_discovery"]["media_count"]=100
+        def b(body,posts):
+            a(body,posts)
+            body["business_discovery"]["followers_count"]=1600
+        self.apply(1,edits=a)
+        self.apply(2,day=1,edits=b)
+        self.apply(3,day=2,edits=b)
+        self.assertEqual(self.count("account_checks"),3)
+        self.assertEqual(self.count("account_states"),2)
+        rows=self.db.execute("""SELECT e.field_path,e.kind,e.previous_value_json,
+              e.new_value_json FROM current_change_events e
+              WHERE e.entity_kind='account'""").fetchall()
+        self.assertEqual(rows,[("profile.followers_count","profile_change","1500","1600")])
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM active_change_batches WHERE entity_kind='account' "
+            "AND change_count=0").fetchone()[0],2)
+
     def test_late_replay_updates_only_derived_comparison_pointer(self):
         self.apply(1,day=0)
         def two(_body, posts):
