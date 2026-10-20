@@ -1,0 +1,6 @@
+# P6 frozen baseline — changes require explicit owner review (enable GitHub ruleset requiring CODEOWNERS).
+/docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md @hibi89
+/DESIGN_FREEZE_NOTICE.md @hibi89
+/AGENTS.md @hibi89
+/.github/CODEOWNERS @hibi89
+/.github/workflows/p6-frozen-design-guard.yml @hibi89
