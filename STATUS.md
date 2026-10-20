@@ -1,3 +1,5 @@
+> **2026-10-20 P6 N=3 CI 병목 정리:** RAW offline workflow 동일 ref 이전 실행 취소 `acb20ad`; Three API workflow 동일 ref 이전 실행 취소 `79ce1e5`; Frozen Guard 동일 ref 이전 실행 취소 `760698a`. CI concurrency 그룹은 workflow+ref별 격리. 기존 Three API `39402283772` (`1c64d00`) SUCCESS 및 Frozen `39402283769` SUCCESS, 최신 전체 Runtime/RAW/Frozen 검증은 queued·미확인. 의도된 superseded 취소는 테스트 PASS가 아니다. Meta/운영 DB/p6 main 미변경.
+
 > **2026-10-20 P6 N=3 CI 통합 완료 준비:** runtime integration workflow의 동일 브랜치 이전 실행 자동 취소(concurrency) `21d0d96`; offline Windows shard 분할 완전성·빈 그룹 검사 `8978f52`; `python tests/run_offline.py --list-groups` 검증용 인벤토리 출력 `d1cd541`. 이전 Three API CI `39402039290` (`2f0d060`) SUCCESS; 최근 `1c64d00` CI 진행 중, 최신 통합/RAW CI queued·미검증. 신규 workflow concurrency에 따라 superseded run 취소는 의도된 동작이며 CI 통과와 구분한다. Meta/운영 DB/main 미변경.
 
 > **2026-10-20 P6 N=3 immutable stage 입력 변조 회귀:** staged posts_json 변조 차단 `f4c984e`, cursor_in 변조 차단 `07f1fb0`, request_bindings_v2.request_id 변조 차단 `1c64d00`. 기존 Three API CI `39402025249` (`b804766`) SUCCESS, Frozen `39402025222` SUCCESS; 신규 CI queued·미검증. 현재까지의 신규 작업은 오프라인 테스트만, 운영 DB/Meta/main 미변경. 다음 우선순위: 최신 CI 완료 확인 후 P1~P5 통합 완료 판정.
