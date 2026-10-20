@@ -348,6 +348,26 @@ class P3EpochTests(unittest.TestCase):
         ).fetchone()[0],0)
         self.assertEqual(self.store.history_checkpoint(history,"KR_001")["page_seq"],0)
 
+    def test_history_cursor_cycle_does_not_write_second_receipt(self):
+        """A later page cannot return to the immutable seed cursor."""
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(page["job_id"],"req-history-cycle",
+            build_request_spec("A","nail_001",
+                               after="history_first_cursor"),at=NOW)
+        before=self.store.history_checkpoint(history,"KR_001")
+        with self.assertRaises((EpochError,sqlite3.IntegrityError)):
+            self.store.commit_history_page(
+                page["job_id"],"req-history-cycle",observed_at=NOW,
+                ordered_ids=["501","502","503","504"],
+                next_cursor="history_first_cursor",terminal_basis="continued",
+                source_evidence_id="safe-cycle",raw_receipt_id="raw-cycle",
+                source_digest="a"*64)
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001"),before)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
+            (page["job_id"],)).fetchone()[0],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
