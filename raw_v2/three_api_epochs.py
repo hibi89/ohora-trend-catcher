@@ -545,12 +545,17 @@ class ThreeApiEpochStore:
                     or latest_binding[0] is None):
                 raise EpochError("Daily replay latest request binding differs")
             if latest_binding[11]>1:
-                parent=self.db.execute("""SELECT e.chain_hash FROM page_evidence_v2 e
-                    WHERE e.job_id=?""",(latest_binding[10],)).fetchone()
+                parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
+                    FROM page_evidence_v2 e WHERE e.job_id=?""",
+                    (latest_binding[10],)).fetchone()
                 if parent is None:
                     raise EpochError("Daily replay latest parent chain missing")
+                if latest_binding[1]!=parent[1]:
+                    raise EpochError("Daily replay latest predecessor cursor differs")
                 parent_hash=parent[0]
             else:
+                if latest_binding[1] is not None:
+                    raise EpochError("Daily replay first page cursor differs")
                 parent_hash="genesis"
             expected_latest_chain=_hash(parent_hash,latest_binding[9],
                 latest_binding[0],latest_binding[1],latest_binding[2],
