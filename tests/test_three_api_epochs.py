@@ -368,6 +368,21 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
             (page["job_id"],)).fetchone()[0],0)
 
+    def test_unrelated_manual_review_does_not_block_verified_history(self):
+        """Review on a different account cannot starve a verified cursor."""
+        history=self.open_history_fixture()
+        self.db.execute("""INSERT INTO coverage_ledger(
+            epoch_id,account_key,verified_oldest,terminal_basis,status)
+            VALUES(?, 'US_101', NULL, NULL, 'needs_review')""",(self.daily,))
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.assertEqual(page["page_seq"],1)
+        self.store.bind_history(page["job_id"],"req-isolated-review",
+            build_request_spec("A","nail_001",
+                               after="history_first_cursor"),at=NOW)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM coverage_ledger WHERE epoch_id=? AND account_key='US_101'",
+            (self.daily,)).fetchone()[0],"needs_review")
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
