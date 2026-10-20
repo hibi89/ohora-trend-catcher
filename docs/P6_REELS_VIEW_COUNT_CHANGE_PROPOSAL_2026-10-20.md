@@ -1,6 +1,6 @@
 # P6 릴스 조회수 확장 — 실측 근거·호환성 검토·구현 준비안 (2026-10-20 KST)
 
-> 상태: **2026-10-20 사용자 명시 지시 — 릴스 view_count 필수 수집 항목**, 코드 구현/통합 검증 별도 진행. 기존 동결 기준선은 그대로 보존. Meta 미반환에 허위 값을 넣으라는 의미가 아니며 실호출/운영 DB/병합 승인은 아님.
+> 상태: **2026-10-20 사용자 명시 지시 — 릴스 view_count 필수 수집 항목.** 기본 P6 신규 요청·RAW/P2 추적 코드 반영 중. 기존 동결 기준선 보존. **통합 CI 최종/실 Meta 수집은 아직 미완료**. Meta 미반환에 허위 값을 넣으라는 의미가 아니며 실호출/운영 DB/병합 승인은 아님.
 > 소스 오브 트루스: [동결 공지](../DESIGN_FREEZE_NOTICE.md), [P6 최종 설계 1~15절](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md). 본 문서는 별도 확장안이며 동결 원문을 대체·수정하지 않음.
 
 ## 1. 2026-10-20 Graph API Explorer 수동 실측
@@ -46,3 +46,12 @@
 - `view_count`의 실측 반환은 `VIDEO + REELS` 19건에서 확인됐지만, 일반 사진/캐러셀/일반 동영상에 대한 보편적인 Meta 정책을 단정할 증거는 없다.
 - Graph API Explorer의 수동 요청 성공은 P6의 실제 request/transport/capture/RAW 파이프라인이 작동했다는 증거가 아니다.
 - 본 문서와 GitHub 기록은 **필수 요구사항 확정 및 단계적 구현 준비**다. 위 Gate 1~5의 구현이나 실운영 성공을 표시하지 않는다.
+
+## 6. 구현 진행 기록 (2026-10-20 KST)
+
+- **신규 요청 필수화:** `raw_v2/three_api_request_spec.py` 기본 _FIELDS에 `view_count,media_product_type` 추가 (2026-10-20 사용자 직접 명시). `limit=4` 그대로. 과거 영수증의 `RequestSpec` 필드 문자열 변경 불가.
+- **원본 보존/정규화:** `three_api_meta_normalizer.py`와 `three_api_runtime_contract.py`의 allowlist·nonnegative-int 검증·명시적 `null` 및 필드 상태를 확장. new CaptureRecord는 `view_count` 세 번째 post metric-status, legacy는 기존 like/comment 상태 집합 유지.
+- **RAW/P2 이력:** `three_api_raw_writer.py`의 `field_observations`에 값별 `view_count` 상태를 기록. `three_api_observation_versions.py`의 불변 post-check metrics version에 조회수를, structure state에 `media_product_type`을 포함. 기존 `post_observations` 컬럼을 변경하지 않으며 과거 계약 증거·상태는 그대로 보존.
+- **테스트:** `tests/test_three_api_reel_metrics.py`를 추가하여 릴스 재관측 18711→18715→18715, 조회수 변경 이벤트 1건, `IMAGE+FEED` 필드 부재, `0` vs `null`, 음수/문자열/boolean 거부, 기존 레거시 요청 재처리 정책을 검사. 세 CI 워크플로우에 신규 파일을 등록.
+- **검증 주의:** `a6420d67` 기준 Three API & RAW v2 CI PASS지만 신규 reel metrics 파일이 포함되기 전의 결과임. `4fa7cf95`의 Three API는 신규 테스트 오류(거부 시 receipt 테이블 자체가 존재하지 않음을 단언에서 고려하지 않음) 때문에 FAILURE; 신규 테스트 단언 수정 `1bdfa41b`, **후속 전체 CI terminal PASS 확인 전 완료로 표시 금지**.
+- 라이브 Meta 재호출/운영 DB·CSV 수정/백필 스케줄러 가동/PR main 병합은 한 번도 이 확장 작업에서 실시하거나 승인한 바 없음. 이 문서는 이전 section 1–5의 준비 단계 기술과 함께 현 단계 구현 상태를 기록한다.
