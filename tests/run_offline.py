@@ -53,6 +53,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--group', choices=GROUP_NAMES,
                         help='Run exactly one module-based CI shard (default: all)')
+    parser.add_argument("--list-groups", action="store_true",
+                        help="Print discovered per-group test counts without running tests")
     args = parser.parse_args()
 
     # Opt-in stack dumps help diagnose CI stalls without touching production paths.
@@ -67,6 +69,11 @@ if __name__ == '__main__':
                     for name in GROUP_NAMES}
     if sum(shard_counts.values()) != total or any(count == 0 for count in shard_counts.values()):
         raise RuntimeError(f"Invalid offline shard partition: {shard_counts}, total={total}")
+    if args.list_groups:
+        for name in GROUP_NAMES:
+            print(f"{name}: {shard_counts[name]} tests", flush=True)
+        print(f"total: {total} tests", flush=True)
+        sys.exit(0)
     suite = select_group(suite, args.group)
     print(f"Offline suite: group={args.group or 'all'} selected={suite.countTestCases()} discovered={total}",
           flush=True)
