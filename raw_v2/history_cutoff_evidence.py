@@ -59,6 +59,8 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
                 return {"verified": False, "reason": "duplicate_media"}
             seen_media.update(media_ids)
         stamps = page.get("published_at")
+        if media_ids is not None and len(media_ids) != len(stamps or []):
+            return {"verified": False, "reason": "media_timestamp_mismatch"}
         if not isinstance(stamps, (list, tuple)) or not stamps:
             return {"verified": False, "reason": "missing_timestamps"}
         try:
