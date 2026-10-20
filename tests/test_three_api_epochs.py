@@ -865,6 +865,36 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.store.commit_history_page(
             page["job_id"],request_id,**args)["status"],"already_committed")
 
+    def test_history_replay_rejects_rewritten_latest_chain_payload(self):
+        """Replay of an old page cannot bless a rewritten later-page proof."""
+        history=self.open_history_fixture()
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"req-chain-one",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        first_args=dict(observed_at=NOW,ordered_ids=["901","902","903","904"],
+            next_cursor="chain_page_two",terminal_basis="continued",
+            source_evidence_id="chain-one",raw_receipt_id="raw-chain-one",
+            source_digest="a"*64)
+        self.store.commit_history_page(first["job_id"],"req-chain-one",**first_args)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"req-chain-two",
+            build_request_spec("B","nail_001",after="chain_page_two"),at=NOW)
+        second_args=dict(observed_at=NOW,ordered_ids=["905","906"],
+            next_cursor="chain_page_three",terminal_basis="continued",
+            source_evidence_id="chain-two",raw_receipt_id="raw-chain-two",
+            source_digest="b"*64)
+        self.store.commit_history_page(second["job_id"],"req-chain-two",**second_args)
+        self.assertEqual(self.store.commit_history_page(
+            first["job_id"],"req-chain-one",**first_args)["status"],"already_committed")
+        # Alter evidence not represented by checkpoint fields, leaving the
+        # recorded chain hash unchanged; replay must independently recalculate.
+        self.db.execute("""UPDATE page_evidence_v2 SET source_evidence_id=?
+            WHERE job_id=?""",("forged-chain-two",second["job_id"]))
+        before=self.db.total_changes
+        with self.assertRaisesRegex(EpochError,"chain digest differs"):
+            self.store.commit_history_page(first["job_id"],"req-chain-one",**first_args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
