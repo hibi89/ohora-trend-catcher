@@ -533,6 +533,25 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_daily_page(second,"skip-d2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_daily_replay_rejects_parent_no_longer_done_without_writes(self):
+        first,second=(self.job(1,page) for page in (1,2))
+        self.store.bind_daily(first,"state-d1",build_request_spec("A","nail_001"),at=NOW)
+        self.store.commit_daily_page(first,"state-d1",observed_at=NOW,
+            ordered_ids=["101"],next_cursor="state_cursor",
+            terminal_basis="continued",source_evidence_id="state-e1",
+            raw_receipt_id="state-r1",source_digest="a"*64)
+        self.store.bind_daily(second,"state-d2",
+            build_request_spec("C","nail_001",after="state_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["102"],next_cursor="state_next",
+            terminal_basis="continued",source_evidence_id="state-e2",
+            raw_receipt_id="state-r2",source_digest="b"*64)
+        self.store.commit_daily_page(second,"state-d2",**args)
+        self.db.execute("UPDATE jobs_v2 SET state='blocked' WHERE job_id=?",(first,))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_daily_page(second,"state-d2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_daily_replay_rejects_cross_epoch_parent_link_without_writes(self):
         first,second=(self.job(1,page) for page in (1,2))
         self.store.bind_daily(first,"epoch-d1",build_request_spec("A","nail_001"),at=NOW)
