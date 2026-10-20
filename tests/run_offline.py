@@ -18,6 +18,7 @@ _MODULE_GROUPS = {
     "test_three_api_daily_orchestrator": "orchestrator",
     "test_three_api_serial_catchup": "orchestrator",
     "test_three_api_serial_lock": "orchestrator",
+    "test_three_api_serial_contract_bridge": "orchestrator",
     "test_three_api_full_roster_batch": "roster",
     "test_three_api_operator_report": "report",
     "test_three_api_p2_observations": "observations",
