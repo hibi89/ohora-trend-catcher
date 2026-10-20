@@ -333,3 +333,49 @@ P1~P5 약16~28시간, 실운영 인수는 별도. 현재 문서가 제시한 537
 - `raw_v2/three_api_raw_writer.py`, `three_api_evidence.py`, `collector.py`, `daily_scheduler.py`
 - `tests/run_offline.py` 및 대응 `tests/test_three_api_*.py`
 - 사용자 첨부 `gpt6와 나의 의견 아스트라검토 후 재설계.txt` 전체 및 대화 이미지
+
+## 15. 확정 추가 요구 — 동영상·릴스 URL 보존과 향후 n8n 연결 (2026-10-20)
+
+사용자 확정: **현재 수집기 설계에 동영상·릴스 URL 보존을 포함한다. 영상 다운로드·프레임 추출·네일 판별은 후속 n8n 작업에서 구현한다.** 3 API 레인 및 게시물 limit=4는 불변. 지금 영상 기능을 이유로 별도 Meta 요청이나 CDN 접근을 실행하지 않는다.
+
+### 수집·저장할 항목
+
+| 항목 | 보존 의미 |
+|---|---|
+| post_id, account_key, media_id | 게시물·계정·개별 영상의 안정적인 연결 키 |
+| media_type | API가 반환한 IMAGE/VIDEO/CAROUSEL_ALBUM 등 원래 값 |
+| media_product_type | 반환 가능성이 확인된 경우에만 원래 값 보존. VIDEO만으로 REELS라고 단정하지 않음 |
+| media_url | API가 실제 반환한 영상 미디어 주소. 다운로드 성공이나 영구 접근을 뜻하지 않음 |
+| thumbnail_url | 실제 반환된 대표 이미지 주소. 영상 URL과 별개로 보존 |
+| permalink | 사람이 게시물을 열 수 있는 주소. 영상 파일 주소 대신 사용하지 않음 |
+| published_at, observed_at | 게시 시각과 URL을 확인한 시각을 분리 |
+| parent_post_id, item_order | 캐러셀 속 영상도 개별 media_id와 당시 순서로 추적 |
+| request_id, evidence_id, locator_state_id | 어떤 응답에서 얻은 주소인지 원본·관측·URL 버전과 연결 |
+| field_status, availability_reason | 주소별 returned/null/absent/not_requested; 검증된 unsupported와 원인 미확인을 구분 |
+
+이미 요청하는 media_url/thumbnail_url/permalink를 우선 재사용한다. media_product_type은 현재 RequestSpec/정규화 allowlist에 없으므로 기존에 수집된다고 주장하지 않는다. 관련 API 버전·권한·필드 지원을 확인한 후 호환 변경을 적용하고, 미지원이면 unknown으로 둔다. duration·해상도·파일 크기·코덱은 현재 Meta 필수 요청에 추가하지 않으며, 향후 n8n 다운로드 후 측정값으로 별도 저장한다.
+
+### 저장 규칙
+
+- 모든 성공 재조회는 observation을 생성한다. 같은 URL이면 locator state 재사용, URL이 달라지면 새 state와 locator_change를 추가한다. 이전 주소를 덮어쓰지 않는다.
+- URL이 빠졌다고 이전 URL을 삭제하지 않는다. 최신 관측의 누락 상태와 last-known URL/관측 시각을 별도로 제공한다. last-known을 현재 접근 가능 주소로 표시하지 않는다.
+- media_url/thumbnail_url/permalink 및 안전한 서명 파라미터는 로컬 데이터 영역에만 보관한다. 임의로 URL query를 제거해 접근 주소를 망가뜨리지 않는다. 반면 Graph access_token·인증 헤더가 포함된 값은 비밀정보 제거 정책을 적용하며, 사용 가능한 형태로 보존할 수 없으면 credential_redacted_unusable로 표시한다. 실제 URL은 GitHub·공개 로그·설계서에 넣지 않는다.
+- URL 만료 시각은 API가 신뢰할 수 있게 제공했을 때만 기록한다. 임의 TTL을 부여하지 않으며 expires_at 기본값은 NULL이다.
+- 수집기는 URL 확인용 HEAD/GET을 보내지 않는다. download_status 기본값은 not_attempted, access_status는 unchecked다. returned는 URL 필드가 왔다는 뜻이지 다운로드 검증 완료가 아니다.
+- URL 저장은 영상 파일 보존이 아니다. n8n 작업을 훗날 시작할 때 URL이 만료됐을 수 있으므로 장기 영상 보존을 보장하지 않는다. 분석 단계가 가동된 뒤에는 새 관측 URL을 가능한 한 신속히 처리하는 구조가 적합하다.
+- 캐러셀에 이미지와 영상이 섞이면 각각 별도 locator를 보존한다. 부분 children에서도 받은 영상 주소는 남기되 전체 수집 완료로 표시하지 않는다.
+
+### 향후 n8n 입력 계약 — 현재는 연결 명세만
+
+읽기 전용 video_candidates view/export를 설계한다:
+post_id, media_id, account_key, parent_post_id, item_order, media_type,
+media_product_type, media_url, thumbnail_url, permalink, observed_at,
+locator_state_id, request_id, url_field_status, access_status.
+
+VIDEO이면서 사용 가능한 형태의 media_url이 반환된 항목을 처리 후보로 제공한다. URL 없는 VIDEO도 unavailable 목록에 남긴다. 썸네일만 있는 항목은 thumbnail_only로 구별하며 영상 분석 완료로 처리하지 않는다. 최신 후보는 저장 commit 시각이 아닌 observed_at 기준으로 선택해 지연 복구가 과거 URL로 되돌리지 않게 한다.
+
+향후 n8n은 별도 analysis DB에 다운로드 시도/오류/실제 자산 SHA-256/프레임 시각/분석 버전을 기록한다. 영상 다운로드 실패가 RAW 수집을 중단시키거나 RAW 이력을 수정하지 않는다. 만료 의심은 refresh_requested로 남기되 n8n이 직접 Meta를 무제한 재호출하지 않는다. 추가 조회가 필요하면 기존 collector 예산·중복 방지·승인 정책을 거친다. URL 변경만으로 같은 영상 분석을 반복하지 않도록, 파일 확보 후 asset hash와 분석 버전으로 중복을 판단한다.
+
+### 추가 인수 기준 및 범위
+
+구현 시 회귀 항목: VIDEO URL 반환/누락/NULL, thumbnail_only, 캐러셀 영상 순서 변경, 동일 URL 재관측, URL 교체, 과거 URL 지연 복구, 비밀정보 URL 차단, 미확인 만료 상태, REELS 식별 미지원. 모두 합성 fixture로 우선 검증한다. **이번 변경은 설계 문서만이며 신규 코드·영상 다운로드·n8n 분석·실 Meta 검증은 미구현/미실행**이다. 기존 P1 요청/정규화 계약과 P2 locator 관측 저장 작업에 포함한다.
