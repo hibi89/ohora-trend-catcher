@@ -156,6 +156,30 @@ class OfflineEpochContractProjector:
                 ).fetchone()
                 if owner is None or owner[0] != job["account_key"]:
                     raise OfflineEpochContractError("RAW account ownership differs")
+            # Legacy RAW field_observations are an independent, immutable
+            # per-request audit trail. An intact P2 metric state must not
+            # excuse a missing/changed view_count observation when P3 commits.
+            # Historical requests never asked for views and recorded
+            # view_count=not_tested; never manufacture zeros on replay.
+            stage = "metric_field_observations"
+            actual_fields = self.raw._db.execute(
+                "SELECT account_key,media_type,field_name,status,item_id "
+                "FROM field_observations WHERE request_id=? "
+                "AND resource_type='posts' AND field_name IN "
+                "('like_count','comments_count','view_count')",
+                (request_id,),
+            ).fetchall()
+            expected_fields = [
+                (job["account_key"], post.get("media_type") or "", field,
+                 record.post_field_status[post["id"]].get(field, "not_tested"),
+                 post["id"])
+                for post in record.normalized_posts
+                for field in ("like_count", "comments_count", "view_count")
+            ]
+            if sorted(map(tuple, actual_fields)) != sorted(expected_fields):
+                raise OfflineEpochContractError(
+                    "RAW metric field observations incomplete"
+                )
             # P2 append-only query/post checks are part of the same RAW
             # transaction as the receipt. An intact receipt alone must not
             # excuse missing structure, stale state, or deleted media rows.
