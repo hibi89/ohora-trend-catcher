@@ -689,6 +689,117 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=? AND state='done'",
             (self.daily,)).fetchone()[0],882)
 
+    def test_three_day_rollover_pauses_unsent_daily_but_recovers_old_bound(self):
+        """A previously bound HTTP result may commit; no old unbound sends.
+
+        Exercise KST midnight, day+2 and a disk-backed store restart.
+        Only synthetic receipt proofs are created.
+        """
+        bound=self.job(1,1)
+        old_unsent=self.job(2,1)
+        self.store.bind_daily(bound,"req-before-midnight",
+            build_request_spec("A","nail_001"),at=NOW)
+        midnight=datetime(2026,10,20,15,0,tzinfo=timezone.utc)
+        day2=self.store.seed_daily(DAY+timedelta(days=1),self.digest,
+                                    anchor_utc=midnight)
+        day3=self.store.seed_daily(DAY+timedelta(days=2),self.digest,
+                                    anchor_utc=midnight+timedelta(days=1))
+        self.assertEqual(self.store.seed_daily(
+            DAY+timedelta(days=2),self.digest,
+            anchor_utc=midnight+timedelta(days=1)),day3)
+        self.assertEqual(len(self.store.ready_daily(day3,"A")),150)
+        self.assertEqual(self.store.ready_daily(day2,"A"),[])
+        self.assertEqual(self.store.ready_daily(self.daily,"A"),[])
+        with self.assertRaises(EpochError):
+            self.store.bind_daily(old_unsent,"req-stale-daily",
+                build_request_spec("A","nail_002"),
+                at=midnight+timedelta(days=1))
+        with self.assertRaises(EpochError):
+            self.store.bind_daily(self.job(1,1,epoch=day2),
+                "req-intermediate-daily",
+                build_request_spec("A","nail_001"),
+                at=midnight+timedelta(days=1))
+        # Delayed bound day1 response is still legally committed to day1.
+        self.assertEqual(self.proof(bound,"req-before-midnight",
+            ids=["111","112","113","114"],nxt="old_verified_cursor",
+            at=midnight+timedelta(days=1))["status"],"committed")
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM jobs_v2 WHERE job_id=?",
+            (old_unsent,)).fetchone()[0],"pending")
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
+            (self.job(1,1,epoch=day3),)).fetchone()[0],0)
+        with tempfile.TemporaryDirectory() as tmp:
+            disk=sqlite3.connect(Path(tmp)/"synthetic_epoch.sqlite",
+                                 isolation_level=None)
+            disk.row_factory=sqlite3.Row
+            try:
+                self.db.backup(disk)
+                restarted=ThreeApiEpochStore(disk)
+                self.assertEqual(restarted.ready_daily(self.daily,"A"),[])
+                self.assertEqual(restarted.ready_daily(day2,"A"),[])
+                self.assertEqual(len(restarted.ready_daily(day3,"A")),150)
+                self.assertEqual(restarted.summary(day3)["jobs"],882)
+                self.assertEqual(restarted.history_checkpoint(self.daily,"KR_001"),None)
+                pending=self.job(1,1,epoch=day3)
+                restarted.bind_daily(pending,"req-new-day",
+                    build_request_spec("A","nail_001"),
+                    at=midnight+timedelta(days=1))
+                self.assertEqual(restarted.commit_daily_page(
+                    pending,"req-new-day",
+                    observed_at=midnight+timedelta(days=1),
+                    ordered_ids=["201","202","203","204"],
+                    next_cursor="new_day_cursor",terminal_basis="continued",
+                    source_evidence_id="synthetic-new-day",
+                    raw_receipt_id="synthetic-new-raw",
+                    source_digest="a"*64)["status"],"committed")
+                self.assertEqual(restarted.summary(self.daily)["states"]["done"],1)
+                self.assertEqual(restarted.summary(day3)["states"]["done"],1)
+                self.assertEqual(disk.execute("PRAGMA foreign_key_check").fetchall(),[])
+            finally:
+                disk.close()
+
+    def test_three_day_rollover_replays_bound_history_without_reset(self):
+        """History received after rollover commits, but cannot send a new page."""
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(page["job_id"],"req-three-day-history",
+            build_request_spec("A","nail_001",after="history_first_cursor"),
+            at=NOW)
+        before=self.store.history_checkpoint(history,"KR_001")
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror=OfflineRawMirror(Path(tmp)/"three_api_raw_mirror.sqlite")
+            try:
+                bridge=OfflineHistoryRawBridge(self.store,mirror)
+                bridge.stage_capture(page["job_id"],"req-three-day-history",
+                    observed_at=NOW,posts=[{"id":"991","like_count":0}],
+                    next_cursor="three_day_resume_cursor",
+                    terminal_basis="continued")
+                midnight=datetime(2026,10,20,15,0,tzinfo=timezone.utc)
+                day2=self.store.seed_daily(DAY+timedelta(days=1),self.digest,
+                                            anchor_utc=midnight)
+                day3=self.store.seed_daily(DAY+timedelta(days=2),self.digest,
+                                            anchor_utc=midnight+timedelta(days=1))
+                self.assertEqual(self.store.summary(day2)["jobs"],882)
+                self.assertEqual(self.store.summary(day3)["jobs"],882)
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001"),before)
+                # This is local replay only: never a fresh send while newest
+                # KST daily front remains unresolved.
+                self.assertEqual(bridge.reconcile_pending()[0]["status"],"committed")
+                cp=self.store.history_checkpoint(history,"KR_001")
+                self.assertEqual(cp["cursor"],"three_day_resume_cursor")
+                self.assertEqual(cp["page_seq"],1)
+                self.assertEqual(bridge.reconcile_pending()[0]["status"],
+                                 "already_committed")
+                with self.assertRaises(EpochError):
+                    self.store.schedule_one_history_page(history,"KR_001","B",
+                        at=midnight+timedelta(days=1))
+                self.assertEqual(mirror.summary()["raw_posts"],1)
+                self.assertEqual(mirror.summary()["raw_post_observations"],1)
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001"),cp)
+            finally:
+                mirror.close()
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
