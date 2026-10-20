@@ -581,6 +581,44 @@ class P3EpochTests(unittest.TestCase):
             finally:
                 mirror.close()
 
+    def test_blocked_own_daily_does_not_reenable_history_from_old_cursor(self):
+        """A blocked latest-day page must quarantine its own older history."""
+        history=self.open_history_fixture()
+        prior=self.store.history_checkpoint(history,"KR_001")
+        next_day=self.store.seed_daily(
+            DAY+timedelta(days=1),self.digest,
+            anchor_utc=NOW+timedelta(days=1))
+        # The other 293 synthetic accounts are explicit exceptions; this
+        # is NOT evidence of successful data collection.
+        self.db.execute("""UPDATE jobs_v2 SET state='blocked',
+            blocked_reason='synthetic_fixture_only'
+            WHERE epoch_id=? AND account_key<>'KR_001'""",(next_day,))
+        self.store.block_daily_account(next_day,"KR_001",
+                                       reason="permission_denied")
+        self.assertIsNone(self.store.active_round(next_day))
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(history,"KR_001","A",
+                at=NOW+timedelta(days=1))
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001"),prior)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=? AND state='blocked'",
+            (next_day,)).fetchone()[0],882)
+
+    def test_other_blocked_account_does_not_starve_proven_history(self):
+        history=self.open_history_fixture()
+        # 293 synthetic exception accounts are blocked by the fixture,
+        # but verified KR_001 still has a real linked synthetic page chain.
+        blocked=self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=? AND state='blocked'",
+            (self.daily,)).fetchone()[0]
+        self.assertEqual(blocked,293*3)
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.assertEqual(page["cursor"],"history_first_cursor")
+        self.assertEqual(page["page_seq"],1)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=? AND phase='history'",
+            (history,)).fetchone()[0],1)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
