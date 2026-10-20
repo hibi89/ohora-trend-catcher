@@ -465,5 +465,42 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         runner.ledger.db.execute(
             "UPDATE daily_window SET status='needs_review' WHERE account_key='KR_001'"
         )
+        decision=runner.step("A",now=NOW)
+        self.assertEqual(decision["status"],"manual_gap_review_required")
+        self.assertEqual(decision["review_accounts"],1)
+        self.assertEqual(decision["history_eligible_accounts"],293)
+        self.assertFalse(decision["history_dispatch_enabled"])
+        before_changes=runner.ledger.db.total_changes
+        report=runner.operator_report(now=NOW)
+        self.assertEqual(report["policy"]["next_phase_if_storage_verified"],
+                         "manual_review")
+        self.assertEqual(report["policy"]["manual_review_accounts"],1)
+        self.assertEqual(report["policy"]["history_eligible_accounts"],293)
+        self.assertFalse(report["policy"]["history_dispatch_enabled"])
+        self.assertFalse(report["policy"]["unattended_execution_enabled"])
+        self.assertEqual(runner.ledger.db.total_changes,before_changes)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],0)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        # The same account-scoped decision survives process restart.
+        runner.close()
+        back=self.create(front={},catchup={})
+        reopened=back.step("B",now=NOW)
+        self.assertEqual(reopened["review_accounts"],1)
+        self.assertEqual(reopened["history_eligible_accounts"],293)
+        self.assertEqual(reopened["status"],"manual_gap_review_required")
+        self.assertEqual(back.ledger.status("KR_001",DAY)["status"],
+                         "needs_review")
+
+    def test_front_barrier_does_not_prematurely_report_history_eligibility(self):
+        runner=self.create(front={})
+        runner.ledger.db.execute(
+            "UPDATE daily_window SET status='needs_review' WHERE account_key='KR_001'"
+        )
+        report=runner.operator_report(now=NOW)
+        self.assertEqual(report["policy"]["next_phase_if_storage_verified"],
+                         "front")
+        self.assertEqual(report["policy"]["manual_review_accounts"],0)
+        self.assertEqual(report["policy"]["history_eligible_accounts"],0)
         self.assertEqual(runner.step("A",now=NOW)["status"],
-                         "manual_gap_review_required")
+                         "front_fixture_missing")
