@@ -156,6 +156,90 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_daily_page(first,"req-daily-observed",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_daily_replay_integrity_matrix(self):
+        """Independent synthetic mutations must not be accepted as idempotent."""
+        fields=[
+            ("request_id","forged-request","immutable daily page replay"),
+            ("cursor_in","forged-cursor","immutable daily page replay"),
+            ("cursor_out","forged-out","immutable daily page replay"),
+            ("observed_at","forged-observed","immutable daily page replay"),
+            ("ordered_ids_json",'["999"]',"immutable daily page replay"),
+            ("terminal_basis","verified_terminal","immutable daily page replay"),
+            ("source_evidence_id","forged-source","immutable daily page replay"),
+            ("raw_receipt_id","forged-receipt","immutable daily page replay"),
+            ("source_digest","b"*64,"immutable daily page replay"),
+            ("chain_hash","c"*64,"immutable daily page replay"),
+        ]
+        for field,payload,message in fields:
+            with self.subTest(field=field):
+                with sqlite3.connect(":memory:",isolation_level=None) as unused:
+                    pass
+                # Use a fresh isolated epoch store for every mutation so a
+                # failed subcase cannot mask a later successful replay.
+                db=sqlite3.connect(":memory:",isolation_level=None)
+                db.row_factory=sqlite3.Row
+                try:
+                    store=ThreeApiEpochStore(db)
+                    digest=store.register_roster(official_shape(),recorded_at=NOW)
+                    daily=store.seed_daily(DAY,digest,anchor_utc=NOW)
+                    job=db.execute("""SELECT job_id FROM jobs_v2
+                        WHERE epoch_id=? AND account_ordinal=1 AND page_seq=1""",
+                        (daily,)).fetchone()[0]
+                    request="req-matrix"
+                    store.bind_daily(job,request,build_request_spec("A","nail_001"),at=NOW)
+                    args=dict(observed_at=NOW,ordered_ids=["101","102"],
+                        next_cursor="matrix_next",terminal_basis="continued",
+                        source_evidence_id="matrix-source",raw_receipt_id="matrix-raw",
+                        source_digest="a"*64)
+                    store.commit_daily_page(job,request,**args)
+                    db.execute("UPDATE page_evidence_v2 SET "+field+"=? WHERE job_id=?",
+                               (payload,job))
+                    before=db.total_changes
+                    with self.assertRaisesRegex(EpochError,message):
+                        store.commit_daily_page(job,request,**args)
+                    self.assertEqual(db.total_changes,before)
+                finally:
+                    db.close()
+
+    def test_daily_replay_checkpoint_integrity_matrix(self):
+        """Seven checkpoint attributes must remain tied to last daily proof."""
+        mutations=[
+            ("cursor","forged"),
+            ("anchor_post_id","999"),
+            ("last_receipt","forged"),
+            ("chain_hash","f"*64),
+            ("updated_at","forged"),
+            ("page_seq",2),
+            ("status","terminal"),
+        ]
+        for field,payload in mutations:
+            with self.subTest(field=field):
+                db=sqlite3.connect(":memory:",isolation_level=None)
+                db.row_factory=sqlite3.Row
+                try:
+                    store=ThreeApiEpochStore(db)
+                    digest=store.register_roster(official_shape(),recorded_at=NOW)
+                    daily=store.seed_daily(DAY,digest,anchor_utc=NOW)
+                    job=db.execute("""SELECT job_id FROM jobs_v2
+                        WHERE epoch_id=? AND account_ordinal=1 AND page_seq=1""",
+                        (daily,)).fetchone()[0]
+                    request="req-checkpoint-matrix"
+                    store.bind_daily(job,request,build_request_spec("A","nail_001"),at=NOW)
+                    args=dict(observed_at=NOW,ordered_ids=["101","102"],
+                        next_cursor="checkpoint_next",terminal_basis="continued",
+                        source_evidence_id="checkpoint-source",
+                        raw_receipt_id="checkpoint-raw",source_digest="a"*64)
+                    store.commit_daily_page(job,request,**args)
+                    db.execute("""UPDATE cursor_checkpoints SET """+field+"""=?
+                        WHERE epoch_id=? AND account_key='KR_001'
+                          AND stream='daily'""",(payload,daily))
+                    before=db.total_changes
+                    with self.assertRaisesRegex(EpochError,"checkpoint differs"):
+                        store.commit_daily_page(job,request,**args)
+                    self.assertEqual(db.total_changes,before)
+                finally:
+                    db.close()
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
