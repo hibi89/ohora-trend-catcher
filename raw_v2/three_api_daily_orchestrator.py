@@ -423,9 +423,16 @@ class OfflineDailyOrchestrator:
             raise OfflineDailyScheduleError("stage_only must be boolean")
         now=now.astimezone(timezone.utc)
         try:
-            self.reconcile()
+            recovered_coverage=self.reconcile()
         except Exception:
             return {"status":"recovery_blocked","lane":lane}
+        # Reuse the phase counts already computed by reconcile(). This avoids
+        # an additional full-roster ledger scan on each synthetic tick.
+        phases=recovered_coverage["action_counts"]
+        if phases.get("front",0):
+            if stage_only:
+                return {"status":"front_stage_only_unsupported"}
+            return self._front_step(lane,now)
         acts=self.ledger.next_actions([a["key"] for a in self.accounts],self.day)
         if any(a["phase"]=="front" for a in acts):
             if stage_only:
