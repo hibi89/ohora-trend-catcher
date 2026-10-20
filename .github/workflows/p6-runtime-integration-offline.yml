@@ -107,6 +107,8 @@ permissions:
 jobs:
   offline-runtime:
     runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -146,6 +148,8 @@ jobs:
         run: python tests/run_offline.py
 
   offline-windows:
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     # Each Windows group runs on an isolated runner. All discovered test modules
     # are assigned to exactly one group in tests/run_offline.py. This preserves
     # the full socket-blocked suite while parallelizing expensive SQLite tests.
