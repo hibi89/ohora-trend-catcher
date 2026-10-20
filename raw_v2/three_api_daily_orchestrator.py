@@ -588,8 +588,15 @@ class OfflineDailyOrchestrator:
             # Custom orders remain deterministic; do not hard-code A/B/C here.
             pivot = order.index(row["last_lane"]) + 1
             order = order[pivot:] + order[:pivot]
+        now = now.astimezone(timezone.utc)
+        try:
+            coverage = self.reconcile()
+        except Exception:
+            return {"status": "recovery_blocked",
+                    "selected_lane": order[0], "lane": order[0]}
+        phases = coverage["action_counts"]
         for lane in order:
-            result = self.step(lane, now=now)
+            result = self._step_with_phases(lane, now, phases)
             if result["status"] in ("front_lane_unavailable", "lane_blocked"):
                 continue
             if result["status"] in ("front_committed", "applied"):
