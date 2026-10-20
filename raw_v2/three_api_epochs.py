@@ -352,6 +352,12 @@ class ThreeApiEpochStore:
                 chain_hash,updated_at,page_seq,status)
                 VALUES(?,?,'history',?,?,?,?,?,0,?)""",
                 (history_epoch,account_key,cursor,anchor,receipt,chain,stamp,state))
+            if cursor is not None:
+                # Initial history root is itself a seen cursor. Returning to
+                # this anchor on later pages is a cycle, not a new page.
+                self.db.execute("""INSERT INTO cursor_seen_v2(
+                    epoch_id,account_key,cursor,request_id) VALUES(?,?,?,?)""",
+                    (history_epoch,account_key,cursor,"seed:"+receipt))
             self.db.execute("COMMIT")
             return {"status":"initialized","cursor":cursor,"history_state":state,
                     "daily_page_seq":page}
@@ -674,8 +680,16 @@ class ThreeApiEpochStore:
                               "WHERE job_id=?",(job_id,)).fetchone()
         if bound is None or bound[0]!=request_id:
             raise EpochError("Missing immutable history request binding")
-        existing=self.db.execute("SELECT chain_hash FROM page_evidence_v2 WHERE job_id=?",
-                                  (job_id,)).fetchone()
+        existing=self.db.execute("""SELECT request_id,cursor_in,cursor_out,
+            observed_at,ordered_ids_json,terminal_basis,source_evidence_id,
+            raw_receipt_id,source_digest FROM page_evidence_v2 WHERE job_id=?""",
+            (job_id,)).fetchone()
+        if existing is not None:
+            expected=(request_id,bound[1],next_cursor,stamp,_json(ids),
+                      terminal_basis,source_evidence_id,raw_receipt_id,source_digest)
+            if tuple(existing)!=expected:
+                raise EpochError("Conflicting immutable history page replay")
+            return {"status":"already_committed","job_id":job_id}
         cp=self.history_checkpoint(job["epoch_id"],job["account_key"])
         if cp is None:
             raise EpochError("Lost durable history checkpoint")
@@ -688,10 +702,6 @@ class ThreeApiEpochStore:
             raise EpochError("History cursor chain continuity is unverified")
         chain=_hash(parent_chain,job_id,request_id,bound[1],next_cursor,ids,
                     source_evidence_id,raw_receipt_id,source_digest)
-        if existing is not None:
-            if existing[0]!=chain:
-                raise EpochError("Conflicting immutable history page replay")
-            return {"status":"already_committed","job_id":job_id}
         if job["state"]!="bound" or cp["page_seq"]!=job["page_seq"]-1 or cp["cursor"]!=bound[1]:
             raise EpochError("History cursor changed; do not dispatch or skip")
         if next_cursor is not None and next_cursor==bound[1]:
