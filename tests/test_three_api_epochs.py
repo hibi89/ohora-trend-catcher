@@ -533,6 +533,26 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_daily_page(second,"skip-d2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_daily_replay_rejects_predecessor_account_corruption_without_writes(self):
+        first,second=(self.job(1,page) for page in (1,2))
+        self.store.bind_daily(first,"account-d1",build_request_spec("A","nail_001"),at=NOW)
+        self.store.commit_daily_page(first,"account-d1",observed_at=NOW,
+            ordered_ids=["101"],next_cursor="account_cursor",
+            terminal_basis="continued",source_evidence_id="account-d-e1",
+            raw_receipt_id="account-d-r1",source_digest="a"*64)
+        self.store.bind_daily(second,"account-d2",
+            build_request_spec("C","nail_001",after="account_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["102"],next_cursor="account_next",
+            terminal_basis="continued",source_evidence_id="account-d-e2",
+            raw_receipt_id="account-d-r2",source_digest="b"*64)
+        self.store.commit_daily_page(second,"account-d2",**args)
+        self.db.execute("UPDATE jobs_v2 SET account_key='US_001' WHERE job_id=?",
+                        (first,))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_daily_page(second,"account-d2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_daily_replay_rejects_parent_phase_corruption_without_writes(self):
         first,second=(self.job(1,page) for page in (1,2))
         self.store.bind_daily(first,"phase-d1",build_request_spec("A","nail_001"),at=NOW)
