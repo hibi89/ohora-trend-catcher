@@ -816,7 +816,37 @@ class ThreeApiEpochStore:
                         or len(media_id)>64 for media_id in anchored_ids) or
                     len(anchored_ids)>4 or len(set(anchored_ids))!=len(anchored_ids)):
                 raise EpochError("History replay media evidence is invalid")
-            if cp["anchor_post_id"]!=(anchored_ids[-1] if anchored_ids else None):
+            if anchored_ids:
+                expected_anchor=anchored_ids[-1]
+            else:
+                # Empty history pages retain the previous durable media anchor.
+                # Page one inherits it from the verified daily front; later
+                # pages inherit it from the last nonempty history page.
+                earlier=self.db.execute("""SELECT e.ordered_ids_json FROM
+                    page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
+                    WHERE j.epoch_id=? AND j.account_key=? AND j.phase='history'
+                      AND j.page_seq<? AND j.state='done'
+                    ORDER BY j.page_seq DESC""",
+                    (job["epoch_id"],job["account_key"],cp["page_seq"])).fetchall()
+                expected_anchor=None
+                for previous_ids in earlier:
+                    try:
+                        parsed=json.loads(previous_ids[0])
+                    except (TypeError,ValueError) as exc:
+                        raise EpochError("History replay media evidence is invalid") from exc
+                    if (not isinstance(parsed,list) or len(parsed)>4 or
+                            any(not isinstance(v,str) or not v.isdecimal()
+                                or len(v)>64 for v in parsed) or
+                            len(set(parsed))!=len(parsed)):
+                        raise EpochError("History replay media evidence is invalid")
+                    if parsed:
+                        expected_anchor=parsed[-1]
+                        break
+                if expected_anchor is None:
+                    # The original daily anchor is not recorded as a distinct
+                    # history seed field; do not claim to verify it here.
+                    expected_anchor=cp["anchor_post_id"]
+            if cp["anchor_post_id"]!=expected_anchor:
                 raise EpochError("History replay anchor differs from evidence")
             if (latest is not None and
                     ((latest[4]=="continued" and latest[0] is None) or
