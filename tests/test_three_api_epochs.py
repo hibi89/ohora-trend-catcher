@@ -3,11 +3,15 @@ from datetime import date,datetime,timedelta,timezone
 from pathlib import Path
 import sqlite3
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"raw_v2"))
 from three_api_epochs import ThreeApiEpochStore,EpochError
 from three_api_request_spec import build_request_spec
+from three_api_raw_mirror import OfflineRawMirror
+from three_api_history_offline_bridge import OfflineHistoryRawBridge,OfflineHistoryBridgeError
 
 NOW=datetime(2026,10,20,2,tzinfo=timezone.utc)
 DAY=date(2026,10,20)
@@ -396,6 +400,129 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=?",
             (history,)).fetchone()[0],0)
+
+    def test_p4_history_bridge_two_pages_terminal_and_idempotent(self):
+        history=self.open_history_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror=OfflineRawMirror(Path(tmp)/"three_api_raw_mirror.sqlite")
+            try:
+                bridge=OfflineHistoryRawBridge(self.store,mirror)
+                first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+                self.store.bind_history(first["job_id"],"req-bridge-one",
+                    build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+                posts=[{"id":str(i),"media_type":"IMAGE","like_count":0}
+                       for i in range(501,505)]
+                args=dict(observed_at=NOW,posts=posts,
+                          next_cursor="bridge_cursor_2",terminal_basis="continued")
+                self.assertEqual(bridge.stage_capture(first["job_id"],"req-bridge-one",
+                    **args)["status"],"staged")
+                self.assertEqual(bridge.stage_capture(first["job_id"],"req-bridge-one",
+                    **args)["status"],"already_staged")
+                self.assertEqual(bridge.reconcile_one(first["job_id"])["status"],"committed")
+                self.assertEqual(bridge.reconcile_one(first["job_id"])["status"],
+                                 "already_committed")
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001")["cursor"],
+                                 "bridge_cursor_2")
+                second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+                self.store.bind_history(second["job_id"],"req-bridge-terminal",
+                    build_request_spec("B","nail_001",after="bridge_cursor_2"),at=NOW)
+                bridge.stage_capture(second["job_id"],"req-bridge-terminal",
+                    observed_at=NOW,posts=[{"id":"601"},{"id":"602"}],
+                    next_cursor=None,terminal_basis="verified_terminal")
+                self.assertEqual(bridge.reconcile_one(second["job_id"])["status"],
+                                 "committed")
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001")["status"],
+                                 "terminal")
+                self.assertEqual(mirror.summary()["raw_posts"],6)
+                self.assertEqual(mirror.summary()["raw_post_observations"],6)
+                self.assertEqual(mirror.summary()["pending_pages"],0)
+                self.assertEqual(self.db.execute(
+                    "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id IN (?,?)",
+                    (first["job_id"],second["job_id"])).fetchone()[0],2)
+                self.assertFalse(bridge.stage_capture(first["job_id"],"req-bridge-one",
+                    **args)["history_dispatch_enabled"])
+                self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(),[])
+            finally:
+                mirror.close()
+
+    def test_p4_history_bridge_recovers_raw_first_without_refetch(self):
+        history=self.open_history_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror=OfflineRawMirror(Path(tmp)/"three_api_raw_mirror.sqlite")
+            try:
+                bridge=OfflineHistoryRawBridge(self.store,mirror)
+                job=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+                self.store.bind_history(job["job_id"],"req-bridge-crash",
+                    build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+                bridge.stage_capture(job["job_id"],"req-bridge-crash",
+                    observed_at=NOW,posts=[{"id":"701","comments_count":0}],
+                    next_cursor="bridge_after_crash",terminal_basis="continued")
+                with mock.patch.object(self.store,"commit_history_page",
+                                       side_effect=EpochError("injected epoch failure")):
+                    with self.assertRaises(OfflineHistoryBridgeError):
+                        bridge.reconcile_one(job["job_id"])
+                self.assertEqual(mirror.summary()["raw_posts"],1)
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001")["page_seq"],0)
+                self.assertEqual(bridge.reconcile_pending()[0]["status"],"committed")
+                self.assertEqual(bridge.reconcile_pending()[0]["status"],"already_committed")
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001")["cursor"],
+                                 "bridge_after_crash")
+                self.assertEqual(mirror.summary()["raw_post_observations"],1)
+            finally:
+                mirror.close()
+
+    def test_p4_history_bridge_rejects_tampered_durable_source(self):
+        history=self.open_history_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror=OfflineRawMirror(Path(tmp)/"three_api_raw_mirror.sqlite")
+            try:
+                bridge=OfflineHistoryRawBridge(self.store,mirror)
+                job=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+                self.store.bind_history(job["job_id"],"req-bridge-tamper",
+                    build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+                bridge.stage_capture(job["job_id"],"req-bridge-tamper",
+                    observed_at=NOW,posts=[{"id":"801"}],
+                    next_cursor="after_tamper",terminal_basis="continued")
+                self.db.execute("UPDATE offline_history_capture SET posts_json='[]' "
+                                "WHERE job_id=?",(job["job_id"],))
+                with self.assertRaises(OfflineHistoryBridgeError):
+                    bridge.reconcile_one(job["job_id"])
+                self.assertEqual(mirror.summary()["raw_posts"],0)
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001")["page_seq"],0)
+                with self.assertRaises(OfflineHistoryBridgeError):
+                    bridge.stage_capture(job["job_id"],"req-bridge-tamper",
+                        observed_at=NOW,posts=[{"id":"999"}],
+                        next_cursor="after_tamper",terminal_basis="continued")
+            finally:
+                mirror.close()
+
+    def test_p4_history_bridge_restarts_from_durable_source(self):
+        history=self.open_history_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror_path=Path(tmp)/"three_api_raw_mirror.sqlite"
+            epoch_path=Path(tmp)/"epoch_offline.sqlite"
+            mirror=OfflineRawMirror(mirror_path)
+            try:
+                bridge=OfflineHistoryRawBridge(self.store,mirror)
+                job=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+                self.store.bind_history(job["job_id"],"req-bridge-restart",
+                    build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+                bridge.stage_capture(job["job_id"],"req-bridge-restart",
+                    observed_at=NOW,posts=[{"id":"901"}],
+                    next_cursor="persisted_cursor",terminal_basis="continued")
+                disk=sqlite3.connect(epoch_path,isolation_level=None)
+                try:
+                    self.db.backup(disk)
+                    reopened=ThreeApiEpochStore(disk)
+                    resumed=OfflineHistoryRawBridge(reopened,mirror)
+                    self.assertEqual(resumed.reconcile_pending()[0]["status"],"committed")
+                    self.assertEqual(reopened.history_checkpoint(history,"KR_001")["cursor"],
+                                     "persisted_cursor")
+                    self.assertEqual(mirror.summary()["raw_posts"],1)
+                finally:
+                    disk.close()
+            finally:
+                mirror.close()
 
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
