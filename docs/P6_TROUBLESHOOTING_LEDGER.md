@@ -212,6 +212,8 @@
 - **미해결/검증:** 문서 수정 후 새로운 SHA에서 `python -m unittest discover -s tests -p 'test_p6_troubleshooting_handoff_guard.py' -v` 및 전체 Runtime CI 확인. Windows timeout은 별도 작업으로 원인 측정·shard/timeout 변경 대안 비교 후 안전한 최소 변경. 해결 전 Runtime 최종 PASS를 주장하지 않는다.
 - **롤백:** 상단 필독 인덱스와 이 사건 추가만 feature branch에서 revert 가능. 동결 설계·운영 collection.sqlite/RAW/CSV·main/Meta HTTP 변경 없음.
 
+> **P6-021 후속 원인·최소 수정 (2026-10-21, 신규 CI 검증 대기):** Windows #39499556675의 `orchestrator`는 70개 중 약 30개 합성 테스트를 통과한 시점에 480초 watchdog에 도달했다. 로그상 여러 SQLite 테스트가 각각 약 12~28초 소요되어 단일 그룹의 소요시간이 예산을 초과한 근거가 있다. 마지막 `commit_page` stack은 시간 초과 당시 실행 위치이며 데드락/원본 결함이라는 확정 근거는 아니다. 대안 A) watchdog만 900초로 상향하면 CI 지연과 실제 정지 탐지 지연이 커진다. **채택 B)** `tests/run_offline.py`에서 4개 오케스트레이터 그룹에 전체 unittest ID의 안정적인 CRC32으로 배정, Windows matrix에 3개 작업을 더해 기존 그룹과 병렬 실행. `tests/test_offline_shards.py`에서 1회씩 정확하게 배정·전그룹 비어 있지 않음·발견 순서 독립성 검증. 전체 테스트와 watchdog 480초는 그대로 보존한다. 신규 코드의 Linux/Windows CI는 실행 결과를 확인해야 하며 합성 전수 PASS나 성능 개선을 사전 주장하지 않는다. 변경 범위는 테스트 실행기/테스트/CI 워크플로뿐이며, 실제 Meta/운영 DB/main·동결 설계 불변. 롤백은 본 변경의 CI/테스트 샤딩 항목만 revert하고 운영 원본은 복원 대상으로 삼지 않는다.
+
 ## 새 사건을 추가할 때의 고정 서식
 
 ```markdown
