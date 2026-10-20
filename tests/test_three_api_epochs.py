@@ -549,6 +549,12 @@ class P3EpochTests(unittest.TestCase):
         next_anchor=NOW+timedelta(days=1)
         other=self.store.seed_daily(DAY+timedelta(days=1),self.digest,
                                     anchor_utc=next_anchor)
+        # The seeded epoch already has a page-one row for KR_001.
+        # Remove only that unused synthetic row to permit the corruption
+        # fixture without violating the unique job identity constraint.
+        self.db.execute("""DELETE FROM jobs_v2 WHERE epoch_id=?
+            AND account_key='KR_001' AND phase='daily_front' AND page_seq=1""",
+            (other,))
         self.db.execute("UPDATE jobs_v2 SET epoch_id=? WHERE job_id=?",
                         (other,first))
         before=self.db.total_changes
