@@ -360,5 +360,26 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertFalse(self.audit()["production_coverage_verified"])
 
 
+    def test_stage_capture_rejects_conflicting_replay_before_raw_write(self):
+        checkpoint=self.fixture.store.history_checkpoint(self.history,"KR_001")
+        page=self.fixture.store.schedule_one_history_page(self.history,"KR_001","A",at=NOW)
+        request="req-stage-conflict"
+        self.fixture.store.bind_history(
+            page["job_id"],request,
+            build_request_spec("A","nail_001",after=checkpoint["cursor"]),at=NOW)
+        self.bridge.stage_capture(page["job_id"],request,observed_at=NOW,
+            posts=self.posts([7101,7102],[360,366]),
+            next_cursor=None,terminal_basis="verified_terminal")
+        before=self.mirror.db.total_changes
+        with self.assertRaises(OfflineHistoryBridgeError):
+            self.bridge.stage_capture(page["job_id"],request,observed_at=NOW,
+                posts=self.posts([7101,7103],[360,366]),
+                next_cursor=None,terminal_basis="verified_terminal")
+        self.assertEqual(self.mirror.db.total_changes,before)
+        self.assertFalse(self.audit()["synthetic_cutoff_verified"])
+        self.bridge.reconcile_one(page["job_id"])
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
