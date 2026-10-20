@@ -61,6 +61,44 @@ class PagingTests(unittest.TestCase):
                 {"data": [], "paging": {"next": "https://example.org",
                  "cursors": {"after": "abc"}}}, prior_cursors=("abc",))
 
+    def test_rejects_cursor_cycles_across_all_previous_pages(self):
+        for previous in ("first_cursor", "second_cursor", "third_cursor"):
+            with self.subTest(previous=previous), self.assertRaisesRegex(
+                    ValueError, "Cursor cycle detected"):
+                mod.validate_page_edge({
+                    "data": [{"id": "1"}],
+                    "paging": {"next": "https://example.org/next",
+                               "cursors": {"after": previous}}},
+                    requested_cursor="current_cursor",
+                    prior_cursors=("first_cursor", "second_cursor",
+                                   "third_cursor"))
+
+    def test_rejects_duplicate_consumed_cursors(self):
+        with self.assertRaisesRegex(ValueError, "Repeated prior cursor"):
+            mod.validate_page_edge({"data": []},
+                                   prior_cursors=("cursor_a", "cursor_a"))
+
+    def test_rejects_malformed_response_cursor_without_next(self):
+        for invalid in ("", "bad cursor", "https://example.org", 17):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                mod.validate_page_edge({
+                    "data": [],
+                    "paging": {"cursors": {"after": invalid}}})
+
+    def test_rejects_malformed_prior_cursor_even_for_terminal_page(self):
+        for invalid in ("", "bad cursor", 17, None):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                mod.validate_page_edge({"data": []},
+                                       prior_cursors=(invalid,))
+
+    def test_empty_terminal_page_does_not_reuse_stale_after_cursor(self):
+        result=mod.validate_page_edge({
+            "data": [],
+            "paging": {"cursors": {"after": "stale_cursor"}}},
+            requested_cursor="current_cursor")
+        self.assertTrue(result["terminal"])
+        self.assertIsNone(result["next_cursor"])
+
     def test_invalid_response_fails(self):
         with self.assertRaises(ValueError):
             mod.validate_page_edge({"data": "bad"})
