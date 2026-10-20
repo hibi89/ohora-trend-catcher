@@ -56,6 +56,8 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
             return {"verified": False, "reason": "cursor_cycle"}
         if incoming is not None:
             seen_cursors.add(incoming)
+        if index and incoming == "root":
+            return {"verified": False, "reason": "cursor_cycle"}
         prior = outgoing
     crossing = oldest <= cutoff
     terminal = prior is None and pages[-1].get("terminal_verified") is True
