@@ -32,6 +32,28 @@ class RequestSpecTests(unittest.TestCase):
             with self.subTest(cursor=cursor), self.assertRaises(ValueError):
                 build_request_spec("A", "nails", after=cursor)
 
+    def test_explicit_account_metrics_opt_in_preserves_default_contract(self):
+        from three_api_runtime_contract import canonical_bytes
+        from three_api_http_preflight import prepare_graph_request
+        from three_api_credentials import make_references
+        base = build_request_spec("A", "nails")
+        profile = build_request_spec("A", "nails", include_account_metrics=True)
+        self.assertEqual(base.limit, profile.limit)
+        self.assertEqual(base.limit, 4)
+        self.assertNotIn("followers_count", business_discovery_field(base))
+        self.assertIn("followers_count,media_count", business_discovery_field(profile))
+        self.assertNotIn(b'"account_fields"', canonical_bytes(base))
+        self.assertIn(b'"account_fields"', canonical_bytes(profile))
+        refs = make_references({lane: {
+            "token_env_name": "TEST_%s_TOKEN" % lane,
+            "ig_user_id_env_name": "TEST_%s_IG_USER_ID" % lane,
+        } for lane in "ABC"})
+        prepared = prepare_graph_request(profile, refs["A"], "17840000000000000")
+        self.assertTrue(prepared.include_account_metrics)
+        self.assertIn("followers_count", prepared.fields)
+        with self.assertRaises(ValueError):
+            build_request_spec("A", "nails", include_account_metrics=1)
+
     def test_fixed_page_size_and_lane(self):
         for limit in (0, 5, True):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
