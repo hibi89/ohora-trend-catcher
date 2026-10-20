@@ -185,16 +185,19 @@ class P2ObservationTests(unittest.TestCase):
         self.assertNotIn("media_url",b)
 
     def test_url_only_change_is_locator_not_new_nail_content(self):
+        def original(_body, posts):
+            posts[0]["media_url"] = "https://cdn.test/image-2026-10-20.jpg"
         def link(_body, posts):
             posts[0]["media_url"] = "https://cdn.test/image-2026-10-21.jpg"
-        self.apply(1)
+        self.apply(1,edits=original)
         self.apply(2,day=1,edits=link)
         kinds=self.db.execute("SELECT field_path,kind FROM current_change_events").fetchall()
         self.assertIn(("locator.media_url","locator_change"),kinds)
         self.assertFalse(any(kind=="content_change" for _,kind in kinds))
         self.assertEqual(self.count("posts"),1)
         # Historical first-seen locator remains; current locator is a new state.
-        self.assertIsNone(self.db.execute("SELECT media_url FROM posts").fetchone()[0])
+        self.assertEqual(self.db.execute("SELECT media_url FROM posts").fetchone()[0],
+                         "https://cdn.test/image-2026-10-20.jpg")
         self.assertEqual(self.db.execute(
             "SELECT COUNT(DISTINCT locator_state_id) FROM post_checks").fetchone()[0],2)
 
