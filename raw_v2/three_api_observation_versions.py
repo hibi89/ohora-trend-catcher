@@ -39,7 +39,6 @@ def _id(prefix, *items):
 
 def ensure_observation_schema(db):
     """Create versioned RAW-only tables and indexes; never mutate existing rows."""
-    db.executescript if False else None  # Avoid executescript: it auto-commits.
     statements = (
         """CREATE TABLE IF NOT EXISTS query_observations(
           request_id TEXT PRIMARY KEY REFERENCES request_log(request_id),
@@ -158,7 +157,7 @@ def _post_components(record, post):
         structure["children"] = [
             {"id": child["id"], "media_type": child.get("media_type")}
             for child in post["children"]]
-    if spec.include_carousel_children:
+    if spec.include_carousel_children or "children" in post:
         tested_structure.add("children")
     struct_state = _state(structure, _POST_FIELDS["structure"],
                           tested_structure)
@@ -168,7 +167,7 @@ def _post_components(record, post):
             {"id": child["id"], "media_url": child.get("media_url"),
              "thumbnail_url": child.get("thumbnail_url")}
             for child in post["children"]]
-    if spec.include_carousel_children:
+    if spec.include_carousel_children or "children" in post:
         tested_media = tested_media | {"child_locations"}
     locator_state = _state(locators, _POST_FIELDS["locator"], tested_media)
     return dict(zip(_PARTS, (content, metrics, struct_state, locator_state)))
