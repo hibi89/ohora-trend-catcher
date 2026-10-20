@@ -1249,16 +1249,23 @@ class P3EpochTests(unittest.TestCase):
 
     def test_history_replay_rejects_empty_page_forged_anchor(self):
         history=self.open_history_fixture()
-        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"history-nonempty",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        self.store.commit_history_page(first["job_id"],"history-nonempty",
+            observed_at=NOW,ordered_ids=["901"],next_cursor="after_nonempty",
+            terminal_basis="continued",source_evidence_id="nonempty-proof",
+            raw_receipt_id="nonempty-raw",source_digest="a"*64)
+        page=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
         request="history-empty-anchor"
         self.store.bind_history(page["job_id"],request,
-            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+            build_request_spec("B","nail_001",after="after_nonempty"),at=NOW)
         args=dict(observed_at=NOW,ordered_ids=[],
             next_cursor=None,terminal_basis="verified_terminal",
             source_evidence_id="empty-proof",raw_receipt_id="empty-raw",
-            source_digest="a"*64)
+            source_digest="b"*64)
         self.store.commit_history_page(page["job_id"],request,**args)
-        self.assertIsNone(self.store.history_checkpoint(history,"KR_001")["anchor_post_id"])
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001")["anchor_post_id"],"901")
         self.db.execute("""UPDATE cursor_checkpoints SET anchor_post_id='forged'
             WHERE epoch_id=? AND account_key='KR_001' AND stream='history'""",(history,))
         before=self.db.total_changes
