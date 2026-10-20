@@ -238,12 +238,14 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
             db.execute("INSERT INTO runs(run_id,started_at,api_version,mode,status) VALUES(?,?,?,?,?)",
                        (run, clock, api_version, "three_api_capture", "started"))
         media_inserted_count = 0
+        newly_inserted_post_ids = set()
         for post in posts:
             pid = post["id"]
             old = db.execute("SELECT account_key FROM posts WHERE post_id=?", (pid,)).fetchone()
             if old and old[0] != account:
                 raise RawWriteError("Cross-account post collision")
             if not old:
+                newly_inserted_post_ids.add(pid)
                 db.execute("""INSERT INTO posts(post_id,account_key,username,caption,timestamp,
                     permalink,media_type,media_product_type,media_url,thumbnail_url,first_seen_run)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
@@ -312,7 +314,9 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
         p2_counts = None
         if contract_record is not None:
             from three_api_observation_versions import project_contract_observation
-            p2_counts = project_contract_observation(db, contract_record)
+            p2_counts = project_contract_observation(
+                db, contract_record,
+                new_post_ids=frozenset(newly_inserted_post_ids))
         db.execute("INSERT INTO three_api_raw_receipts VALUES(?,?,?,?,?)",
                    (cid,account,clock,digest,canonical(capture)))
         if contract_record is not None:
