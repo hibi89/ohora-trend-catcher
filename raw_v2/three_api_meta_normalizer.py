@@ -53,10 +53,10 @@ def _normalize_children(post, *, allow_partial=False):
         seen.add(media_id)
         record = {field: child[field] for field in CHILD_FIELDS if field in child}
         for field in ("media_type", "media_url", "thumbnail_url"):
-            if field in record and (not isinstance(record[field], str)
-                                    or len(record[field]) > 2048):
+            if field in record and record[field] is not None and (
+                    not isinstance(record[field], str) or len(record[field]) > 2048):
                 raise ValueError("Invalid carousel child metadata")
-        if "media_type" in record and record["media_type"] not in ("IMAGE", "VIDEO"):
+        if "media_type" in record and record["media_type"] is not None and record["media_type"] not in ("IMAGE", "VIDEO"):
             raise ValueError("Invalid carousel media type")
         normalized.append(record)
     return normalized
