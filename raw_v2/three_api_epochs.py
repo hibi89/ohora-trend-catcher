@@ -192,7 +192,7 @@ class ThreeApiEpochStore:
                 read=self.db.execute("""SELECT ordinal,account_key,username,country
                     FROM roster_members WHERE roster_digest=? ORDER BY ordinal""",
                     (digest,)).fetchall()
-                if existing[0]!=294 or list(read)!=rows:
+                if existing[0]!=294 or [tuple(item) for item in read]!=rows:
                     raise EpochError("Immutable roster fingerprint collision")
             self.db.execute("COMMIT")
         except BaseException:
@@ -243,7 +243,7 @@ class ThreeApiEpochStore:
                             (job_id,epoch_id,account,ordinal,"daily_front",
                              page,round_no,lane,previous))
                         previous=job_id
-            elif row!=("daily",day,roster_digest):
+            elif tuple(row)!=("daily",day,roster_digest):
                 raise EpochError("Existing daily epoch conflicts with roster")
             self.db.execute("COMMIT")
         except BaseException:
@@ -323,7 +323,7 @@ class ThreeApiEpochStore:
             source=self.db.execute("SELECT kind,roster_digest FROM collection_epochs "
                                    "WHERE epoch_id=?",(daily_epoch,)).fetchone()
             if (target is None or target[0]!="history" or source is None or
-                    source!=( "daily",target[1])):
+                    tuple(source)!=("daily",target[1])):
                 raise EpochError("Daily/history roster lineage mismatch")
             existing=self.history_checkpoint(history_epoch,account_key)
             if existing is not None:
