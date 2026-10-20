@@ -25,6 +25,7 @@
 | P6-011 | CI 회귀 | API B 테스트 예상 RAW 4건 vs 실제 1건 | fixture/expected cardinality 일치 |
 | P6-012 | 아키텍처 | 사용자 승인: 3 API 호출 직렬화 | 오프라인 수동 경로만 추가, 실 HTTP 미전환 |
 | P6-013 | 변경 관리 | 잦은 커밋이 in-progress CI를 cancel | 완료 전 CI PASS 주장 금지 |
+| P6-014 | 교대/지식보존 | 사건 기록은 있었으나 새 AI 작업자에 대한 명시적 의무 누락 | AGENTS + 작업 프로토콜에 기록 의무 명문화 |
 
 ## 사건별 상세
 
@@ -124,6 +125,15 @@
 - **근거:** 기존 [STATUS.md](../STATUS.md) 및 GitHub Actions에서 `143f31a`/`a4f106a` 등 후속 실행 취소 관측.
 - **대응:** 변경사항을 의미 있는 묶음으로 커밋한 다음 CI를 완료까지 관찰. 문서 상태에 완료/실패/취소/진행 중을 따로 기록. 전체 오프라인 검증이 끝나기 전 실제 Meta API 운영 준비 완료로 표현하지 않음.
 
+### P6-014 — 새 채팅방 작업자에게 기록 의무가 전파되지 않음 (2026-10-21)
+
+- **징후:** p6 `STATUS.md`/`HANDOFF.md`와 새 ledger는 존재했지만, **`AGENTS.md`와 `docs/AI_WORK_UNIT_PROTOCOL.md`에 모든 후속 AI가 사건/설계결정을 갱신해야 한다는 명령이 명시되지 않았음**. 새 채팅방이 문서를 찾아 읽더라도 기록을 생략할 여지가 있음.
+- **추가 발견:** `docs/RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md`라는 **RAW v2.1의 기존 상세 트러블슈팅 문서가 이미 존재**함. 새 p6 ledger는 그 기록을 대체하거나 '프로젝트 최초 트러블슈팅'이라고 주장해서는 안 됨.
+- **수정:** [AGENTS 의무 규칙](../AGENTS.md) 추가 (`f10fe06`), [N-unit 교대 절차](AI_WORK_UNIT_PROTOCOL.md) 추가 (`765a6ef`); 본 장부에 OPEN·해결·CI 구분 및 신입 작업자 필독 체인을 유지.
+- **검증:** GitHub 파일 업데이트 결과 커밋 확인; 실제 새 채팅방/타 에이전트가 수행하는지는 **미검증**. 규칙은 사회적·절차적 구속이며 GitHub가 기록 누락을 자동 감지·강제하는 것은 아님.
+- **재발 방지:** 시작 전 `AGENTS → 현재 브랜치 HANDOFF/STATUS → p6 ledger → RAW v2 chronology` 조회, 사건 발생 때 본 장부 갱신, 세션 종료 전 저장소 재조회; 기록 실패 시 미반영 명시. 미래에 CI/PR로 기록 검증을 강화하려면 별도 신뢰성 검토가 필요함.
+- **롤백:** 기능·운영 데이터와 분리된 문서 변경이므로 승인된 경우 해당 문서 커밋만 revert. Frozen 설계와 기존 사고 이력은 보존.
+
 ## 새 사건을 추가할 때의 고정 서식
 
 ```markdown
@@ -153,5 +163,6 @@
 - [현재 상태](../STATUS.md) · [인수인계](../HANDOFF.md) · [개발 규칙](../AGENTS.md)
 - [동결 기준](../DESIGN_FREEZE_NOTICE.md) · [최종 설계](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md)
 - [AI 작업단위 규칙](AI_WORK_UNIT_PROTOCOL.md)
+- [기존 RAW v2.1 트러블슈팅 상세 연대기](RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md) · [오류 대응 SOP](RAW_V2_ERROR_HANDLING_RUNBOOK.md)
 - [Git 커밋 기록](https://github.com/hibi89/ohora-trend-catcher/commits/codex/p6-readiness-hardening-20261019)
 - [GitHub Actions](https://github.com/hibi89/ohora-trend-catcher/actions) · [Draft PR #6](https://github.com/hibi89/ohora-trend-catcher/pull/6)
