@@ -67,7 +67,7 @@ if __name__ == '__main__':
     if watchdog_seconds < 0:
         raise SystemExit("OFFLINE_TEST_WATCHDOG_SECONDS cannot be negative")
     if watchdog_seconds > 0:
-        faulthandler.dump_traceback_later(watchdog_seconds, repeat=True)
+        faulthandler.dump_traceback_later(watchdog_seconds, repeat=True, exit=True)
     suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern='test_*.py')
     total = suite.countTestCases()
     # Fail closed if a discovered test is not assigned to exactly one CI shard.
