@@ -254,6 +254,25 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM page_evidence_v2 "
             "WHERE job_id=?",(page["job_id"],)).fetchone()[0],0)
 
+    def test_unfinished_history_job_cannot_be_scheduled_twice(self):
+        """A pending or bound page must be resumed, never duplicated."""
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(page["job_id"],"req-history-pending",
+            build_request_spec("A","nail_001",
+                               after="history_first_cursor"),at=NOW)
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(history,"KR_001","C",at=NOW)
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001")["page_seq"],0)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=? AND phase='history'",
+            (history,)).fetchone()[0],1)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
+            (page["job_id"],)).fetchone()[0],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
