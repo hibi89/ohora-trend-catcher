@@ -57,8 +57,11 @@ def capture_record_from_response(request, response):
         root = response.payload.get("business_discovery", response.payload)
         if not isinstance(root, Mapping):
             raise ValueError("Invalid target account envelope")
+        requested_account_fields = frozenset(
+            field for field in ("followers_count", "media_count")
+            if field in request.request_spec.account_fields)
         account = {key: root[key] for key in ("id", "username", "followers_count", "media_count")
-                   if key in root}
+                   if key in root and (key in ("id", "username") or key in requested_account_fields)}
         posts = normalized["data"]
         raw_media = root.get("media", root)
         source_posts = raw_media.get("data", []) if isinstance(raw_media, Mapping) else []
@@ -81,10 +84,6 @@ def capture_record_from_response(request, response):
         requested_post_fields = frozenset(
             field for field in ("like_count", "comments_count")
             if field in request.request_spec.media_fields.split(","))
-        requested_account_fields = frozenset(
-            field for field in ("followers_count", "media_count")
-            if field in ("followers_count", "media_count") and
-            field in request.request_spec.media_fields.split(","))
         return capture_from_response(
             request, response, capture_id="cap-" + request.request_id,
             normalized_posts=posts, account_observation=account,
