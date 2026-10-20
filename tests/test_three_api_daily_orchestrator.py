@@ -106,10 +106,24 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         runner.evidence.commit_staged_page(
             job["id"],job["lease_id"],normalized,now=NOW)
         self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        # Source committed, daily ledger/RAW not yet projected: audit must
+        # expose the incomplete three-DB boundary without altering it.
+        before=tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db))
+        pending=runner.audit_storage()
+        self.assertEqual(pending["source_pages"],1)
+        self.assertEqual(pending["unverified_source"],1)
+        self.assertFalse(pending["storage_verified"])
+        self.assertEqual(tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db)),before)
         runner.close()
         restarted=self.create(front={})
         r=restarted.reconcile()
         self.assertEqual(r["mirror_posts"],4)
+        repaired=restarted.audit_storage()
+        self.assertEqual(repaired["verified_pages"],1)
+        self.assertEqual(repaired["pages_requiring_attention"],0)
+        self.assertTrue(repaired["storage_verified"])
         self.assertEqual(r["front_pages"],1)
         self.assertEqual(restarted.mirror.db.execute(
             "SELECT COUNT(*) FROM raw_post_observations").fetchone()[0],4)
