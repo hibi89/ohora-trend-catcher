@@ -237,6 +237,52 @@ class P3EpochTests(unittest.TestCase):
                 finally:
                     db.close()
 
+    def test_daily_invalid_receipt_input_matrix(self):
+        """Reject malformed synthetic evidence before any receipt is stored."""
+        cases=[
+            ("ordered_ids",None),
+            ("ordered_ids","101"),
+            ("ordered_ids",["1","2","3","4","5"]),
+            ("ordered_ids",["1","1"]),
+            ("ordered_ids",["not-numeric"]),
+            ("ordered_ids",[123]),
+            ("ordered_ids",["1"*65]),
+            ("next_cursor","bad cursor"),
+            ("next_cursor",123),
+            ("terminal_basis","unknown"),
+            ("source_evidence_id",""),
+            ("raw_receipt_id",""),
+            ("source_digest",""),
+            ("source_digest","x"*64),
+            ("source_digest","a"*63),
+        ]
+        for field,payload in cases:
+            with self.subTest(field=field,payload=repr(payload)):
+                db=sqlite3.connect(":memory:",isolation_level=None)
+                db.row_factory=sqlite3.Row
+                try:
+                    store=ThreeApiEpochStore(db)
+                    digest=store.register_roster(official_shape(),recorded_at=NOW)
+                    daily=store.seed_daily(DAY,digest,anchor_utc=NOW)
+                    job=db.execute("""SELECT job_id FROM jobs_v2
+                        WHERE epoch_id=? AND account_ordinal=1 AND page_seq=1""",
+                        (daily,)).fetchone()[0]
+                    store.bind_daily(job,"req-invalid-matrix",
+                        build_request_spec("A","nail_001"),at=NOW)
+                    args=dict(observed_at=NOW,ordered_ids=["101"],
+                        next_cursor="valid_cursor",terminal_basis="continued",
+                        source_evidence_id="safe-source",raw_receipt_id="safe-raw",
+                        source_digest="a"*64)
+                    args[field]=payload
+                    before=db.total_changes
+                    with self.assertRaises((EpochError,TypeError)):
+                        store.commit_daily_page(job,"req-invalid-matrix",**args)
+                    self.assertEqual(db.total_changes,before)
+                    self.assertEqual(db.execute("""SELECT COUNT(*) FROM page_evidence_v2
+                        WHERE job_id=?""",(job,)).fetchone()[0],0)
+                finally:
+                    db.close()
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
