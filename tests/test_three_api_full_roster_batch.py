@@ -152,7 +152,12 @@ class FullRosterBatchTests(unittest.TestCase):
         self.assertEqual(restarted.coverage()["front_pages"],before["front_pages"])
         self.assertEqual(restarted.ledger.db.execute(
             "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'").fetchone()[0],0)
-        self.assertEqual(restarted.step("A",now=NOW)["status"],"front_fixture_missing")
+        # Account 1 page 2 can still advance on lane C, but this must
+        # not silently certify the missing account or launch catch-up.
+        self.assertEqual(restarted.step("C",now=NOW)["status"],"front_fixture_missing")
+        self.assertGreater(restarted.coverage()["front_incomplete"],0)
+        self.assertEqual(restarted.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'").fetchone()[0],0)
 
     def test_missing_account_294_blocks_global_gap_without_lying_about_coverage(self):
         self.front.pop((294,1,None))
