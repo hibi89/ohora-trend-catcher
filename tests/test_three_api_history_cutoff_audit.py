@@ -278,7 +278,7 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.bridge.stage_capture(page["job_id"],request,observed_at=NOW,
             posts=posts,next_cursor=None,terminal_basis="verified_terminal")
         receipt="history."+page["job_id"]
-        self.mirror.stage_page(receipt,"KR_001",NOW,posts)
+        self.mirror.stage_page(receipt,"KR_001",NOW.isoformat(),posts)
         self.mirror.promote_page(receipt)
         self.assertFalse(self.audit()["synthetic_cutoff_verified"])
         self.bridge.reconcile_one(page["job_id"])
