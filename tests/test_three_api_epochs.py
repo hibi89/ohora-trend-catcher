@@ -467,6 +467,26 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_daily_page(first,"missing-parent-d1",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_daily_replay_rejects_missing_parent_evidence_without_writes(self):
+        first,second=(self.job(1,page) for page in (1,2))
+        self.store.bind_daily(first,"missing-proof-d1",
+            build_request_spec("A","nail_001"),at=NOW)
+        self.store.commit_daily_page(first,"missing-proof-d1",
+            observed_at=NOW,ordered_ids=["101"],next_cursor="proof_cursor",
+            terminal_basis="continued",source_evidence_id="missing-proof-e1",
+            raw_receipt_id="missing-proof-r1",source_digest="a"*64)
+        self.store.bind_daily(second,"missing-proof-d2",
+            build_request_spec("C","nail_001",after="proof_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["102"],next_cursor="next_cursor",
+            terminal_basis="continued",source_evidence_id="missing-proof-e2",
+            raw_receipt_id="missing-proof-r2",source_digest="b"*64)
+        self.store.commit_daily_page(second,"missing-proof-d2",**args)
+        self.db.execute("DELETE FROM page_evidence_v2 WHERE job_id=?",(first,))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_daily_page(second,"missing-proof-d2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
