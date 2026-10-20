@@ -1,5 +1,8 @@
 """Synthetic history cutoff evidence tests. No Meta or operating DB."""
 import unittest
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from datetime import datetime, timedelta, timezone
 
 from raw_v2.history_cutoff_evidence import assess_cutoff_evidence
