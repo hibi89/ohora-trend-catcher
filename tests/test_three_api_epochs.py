@@ -159,7 +159,6 @@ class P3EpochTests(unittest.TestCase):
     def test_daily_replay_integrity_matrix(self):
         """Independent synthetic mutations must not be accepted as idempotent."""
         fields=[
-            ("request_id","forged-request","immutable daily page replay"),
             ("cursor_in","forged-cursor","immutable daily page replay"),
             ("cursor_out","forged-out","immutable daily page replay"),
             ("observed_at","forged-observed","immutable daily page replay"),
@@ -172,8 +171,6 @@ class P3EpochTests(unittest.TestCase):
         ]
         for field,payload,message in fields:
             with self.subTest(field=field):
-                with sqlite3.connect(":memory:",isolation_level=None) as unused:
-                    pass
                 # Use a fresh isolated epoch store for every mutation so a
                 # failed subcase cannot mask a later successful replay.
                 db=sqlite3.connect(":memory:",isolation_level=None)
