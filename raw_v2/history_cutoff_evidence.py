@@ -20,6 +20,8 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
     terminal_verified=True. A crossing requires a timestamp <= cutoff.
     """
     anchor, cutoff = _utc(anchor), _utc(cutoff)
+    if type(rooted) is not bool:
+        raise ValueError("Explicit rooted evidence required")
     if cutoff >= anchor or not isinstance(pages, (tuple, list)):
         raise ValueError("Invalid history window or pages")
     if not rooted or not pages:
