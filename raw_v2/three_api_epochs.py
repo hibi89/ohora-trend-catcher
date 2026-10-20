@@ -328,7 +328,7 @@ class ThreeApiEpochStore:
             existing=self.history_checkpoint(history_epoch,account_key)
             if existing is not None:
                 self.db.execute("COMMIT")
-                return {"status":"already_initialized",**existing}
+                return {**existing,"history_state":existing["status"],"status":"already_initialized"}
             rows=self.db.execute("""SELECT e.job_id,e.cursor_out,e.ordered_ids_json,
                    e.raw_receipt_id,e.chain_hash,e.terminal_basis,j.page_seq
                    FROM page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
