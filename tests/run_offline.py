@@ -68,8 +68,17 @@ if __name__ == '__main__':
     all_cases = list(iter_cases(suite))
     shard_counts = {name: sum(group_for_case(case) == name for case in all_cases)
                     for name in GROUP_NAMES}
-    if sum(shard_counts.values()) != total or any(count == 0 for count in shard_counts.values()):
+    if (sum(shard_counts.values()) != total
+            or any(count == 0 for count in shard_counts.values())
+            or any(group_for_case(case) not in GROUP_NAMES for case in all_cases)):
         raise RuntimeError(f"Invalid offline shard partition: {shard_counts}, total={total}")
+    # The expensive observation tests must never silently fall back into
+    # 'remaining', which previously exceeded the Windows watchdog budget.
+    observation_cases=[case for case in all_cases if
+        case.__class__.__module__.rsplit(".",1)[-1]=="test_three_api_p2_observations"]
+    if not observation_cases or any(group_for_case(case)!="observations"
+                                    for case in observation_cases):
+        raise RuntimeError("Observation regression shard assignment is missing")
     if args.list_groups:
         for name in GROUP_NAMES:
             print(f"{name}: {shard_counts[name]} tests", flush=True)
