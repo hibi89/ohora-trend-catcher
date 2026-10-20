@@ -381,5 +381,33 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertTrue(self.audit()["synthetic_cutoff_verified"])
 
 
+    def test_reconcile_rejects_raw_receipt_payload_tampering(self):
+        checkpoint=self.fixture.store.history_checkpoint(self.history,"KR_001")
+        page=self.fixture.store.schedule_one_history_page(self.history,"KR_001","A",at=NOW)
+        request="req-replay-raw-tamper"
+        self.fixture.store.bind_history(
+            page["job_id"],request,
+            build_request_spec("A","nail_001",after=checkpoint["cursor"]),at=NOW)
+        self.bridge.stage_capture(page["job_id"],request,observed_at=NOW,
+            posts=self.posts([7201,7202],[360,366]),
+            next_cursor=None,terminal_basis="verified_terminal")
+        receipt="history."+page["job_id"]
+        self.mirror.stage_page(receipt,"KR_001",NOW.isoformat(),
+            self.posts([7201,7202],[360,366]))
+        self.mirror.promote_page(receipt)
+        self.mirror.db.execute(
+            "UPDATE page_receipts SET payload_sha256='tampered' WHERE request_id=?",
+            (receipt,))
+        before=self.fixture.db.execute(
+            "SELECT state FROM jobs_v2 WHERE job_id=?",(page["job_id"],)
+        ).fetchone()[0]
+        with self.assertRaises(OfflineHistoryBridgeError):
+            self.bridge.reconcile_one(page["job_id"])
+        self.assertEqual(self.fixture.db.execute(
+            "SELECT state FROM jobs_v2 WHERE job_id=?",(page["job_id"],)
+        ).fetchone()[0],before)
+        self.assertFalse(self.audit()["synthetic_cutoff_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
