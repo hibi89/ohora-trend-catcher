@@ -311,9 +311,11 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(safe_usage_metrics({"x-business-use-case-usage":
             '{"123":[{"call_count":44},{"call_count":72}]}'}),
             {"max_usage_percent": 72})
+        self.assertEqual(safe_usage_metrics({"x-app-usage": '{"call_count":85}'}),
+                         {"max_usage_percent": 85})
+        self.assertEqual(safe_usage_metrics({"x-app-usage": '{"call_count":86}'}),
+                         {"max_usage_percent": 86})
         for headers in ({}, {"x-app-usage": "invalid"},
-                        {"x-app-usage": '{"call_count":85}'},
-                        {"x-app-usage": '{"call_count":86}'},
                         {"x-app-usage": '{"call_count":101}'},
                         {"x-app-usage": '{"call_count":true}'}):
             with self.subTest(headers=headers), self.assertRaises(ValueError):
@@ -325,16 +327,16 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(record.usage_metrics, {"max_usage_percent": 3})
         self.assertNotIn("x-app-usage", str(record.usage_metrics))
         response = ResponseEnvelope(CONTRACT_VERSION, record.request.request_id, 200,
-            {"media": {"data": [{"id": "123"}]}},
+            {"business_discovery": {"id": record.request.target_ig_user_id,
+                "username": record.request.username, "media": {"data": [{"id": "123"}]}}},
             {"x-app-usage": '{"call_count":85}'},
             record.observed_at, None)
-        with self.assertRaises(ContractError) as context:
-            capture_from_response(record.request, response, capture_id="capture-2",
-                normalized_posts=[{"id": "123", "media_type": "IMAGE"}],
-                account_observation={"id": record.request.target_ig_user_id,
-                    "username": record.request.username}, account_fields_tested=frozenset(),
-                carousel_completeness={"123": "not_applicable"}, source_digest="b" * 64)
-        self.assertEqual(context.exception.category, "usage_limit")
+        saved = capture_from_response(record.request, response, capture_id="capture-2",
+            normalized_posts=[{"id": "123", "media_type": "IMAGE"}],
+            account_observation={"id": record.request.target_ig_user_id,
+                "username": record.request.username}, account_fields_tested=frozenset(),
+            carousel_completeness={"123": "not_applicable"}, source_digest="b" * 64)
+        self.assertEqual(saved.usage_metrics, {"max_usage_percent": 85})
 
 
 if __name__ == "__main__":
