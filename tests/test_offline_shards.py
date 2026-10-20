@@ -17,6 +17,14 @@ def _case(module_name, class_name="Fixture"):
     return klass()
 
 
+def _roster_case(method):
+    cls = type("FullRosterBatchTests", (unittest.TestCase,), {
+        "__module__": "test_three_api_full_roster_batch",
+        method: lambda self: None,
+    })
+    return cls(method)
+
+
 def _orchestrator_case_for(group):
     # Independent synthetic test IDs for all subshards: do not rely on an
     # arbitrary CPython hash seed or module discovery order.
@@ -32,8 +40,10 @@ class OfflineShardTests(unittest.TestCase):
         self.orchestrator_cases = [
             _orchestrator_case_for(group) for group in runner.ORCHESTRATOR_GROUPS
         ]
+        self.roster_cases = [
+            _roster_case(method) for method in runner._ROSTER_METHOD_GROUPS
+        ]
         self.heavy_cases = [
-            _case("test_three_api_full_roster_batch"),
             _case("test_three_api_operator_report"),
             _case("test_three_api_p2_observations"),
             _case("test_three_api_epoch_contract_projection"),
@@ -42,7 +52,7 @@ class OfflineShardTests(unittest.TestCase):
             _case("test_other_runtime"),
             _case("tests.test_another_module"),
         ]
-        self.cases = self.orchestrator_cases + self.heavy_cases + self.remaining_cases
+        self.cases = self.orchestrator_cases + self.roster_cases + self.heavy_cases + self.remaining_cases
         self.suite = unittest.TestSuite([
             unittest.TestSuite(self.cases[:5]),
             unittest.TestSuite(self.cases[5:]),
@@ -65,8 +75,19 @@ class OfflineShardTests(unittest.TestCase):
                 list(runner.iter_cases(runner.select_group(self.suite, group))), [case]
             )
 
+    def test_roster_groups_cover_all_five_methods_once(self):
+        parts = [
+            list(runner.iter_cases(runner.select_group(self.suite, group)))
+            for group in runner.ROSTER_GROUPS
+        ]
+        self.assertEqual([len(part) for part in parts], [2, 2, 1])
+        self.assertEqual(
+            {case.id() for part in parts for case in part},
+            {case.id() for case in self.roster_cases},
+        )
+
     def test_other_heavy_modules_are_isolated(self):
-        for group, case in zip(("roster", "report", "observations", "projection"),
+        for group, case in zip(("report", "observations", "projection"),
                                self.heavy_cases):
             self.assertEqual(
                 list(runner.iter_cases(runner.select_group(self.suite, group))), [case]
