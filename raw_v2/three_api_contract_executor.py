@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Mapping
+import json
 
 from three_api_meta_normalizer import normalize_meta_page
 from three_api_runtime_contract import (
@@ -172,6 +173,47 @@ class ThreeApiContractExecutor:
 
         # If RAW fails or the acknowledgement is interrupted, the durable
         # capture remains pending and the next call recovers without HTTP.
+        return commit_raw_and_confirm(self.capture, self.raw, record)
+
+    def reproject_saved_response(self, request):
+        """Explicit no-HTTP replay of a previously journaled safe response.
+
+        Parser/schema repairs can rebuild Capture and RAW from the immutable
+        received evidence. Never interpret this as an additional Meta request.
+        A missing/unsafe payload or missing quota evidence remains blocked.
+        """
+        from three_api_transport import extract_next_cursor
+        from three_api_runtime_contract import ResponseEnvelope
+        existing = self.capture.get_capture_for_request(request.request_id)
+        if existing is not None:
+            if existing.request.request_spec_digest != request.request_spec_digest:
+                raise ContractExecutionError("Request identity conflict")
+            return commit_raw_and_confirm(self.capture, self.raw, existing)
+        evidence = self.capture.get_response_evidence(request.request_id)
+        if (evidence is None or evidence["classification"] != "safe"
+                or evidence["safe_body"] is None
+                or not 200 <= evidence["http_status"] < 300):
+            raise ContractExecutionError("No safe successful response to reproject")
+        metric = evidence["safe_usage"].get("max_usage_percent")
+        headers = ({"x-app-usage": json.dumps({"call_count": metric})}
+                   if type(metric) is int and 0 <= metric <= 100 else {})
+        try:
+            next_cursor = extract_next_cursor(
+                evidence["safe_body"], requested_cursor=request.request_spec.after)
+        except (ValueError, TypeError):
+            next_cursor = None
+        received_at = datetime.fromisoformat(evidence["received_at"].replace("Z", "+00:00"))
+        response = ResponseEnvelope(CONTRACT_VERSION, request.request_id,
+                    evidence["http_status"], evidence["safe_body"],
+                    headers, received_at, next_cursor)
+        # Validate BEFORE transitioning any intent state. Parser errors do not
+        # destroy evidence or accidentally unlock a new transport attempt.
+        try:
+            record = capture_record_from_response(request, response)
+        except ContractError:
+            raise ContractExecutionError("Saved response still fails offline validation") from None
+        self.capture.permit_local_reprojection(request)
+        persist_capture_verified(self.capture, record)
         return commit_raw_and_confirm(self.capture, self.raw, record)
 
     def recover(self, run_id):
