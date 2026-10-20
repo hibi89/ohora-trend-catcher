@@ -10,6 +10,13 @@ from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
+from math import ceil
+
+from three_api_response_evidence import (
+    SANITIZER_VERSION, UnsafeResponseEvidence, evidence_digest,
+    prepare_safe_response,
+)
+from three_api_usage import parse_usage
 
 from three_api_request_spec import RequestSpec
 
@@ -116,6 +123,19 @@ class CaptureJournal:
                 payload BLOB NOT NULL,
                 FOREIGN KEY(request_id) REFERENCES intents(request_id));
             CREATE INDEX IF NOT EXISTS failures_run ON failures(run_id);
+            CREATE TABLE IF NOT EXISTS response_evidence(
+                evidence_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL UNIQUE REFERENCES intents(request_id),
+                received_at TEXT NOT NULL,
+                http_status INTEGER NOT NULL,
+                safe_body_json BLOB,
+                body_digest TEXT,
+                safe_usage_json TEXT NOT NULL,
+                sanitizer_version TEXT NOT NULL,
+                classification TEXT NOT NULL
+                    CHECK(classification IN ('safe','evidence_unavailable')),
+                redacted_paths_json TEXT NOT NULL
+            );
         """)
 
     def close(self):
@@ -139,6 +159,71 @@ class CaptureJournal:
                 "INSERT INTO intents(request_id,run_id,payload,digest) VALUES(?,?,?,?)",
                 (request.request_id, request.run_id, data, digest))
         return True
+
+    def save_response_evidence(self, response):
+        """Durably store a safe response *before* schema/cursor/usage validation.
+
+        A sanitizer failure stores evidence_unavailable metadata, NEVER the
+        unsafe original. No raw usage headers or paging URLs are persisted.
+        This method never marks a request successful or authorizes any HTTP.
+        """
+        from three_api_runtime_contract import ResponseEnvelope
+        if not isinstance(response, ResponseEnvelope):
+            raise ValueError("Typed response receipt required")
+        observed_at = response.received_at.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        safe_usage = parse_usage(dict(response.usage_headers))
+        metrics = {"max_usage_percent": ceil(safe_usage)} if safe_usage is not None else {}
+        try:
+            safe_body, redacted_paths = prepare_safe_response(response.payload)
+            digest = evidence_digest(safe_body)
+            body = json.dumps(safe_body, sort_keys=True, separators=(",", ":"),
+                              ensure_ascii=False, allow_nan=False).encode("utf-8")
+            classification = "safe"
+        except (UnsafeResponseEvidence, TypeError, ValueError):
+            body, digest, redacted_paths, classification = (
+                None, None, [], "evidence_unavailable")
+        evidence_id = "response-" + response.request_id
+        record = (
+            evidence_id, response.request_id, observed_at, response.http_status,
+            body, digest, json.dumps(metrics, sort_keys=True),
+            SANITIZER_VERSION, classification,
+            json.dumps(redacted_paths, sort_keys=True),
+        )
+        with self._db:
+            intent = self._db.execute(
+                "SELECT outcome FROM intents WHERE request_id=?", (response.request_id,)
+            ).fetchone()
+            if intent is None or intent["outcome"] not in ("pending", "captured"):
+                raise ValueError("Response evidence requires durable intent")
+            previous = self._db.execute(
+                "SELECT * FROM response_evidence WHERE request_id=?",
+                (response.request_id,),
+            ).fetchone()
+            if previous is not None:
+                if tuple(previous) != record:
+                    raise ValueError("Immutable response evidence conflict")
+            else:
+                self._db.execute(
+                    "INSERT INTO response_evidence VALUES(?,?,?,?,?,?,?,?,?,?)", record)
+        return {"evidence_id": evidence_id, "classification": classification,
+                "body_digest": digest, "safe_usage": metrics}
+
+    def get_response_evidence(self, request_id):
+        """Return safe retained evidence without live headers or credentials."""
+        row = self._db.execute(
+            "SELECT * FROM response_evidence WHERE request_id=?", (request_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        data = bytes(result["safe_body_json"]) if result["safe_body_json"] is not None else None
+        result["safe_body"] = json.loads(data.decode("utf-8")) if data is not None else None
+        if result["safe_body"] is not None and evidence_digest(result["safe_body"]) != result["body_digest"]:
+            raise ValueError("Response evidence digest mismatch")
+        del result["safe_body_json"]
+        result["safe_usage"] = json.loads(result.pop("safe_usage_json"))
+        result["redacted_paths"] = json.loads(result.pop("redacted_paths_json"))
+        return result
 
     def get_intent_outcome(self, request_id):
         row = self._db.execute(
