@@ -110,6 +110,7 @@ def audit_synthetic_history_cutoff(epochs: ThreeApiEpochStore,
         if not rows or any(row[2]!="done" for row in rows):
             return result
         seen=set()
+        seen_history_cursors=set()
         seen_raw_receipts=set()
         seen_source_ids=set()
         oldest=None
@@ -156,8 +157,10 @@ def audit_synthetic_history_cutoff(epochs: ThreeApiEpochStore,
             )
             if expected_chain!=chain_hash:
                 return result
-            if cursor_out is not None and cursor_out == cursor_in:
+            if cursor_out is not None and (cursor_out == cursor_in or cursor_out in seen_history_cursors):
                 return result
+            if cursor_in is not None:
+                seen_history_cursors.add(cursor_in)
             receipt=mirror.db.execute(
                 "SELECT account_key,observed_at,payload_json,payload_sha256,state "
                 "FROM page_receipts WHERE request_id=?",(raw_id,)
