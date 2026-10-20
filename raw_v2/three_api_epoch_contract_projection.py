@@ -11,10 +11,11 @@ P3 page ledger advance. This is an integration seam, not live authorization.
 from __future__ import annotations
 
 from datetime import date
+import sqlite3
 
 from three_api_epochs import ThreeApiEpochStore, EpochError, _hash
 from three_api_capture import CaptureJournal
-from three_api_raw_writer import ContractRawWriter
+from three_api_raw_writer import ContractRawWriter, RawWriteError
 from three_api_runtime_contract import digest_sha256, validate_raw_receipt
 
 
@@ -116,8 +117,8 @@ class OfflineEpochContractProjector:
                 item = expected[row[0]]
                 if (row[1] != item.get("like_count")
                         or row[2] != item.get("comments_count")
-                        or row[3] != int("like_count" in item and item["like_count"] is not None)
-                        or row[4] != int("comments_count" in item and item["comments_count"] is not None)
+                        or row[3] != int("like_count" in item)
+                        or row[4] != int("comments_count" in item)
                         or row[5] != actual_at):
                     raise OfflineEpochContractError("RAW observation evidence differs")
                 owner = self.raw._db.execute(
@@ -138,5 +139,5 @@ class OfflineEpochContractProjector:
             )
         except OfflineEpochContractError:
             raise
-        except (EpochError, ValueError, KeyError, TypeError, AttributeError):
+        except (EpochError, RawWriteError, sqlite3.Error, ValueError, KeyError, TypeError, AttributeError):
             raise OfflineEpochContractError("Stored epoch/Capture/RAW proof rejected") from None
