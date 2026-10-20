@@ -120,5 +120,12 @@ class CutoffAssessorTests(unittest.TestCase):
             rooted=True)["reason"], "duplicate_media")
 
 
+    def test_media_inventory_timestamp_count_mismatch(self):
+        self.assertEqual(self.check(
+            365, -1, media_ids=["m1", "m2"])["reason"], "media_timestamp_mismatch")
+        self.assertTrue(self.check(
+            365, -1, media_ids=["m1"])["verified"])
+
+
 if __name__ == "__main__":
     unittest.main()
