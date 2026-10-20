@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 
 from three_api_coordinator import Coordinator, LANES, stamp
+from three_api_serial_lock import single_dispatch_gate
 from three_api_daily_gap import DailyGapLedger, _day
 from three_api_daily_projection import DailyEvidenceProjector
 from three_api_evidence import PageEvidenceStore
@@ -565,6 +566,7 @@ class OfflineDailyOrchestrator:
             self.coordinator.observe_usage(lane,None,now=now)
             return {"status":"front_blocked","lane":lane}
 
+    @single_dispatch_gate
     def step_serial(self, *, now, lane_order=("A", "B", "C")):
         """One manual synthetic page maximum; rotate lanes across restarts.
 
@@ -610,6 +612,7 @@ class OfflineDailyOrchestrator:
             return {"selected_lane": lane, **result}
         return {"status": "all_lanes_unavailable", "selected_lane": None}
 
+    @single_dispatch_gate
     def step(self, lane, *, now, stage_only=False):
         """One explicit fixture-only step; never runs autonomously or live.
 
