@@ -546,6 +546,8 @@ class ThreeApiEpochStore:
                     or latest_binding[0] is None
                     or latest_binding[0]!=latest_binding[12]):
                 raise EpochError("Daily replay latest request binding differs")
+            if latest_binding[11]>1 and latest_binding[10] is None:
+                raise EpochError("Daily replay latest parent job link missing")
             if latest_binding[11]>1:
                 parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
                     FROM page_evidence_v2 e WHERE e.job_id=?""",
