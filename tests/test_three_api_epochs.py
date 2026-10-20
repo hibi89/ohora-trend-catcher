@@ -860,6 +860,30 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_history_page(second["job_id"],"skip-h2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_history_replay_rejects_predecessor_account_corruption_without_writes(self):
+        history=self.open_history_fixture()
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"account-h1",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        self.store.commit_history_page(first["job_id"],"account-h1",
+            observed_at=NOW,ordered_ids=["501","502","503","504"],
+            next_cursor="account_history_cursor",terminal_basis="continued",
+            source_evidence_id="account-h-e1",raw_receipt_id="account-h-r1",
+            source_digest="a"*64)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"account-h2",
+            build_request_spec("B","nail_001",after="account_history_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["505"],next_cursor=None,
+            terminal_basis="verified_terminal",source_evidence_id="account-h-e2",
+            raw_receipt_id="account-h-r2",source_digest="b"*64)
+        self.store.commit_history_page(second["job_id"],"account-h2",**args)
+        self.db.execute("UPDATE jobs_v2 SET account_key='US_001' WHERE job_id=?",
+                        (first["job_id"],))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_history_page(second["job_id"],"account-h2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_replay_rejects_parent_phase_corruption_without_writes(self):
         history=self.open_history_fixture()
         first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
