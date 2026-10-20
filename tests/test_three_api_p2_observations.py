@@ -315,7 +315,11 @@ class P2ObservationTests(unittest.TestCase):
             executor.execute(request)
         for table in ("posts","post_observations","post_checks",
                       "account_checks","query_observations","three_api_raw_receipts"):
-            self.assertEqual(self.count(table),0,table)
+            # P2/receipt CREATE TABLE occurs inside the aborted transaction,
+            # so brand-new tables may be rolled back altogether.
+            exists=self.db.execute("SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name=?", (table,)).fetchone()
+            self.assertEqual(self.count(table) if exists else 0,0,table)
         self.assertIsNotNone(self.journal.get_capture_for_request(request.request_id))
         self.assertEqual(transport.calls,1)
         self.db.execute("DROP TRIGGER offline_fail_p2")
