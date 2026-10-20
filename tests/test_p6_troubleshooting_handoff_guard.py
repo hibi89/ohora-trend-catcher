@@ -34,8 +34,8 @@ class P6TroubleshootingHandoffGuard(unittest.TestCase):
 
     def test_incident_index_matches_unique_detailed_records(self):
         ledger = self.read(LEDGER)
-        table = re.findall(r"^\\| (P6-\\d{3}) \\|", ledger, re.MULTILINE)
-        details = re.findall(r"^### (P6-\\d{3}) —", ledger, re.MULTILINE)
+        table = re.findall(r"^\| (P6-\d{3}) \|", ledger, re.MULTILINE)
+        details = re.findall(r"^### (P6-\d{3}) —", ledger, re.MULTILINE)
         self.assertGreaterEqual(len(table), 14)
         self.assertEqual(len(table), len(set(table)))
         self.assertEqual(len(details), len(set(details)))
