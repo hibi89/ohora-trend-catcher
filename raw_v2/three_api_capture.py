@@ -232,6 +232,32 @@ class CaptureJournal:
         result["redacted_paths"] = json.loads(result.pop("redacted_paths_json"))
         return result
 
+    def permit_local_reprojection(self, request):
+        """Permit a parsed SAFE response to be stored, without any HTTP send.
+
+        This is deliberately NOT an HTTP retry authorization. An unresolved
+        outcome without saved response evidence must remain blocked.
+        """
+        (_, _, _, _, _, RequestEnvelope, _, canonical, digest_fn) = _contract()
+        if not isinstance(request, RequestEnvelope):
+            raise ValueError("Original validated request required")
+        with self._db:
+            row = self._db.execute(
+                "SELECT payload,digest,outcome FROM intents WHERE request_id=?",
+                (request.request_id,)).fetchone()
+            evidence = self._db.execute(
+                "SELECT classification FROM response_evidence WHERE request_id=?",
+                (request.request_id,)).fetchone()
+            if (row is None or bytes(row["payload"]) != canonical(request)
+                    or row["digest"] != digest_fn(request)
+                    or row["outcome"] not in ("pending", "failed_no_retry")
+                    or evidence is None or evidence["classification"] != "safe"):
+                raise ValueError("No original safe response eligible for local replay")
+            self._db.execute(
+                "UPDATE intents SET outcome='pending' WHERE request_id=?",
+                (request.request_id,))
+        return True
+
     def get_intent_outcome(self, request_id):
         row = self._db.execute(
             "SELECT outcome FROM intents WHERE request_id=?", (request_id,)).fetchone()
