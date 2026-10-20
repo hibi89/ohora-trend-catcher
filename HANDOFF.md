@@ -1,3 +1,5 @@
+> **2026-10-20 P6 3단위:** cutoff assessor에서 페이지별 media ID 중복/교차 중복 거부 `8e2cfdf`, 회귀 테스트 `217601d`, media ID와 발행 시각의 1:1 개수 검사 `2e480c7`. 직전 `ca7b00a` RAW CI `39400161586` SUCCESS, `8d07766` Frozen Guard `39400261545` SUCCESS; 최신 `2e480c7` 전체 CI 아직 확인 전. 합성 증거 판정기만 수정, 실제 RAW receipt 진위·운영 연동 미완료. Meta/운영 DB/main 변경 없음.
+
 > **2026-10-20 P6 3단위 추가 작업:** History cutoff assessor에서 중복 receipt ID 거부 `643a0c2`, 중복 receipt 및 미래 발행 시각 회귀 테스트 `6b1d330`, rooted 근거의 명시적 bool 강제 `8d07766`. 이전 `ca7b00a` Frozen Guard SUCCESS, `643a0c2` Frozen Guard SUCCESS. 최신 `8d07766` Frozen/RAW CI는 확인 시점 QUEUED이므로 전체 PASS 주장 금지. 독립 오프라인 판정기이며 실제 RAW 증거·운영 DB 연결 미완료. Meta 실호출·운영 DB·main 병합 없음.
 
 > **2026-10-20 — P6 cutoff 증거 검증 5단위 구현, 전체 CI 최종 대기.** (1) GitHub Actions unittest discovery import 오류 수정 `57b150d`, `6d80902`; (2) 검증되지 않은 receipt/timestamp 거부 `d2b4298`; (3) 검증 플래그·cursor self-loop 회귀 `52debfa`; (4) 중복 cursor 방지 `f5b37f5`. 이전 RAW run `39399759236`은 ModuleNotFoundError로 실패했고 원인 수정 완료. Frozen Guard 일부 SUCCESS, 최신 전체 RAW CI **미확인**. 독립 순수 오프라인 assessor이며 실 DB/RAW receipt 검증 경로와 아직 연결하지 않음. Meta 호출·운영 DB·main 병합 없음. 
