@@ -103,11 +103,13 @@ class DailyGapTests(unittest.TestCase):
     def test_294_roster_front_barrier_bounded_queries(self):
         """Full roster never scans historical gaps while any front is missing."""
         keys = [f"KR_{i:03d}" for i in range(1, 295)]
+        self.l.seed_previous_head("KR_001", "100")
         for key in keys:
             self.l.begin_day(key, "2026-10-19")
         # Historical, unresolved gap must not outrank a pending current front.
-        self.l.seed_previous_head("KR_001", "100")
         self.front(account="KR_001")
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "catchup_pending")
         observed = []
         self.l.db.set_trace_callback(observed.append)
         try:
