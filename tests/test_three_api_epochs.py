@@ -546,7 +546,9 @@ class P3EpochTests(unittest.TestCase):
             terminal_basis="continued",source_evidence_id="epoch-d-e2",
             raw_receipt_id="epoch-d-r2",source_digest="b"*64)
         self.store.commit_daily_page(second,"epoch-d2",**args)
-        other=self.store.seed_daily("2026-10-21",self.digest,anchor_utc=NOW)
+        next_anchor=NOW+timedelta(days=1)
+        other=self.store.seed_daily(DAY+timedelta(days=1),self.digest,
+                                    anchor_utc=next_anchor)
         self.db.execute("UPDATE jobs_v2 SET epoch_id=? WHERE job_id=?",
                         (other,first))
         before=self.db.total_changes
