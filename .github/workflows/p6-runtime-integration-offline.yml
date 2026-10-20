@@ -36,6 +36,8 @@ on:
       - 'raw_v2/three_api_history_cutoff_audit.py'
       - 'tests/test_three_api_history_cutoff_audit.py'
       - 'raw_v2/three_api_epoch_contract_projection.py'
+      - 'raw_v2/three_api_history_fixture_ingress.py'
+      - 'tests/test_three_api_history_contract_offline.py'
       - 'tests/test_three_api_epoch_contract_projection.py'
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_evidence.py'
@@ -80,6 +82,8 @@ on:
       - 'raw_v2/three_api_history_cutoff_audit.py'
       - 'tests/test_three_api_history_cutoff_audit.py'
       - 'raw_v2/three_api_epoch_contract_projection.py'
+      - 'raw_v2/three_api_history_fixture_ingress.py'
+      - 'tests/test_three_api_history_contract_offline.py'
       - 'tests/test_three_api_epoch_contract_projection.py'
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_evidence.py'
@@ -114,6 +118,7 @@ jobs:
             raw_v2/three_api_epochs.py \
             raw_v2/three_api_history_cutoff_audit.py \
             raw_v2/three_api_epoch_contract_projection.py \
+            raw_v2/three_api_history_fixture_ingress.py \
             raw_v2/three_api_observation_versions.py \
             raw_v2/three_api_p2_clone_migration.py \
             raw_v2/three_api_transport.py \
@@ -124,6 +129,7 @@ jobs:
             tests/test_three_api_epochs.py \
             tests/test_three_api_history_cutoff_audit.py \
             tests/test_three_api_epoch_contract_projection.py \
+            tests/test_three_api_history_contract_offline.py \
             tests/test_three_api_p2_observations.py \
             tests/test_three_api_p2_clone_migration.py \
             tests/test_three_api_transport.py
