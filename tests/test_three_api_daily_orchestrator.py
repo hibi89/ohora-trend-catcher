@@ -348,7 +348,7 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
             "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
         ).fetchone())
         runner.close()
-        retry=self.create()
+        retry=self.create(front={})
         second=retry.step_serial(now=NOW)
         self.assertEqual((second["selected_lane"],second["status"]),
                          ("A","front_fixture_missing"))
