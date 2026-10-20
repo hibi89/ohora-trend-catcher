@@ -188,6 +188,48 @@ class DailyGapTests(unittest.TestCase):
         self.front()
         self.assertEqual(self.l.next_actions([], "2026-10-19"), [])
 
+    def test_manual_review_blocks_only_affected_account_history(self):
+        """One review exception must not starve another verified account."""
+        self.seed()
+        self.l.record_page("KR_001", "2026-10-19",
+                           phase="front", post_ids=["115", "114"])
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "needs_review")
+        self.l.seed_previous_head("US_151", "200")
+        self.l.begin_day("US_151", "2026-10-19")
+        self.l.record_page("US_151", "2026-10-19",
+                           phase="front", post_ids=["201", "200"])
+        self.assertEqual(self.l.next_actions(
+            ["KR_001", "US_151"], "2026-10-19"), [
+                {"account_key": "KR_001", "phase": "needs_review",
+                 "gap_day": "2026-10-19"},
+                {"account_key": "US_151", "phase": "history"},
+            ])
+        # The exception stays durable; eligibility must not change its state.
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "needs_review")
+
+    def test_old_day_review_does_not_starve_other_day_history(self):
+        """New daily front completion does not erase an old manual-review gap."""
+        self.seed()
+        self.l.record_page("KR_001", "2026-10-19",
+                           phase="front", post_ids=["115", "114"])
+        self.l.begin_day("KR_001", "2026-10-20")
+        self.l.record_page("KR_001", "2026-10-20",
+                           phase="front", post_ids=["117", "115"])
+        self.l.seed_previous_head("US_151", "200")
+        self.l.begin_day("US_151", "2026-10-20")
+        self.l.record_page("US_151", "2026-10-20",
+                           phase="front", post_ids=["201", "200"])
+        self.assertEqual(self.l.next_actions(
+            ["US_151", "KR_001"], "2026-10-20"), [
+                {"account_key": "KR_001", "phase": "needs_review",
+                 "gap_day": "2026-10-19"},
+                {"account_key": "US_151", "phase": "history"},
+            ])
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "needs_review")
+
     def test_front_is_first_for_all_accounts(self):
         self.seed();self.front()
         self.l.seed_previous_head("US_151","200")
