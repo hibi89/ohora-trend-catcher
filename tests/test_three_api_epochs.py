@@ -1390,10 +1390,12 @@ class P3EpochTests(unittest.TestCase):
             observed_at=NOW,ordered_ids=["902"],next_cursor="binding_third",
             terminal_basis="continued",source_evidence_id="binding-second-source",
             raw_receipt_id="binding-second-raw",source_digest="b"*64)
-        self.db.execute("""UPDATE page_evidence_v2 SET request_id='forged'
+        # Foreign keys intentionally prohibit orphaning a request ID.
+        # Mutate the bound request's immutable cursor instead, preserving FK.
+        self.db.execute("""UPDATE request_bindings_v2 SET requested_cursor='forged'
             WHERE job_id=?""",(second["job_id"],))
         before=self.db.total_changes
-        with self.assertRaisesRegex(EpochError,"chain digest differs"):
+        with self.assertRaisesRegex(EpochError,"chain binding differs"):
             self.store.commit_history_page(first["job_id"],"binding-first",**args)
         self.assertEqual(self.db.total_changes,before)
 
