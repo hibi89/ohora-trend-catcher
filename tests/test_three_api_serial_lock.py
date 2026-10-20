@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -31,6 +32,35 @@ class SerialTickLockTests(unittest.TestCase):
                 raise RuntimeError("synthetic failure")
         with serial_tick_lock(self.source):
             self.assertTrue(True)
+
+    def test_other_process_cannot_dispatch_until_owner_releases(self):
+        # Child startup gives the OS a distinct lock owner on Windows/Linux.
+        child = (
+            "from three_api_serial_lock import serial_tick_lock, SerialTickBusy; "
+            "import sys; "
+            "ctx = serial_tick_lock(sys.argv[1]); "
+            "try_enter = None\n"
+            "try:\n"
+            "    with ctx:\n"
+            "        pass\n"
+            "except SerialTickBusy:\n"
+            "    sys.exit(42)\n"
+        )
+        environment = dict(__import__("os").environ)
+        raw_path = str(Path(__file__).resolve().parents[1] / "raw_v2")
+        environment["PYTHONPATH"] = raw_path
+        command = [sys.executable, "-c", child, str(self.source)]
+        with serial_tick_lock(self.source):
+            held = subprocess.run(
+                command, env=environment, capture_output=True, text=True,
+                timeout=15,
+            )
+            self.assertEqual(held.returncode, 42, held.stderr)
+        free = subprocess.run(
+            command, env=environment, capture_output=True, text=True,
+            timeout=15,
+        )
+        self.assertEqual(free.returncode, 0, free.stderr)
 
     def test_unrelated_offline_source_db_has_independent_gate(self):
         another = self.root / "other.sqlite"
