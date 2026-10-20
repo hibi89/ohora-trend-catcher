@@ -161,6 +161,8 @@ def audit_synthetic_history_cutoff(epochs: ThreeApiEpochStore,
                 return result
             if cursor_in is not None:
                 seen_history_cursors.add(cursor_in)
+            if cursor_out is not None:
+                seen_history_cursors.add(cursor_out)
             receipt=mirror.db.execute(
                 "SELECT account_key,observed_at,payload_json,payload_sha256,state "
                 "FROM page_receipts WHERE request_id=?",(raw_id,)
