@@ -123,7 +123,10 @@ class OfflineDailyOrchestrator:
         # replay a staged inbox before examining phase decisions.
         self.catchup_runner.reconcile_pending()
         self.catchup.reconcile_all()
-        return self.coverage()
+        # The caller only needs recovery to finish before dispatch. Avoid a
+        # second roster-wide coverage scan on every manual scheduler tick;
+        # coverage() remains available explicitly for reporting and tests.
+        return None
 
     def coverage(self):
         """Readable phase/coverage counters, never a completeness guarantee."""
