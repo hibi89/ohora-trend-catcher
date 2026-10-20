@@ -488,8 +488,46 @@ class ThreeApiEpochStore:
         existing=self.db.execute("SELECT chain_hash FROM page_evidence_v2 "
                                  "WHERE job_id=?",(job_id,)).fetchone()
         if existing is not None:
-            if existing[0]!=chain:
-                raise EpochError("Conflicting immutable page proof")
+            if job["state"]!="done":
+                raise EpochError("Daily replay job is not committed")
+            stored=self.db.execute("""SELECT e.request_id,e.cursor_in,e.cursor_out,
+                e.observed_at,e.ordered_ids_json,e.terminal_basis,
+                e.source_evidence_id,e.raw_receipt_id,e.source_digest,e.chain_hash
+                FROM page_evidence_v2 e WHERE e.job_id=?""",(job_id,)).fetchone()
+            expected=(request_id,bound[1],next_cursor,stamp,_json(ids),
+                      terminal_basis,source_evidence_id,raw_receipt_id,
+                      source_digest,chain)
+            if tuple(stored)!=expected:
+                raise EpochError("Conflicting immutable daily page replay")
+            cp=self.db.execute("""SELECT cursor,anchor_post_id,last_receipt,
+                chain_hash,updated_at,page_seq,status FROM cursor_checkpoints
+                WHERE epoch_id=? AND account_key=? AND stream='daily'""",
+                (job["epoch_id"],job["account_key"])).fetchone()
+            latest=self.db.execute("""SELECT e.cursor_out,e.ordered_ids_json,
+                e.raw_receipt_id,e.chain_hash,e.observed_at,e.terminal_basis
+                FROM page_evidence_v2 e JOIN jobs_v2 j ON j.job_id=e.job_id
+                WHERE j.epoch_id=? AND j.account_key=? AND j.phase='daily_front'
+                  AND j.state='done' ORDER BY j.page_seq DESC LIMIT 1""",
+                (job["epoch_id"],job["account_key"])).fetchone()
+            if cp is None or latest is None:
+                raise EpochError("Daily replay checkpoint evidence missing")
+            try:
+                latest_ids=json.loads(latest[1])
+            except (TypeError,ValueError) as exc:
+                raise EpochError("Daily replay media evidence invalid") from exc
+            if (not isinstance(latest_ids,list) or len(latest_ids)>4 or
+                    any(not isinstance(v,str) or not v.isdecimal() or len(v)>64
+                        for v in latest_ids) or len(set(latest_ids))!=len(latest_ids)):
+                raise EpochError("Daily replay media evidence invalid")
+            last_seq=self.db.execute("""SELECT MAX(page_seq) FROM jobs_v2
+                WHERE epoch_id=? AND account_key=? AND phase='daily_front'
+                  AND state='done'""",(job["epoch_id"],job["account_key"])).fetchone()[0]
+            if (cp[5]!=last_seq or cp[0]!=latest[0] or
+                    cp[1]!=(latest_ids[-1] if latest_ids else None) or
+                    cp[2]!=latest[2] or cp[3]!=latest[3] or
+                    cp[4]!=latest[4] or
+                    cp[6]!=("terminal" if latest[5]=="verified_terminal" else "open")):
+                raise EpochError("Daily replay checkpoint differs from evidence")
             return {"status":"already_committed","job_id":job_id}
         if job["state"]!="bound":
             raise EpochError("Cannot commit unbound or skipped daily page")
