@@ -54,7 +54,7 @@ def ensure_observation_schema(db):
           first_observed_request_id TEXT NOT NULL REFERENCES query_observations(request_id),
           first_observed_at TEXT NOT NULL,
           origin TEXT NOT NULL CHECK(origin IN (
-             'p2_new_post','legacy_row_reobserved'))""",
+             'p2_new_post','legacy_row_reobserved')))""",
         """CREATE TABLE IF NOT EXISTS post_states(
           state_id TEXT PRIMARY KEY, post_id TEXT NOT NULL REFERENCES posts(post_id),
           component TEXT NOT NULL, schema_version TEXT NOT NULL,
