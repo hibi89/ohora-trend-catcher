@@ -1,3 +1,5 @@
+> **2026-10-20 CI verification:** HEAD `5cf807134981793f6eeefc6f5695dc6c881daf1e` passed all four GitHub Actions workflows: Frozen Design Guard, P6 C Contract Offline, Three API offline tests, and P6 Runtime Integration Offline (including Linux and Windows jobs). This verifies offline CI only; Meta production calls, operational DB edits, deployment, and main merge remain unapproved.
+
 > **2026-10-20 p6 offline hardening:** latest daily replay now recomputes the committed page chain digest from its immutable request binding and parent hash (`88f5ef4`); four synthetic mutation cases added (`fa3268b`). Frozen design unchanged. CI for these commits not yet confirmed; no Meta calls, operational DB edits, deployment, or main merge.
 
 > **2026-10-20 p6 daily replay integrity follow-up (CI pending):** history request ID type guard `73cfd30`, nine request ID test cases `cc3b3e5`, six extra daily replay malformed media JSON cases `c1684b1`, stored daily JSON integrity guard `d61c203`, dedicated error assertions `bcd79de`. These are authored offline changes, not yet confirmed green in CI. Frozen design unchanged; Meta API/operational DB/main merge forbidden.
