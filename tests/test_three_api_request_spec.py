@@ -16,6 +16,16 @@ class RequestSpecTests(unittest.TestCase):
         self.assertNotIn("access_token", field)
         self.assertIsNone(spec.after)
 
+    def test_owner_required_view_count_in_all_new_collection_pages(self):
+        for lane in ("A", "B", "C"):
+            spec = build_request_spec(lane, "nail.artist", limit=4)
+            fields = business_discovery_field(spec)
+            self.assertIn("media.limit(4)", fields)
+            self.assertIn("media_product_type", spec.media_fields.split(","))
+            self.assertIn("view_count", spec.media_fields.split(","))
+            self.assertIn("view_count", fields)
+            self.assertNotIn("access_token", fields)
+
     def test_next_page(self):
         spec = build_request_spec("C", "nails_01", after="abc_123=")
         self.assertIn("media.after(abc_123=).limit(4)", business_discovery_field(spec))
