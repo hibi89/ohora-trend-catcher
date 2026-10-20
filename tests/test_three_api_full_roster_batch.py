@@ -134,6 +134,26 @@ class FullRosterBatchTests(unittest.TestCase):
                 self.assertEqual(restarted.mirror.summary()["raw_post_media"],309)
                 self.assertEqual(restarted.mirror.summary()["raw_post_observations"],309)
 
+    def test_restart_does_not_claim_coverage_when_last_account_missing(self):
+        self.front.pop((294,1,None))
+        runner=self.open()
+        self.assertEqual(self._drain_lane(runner,"A",151),150)
+        for _ in range(143):
+            self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_fixture_missing")
+        before=runner.coverage()
+        self.assertGreater(before["front_incomplete"],0)
+        self.assertEqual(runner.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'").fetchone()[0],0)
+        runner.close()
+        restarted=self.open(front={},catchup={})
+        after=restarted.reconcile()
+        self.assertGreater(restarted.coverage()["front_incomplete"],0)
+        self.assertEqual(restarted.coverage()["front_pages"],before["front_pages"])
+        self.assertEqual(restarted.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'").fetchone()[0],0)
+        self.assertEqual(restarted.step("A",now=NOW)["status"],"front_fixture_missing")
+
     def test_missing_account_294_blocks_global_gap_without_lying_about_coverage(self):
         self.front.pop((294,1,None))
         runner=self.open()
