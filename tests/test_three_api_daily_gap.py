@@ -123,6 +123,25 @@ class DailyGapTests(unittest.TestCase):
             len([query for query in observed if "FROM daily_window" in query]), 1
         )
 
+    def test_front_barrier_preserves_roster_order_after_restart(self):
+        """Pending fronts stay ordered and block older catch-up after restart."""
+        self.l.seed_previous_head("KR_001", "100")
+        for key in ("KR_001", "US_151", "JP_294"):
+            self.l.begin_day(key, "2026-10-19")
+        self.front()
+        self.l.close()
+        self.l = DailyGapLedger(self.path)
+        self.l.record_page("US_151", "2026-10-19",
+                           phase="front", post_ids=["201"])
+        roster = ["JP_294", "KR_001", "US_151"]
+        self.assertEqual(self.l.next_actions(roster, "2026-10-19"),
+                         [{"account_key": "JP_294", "phase": "front"}])
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "catchup_pending")
+        self.assertEqual(self.l.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE account_key='KR_001'"
+        ).fetchone()[0], 3)
+
     def test_front_is_first_for_all_accounts(self):
         self.seed();self.front()
         self.l.seed_previous_head("US_151","200")
