@@ -156,6 +156,8 @@ def audit_synthetic_history_cutoff(epochs: ThreeApiEpochStore,
             )
             if expected_chain!=chain_hash:
                 return result
+            if cursor_out is not None and cursor_out == cursor_in:
+                return result
             receipt=mirror.db.execute(
                 "SELECT account_key,observed_at,payload_json,payload_sha256,state "
                 "FROM page_receipts WHERE request_id=?",(raw_id,)
