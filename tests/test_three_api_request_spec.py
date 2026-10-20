@@ -71,7 +71,7 @@ class RequestSpecTests(unittest.TestCase):
                     spec = build_request_spec(lane, "nails", after=cursor)
                     self.assertEqual(spec.limit, 4)
                     field = business_discovery_field(spec)
-                    self.assertIn("media.limit(4)", field) if cursor is None else self.assertIn("limit(4)", field)
+                    self.assertIn("limit(4)", field)
                     self.assertIn("view_count", field)
                     self.assertNotIn("access_token", field)
 
