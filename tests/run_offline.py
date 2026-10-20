@@ -35,6 +35,32 @@ def iter_cases(suite):
             yield item
 
 
+def unique_discovered_cases(suite):
+    """Execute each imported unittest case once; reject conflicting identities.
+
+    Some test modules re-export a TestCase class imported from another
+    module. unittest discovery legitimately finds the same class and method
+    twice. Preserve one execution, but never conflate distinct test methods
+    or function-test callbacks that happen to share a textual id.
+    """
+    seen={}
+    unique=[]
+    for case in iter_cases(suite):
+        identity=case.id()
+        prior=seen.get(identity)
+        if prior is not None:
+            if (prior.__class__ is not case.__class__
+                    or getattr(prior, "_testMethodName", None)
+                    != getattr(case, "_testMethodName", None)
+                    or getattr(prior, "_testFunc", None)
+                    is not getattr(case, "_testFunc", None)):
+                raise RuntimeError(f"Conflicting offline test identity: {identity}")
+            continue
+        seen[identity]=case
+        unique.append(case)
+    return unique
+
+
 def group_for_case(case):
     module = case.__class__.__module__.rsplit(".", 1)[-1]
     return _MODULE_GROUPS.get(module, "remaining")
@@ -68,10 +94,14 @@ if __name__ == '__main__':
         raise SystemExit("OFFLINE_TEST_WATCHDOG_SECONDS cannot be negative")
     if watchdog_seconds > 0:
         faulthandler.dump_traceback_later(watchdog_seconds, repeat=True, exit=True)
-    suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern='test_*.py')
-    total = suite.countTestCases()
-    # Fail closed if a discovered test is not assigned to exactly one CI shard.
-    all_cases = list(iter_cases(suite))
+    discovered = unittest.defaultTestLoader.discover(
+        str(Path(__file__).parent), pattern='test_*.py')
+    original_count=discovered.countTestCases()
+    # Imported/re-exported TestCase classes otherwise produce duplicate
+    # test IDs. Keep all distinct tests and execute each exact identity once.
+    all_cases=unique_discovered_cases(discovered)
+    suite=unittest.TestSuite(all_cases)
+    total=len(all_cases)
     shard_counts = {name: sum(group_for_case(case) == name for case in all_cases)
                     for name in GROUP_NAMES}
     if (sum(shard_counts.values()) != total
@@ -86,14 +116,12 @@ if __name__ == '__main__':
                                     for case in observation_cases):
         raise RuntimeError("Observation regression shard assignment is missing")
     case_ids=[case.id() for case in all_cases]
-    if len(case_ids)!=len(set(case_ids)):
-        raise RuntimeError("Duplicate test identities in offline discovery")
     if sum(shard_counts.values())!=len(set(case_ids)):
         raise RuntimeError("Offline shard partition does not cover unique tests")
     if args.list_groups:
         for name in GROUP_NAMES:
             print(f"{name}: {shard_counts[name]} tests", flush=True)
-        print(f"total: {total} tests", flush=True)
+        print(f"total: {total} distinct tests (discovered {original_count})", flush=True)
         sys.exit(0)
     suite = select_group(suite, args.group)
     print(f"Offline suite: group={args.group or 'all'} selected={suite.countTestCases()} discovered={total}",
