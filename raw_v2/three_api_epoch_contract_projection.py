@@ -11,11 +11,13 @@ P3 page ledger advance. This is an integration seam, not live authorization.
 from __future__ import annotations
 
 from datetime import date
+import json
 import sqlite3
 
 from three_api_epochs import ThreeApiEpochStore, EpochError, _hash
 from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter, RawWriteError
+from three_api_observation_versions import _post_components
 from three_api_runtime_contract import (
     digest_sha256, sanitize_meta_response, validate_raw_receipt,
 )
@@ -142,6 +144,86 @@ class OfflineEpochContractProjector:
                 ).fetchone()
                 if owner is None or owner[0] != job["account_key"]:
                     raise OfflineEpochContractError("RAW account ownership differs")
+            # P2 append-only query/post checks are part of the same RAW
+            # transaction as the receipt. An intact receipt alone must not
+            # excuse missing structure, stale state, or deleted media rows.
+            stage = "versioned_raw_evidence"
+            query = self.raw._db.execute(
+                "SELECT evidence_id,capture_id,account_key,checked_at,"
+                "outcome,returned_count,quality_status FROM query_observations "
+                "WHERE request_id=?", (request_id,)
+            ).fetchone()
+            if (query is None or tuple(query) != (
+                    source["evidence_id"], record.capture_id,
+                    job["account_key"], actual_at, "success",
+                    len(record.normalized_posts), "verified")):
+                raise OfflineEpochContractError(
+                    "Versioned RAW query proof incomplete"
+                )
+            checks = self.raw._db.execute(
+                "SELECT post_id,account_key,observed_at,"
+                "content_state_id,metrics_state_id,structure_state_id,"
+                "locator_state_id FROM post_checks WHERE request_id=?",
+                (request_id,)
+            ).fetchall()
+            if len(checks) != len(expected) or {row[0] for row in checks} != set(expected):
+                raise OfflineEpochContractError(
+                    "Versioned RAW post checks incomplete"
+                )
+            for check in checks:
+                post = expected[check[0]]
+                if check[1] != job["account_key"] or check[2] != actual_at:
+                    raise OfflineEpochContractError(
+                        "Versioned RAW post identity differs"
+                    )
+                pieces = _post_components(record, post)
+                for component, state_id in zip(
+                        ("content", "metrics", "structure", "locator"),
+                        check[3:]):
+                    actual_state = self.raw._db.execute(
+                        "SELECT post_id,component,full_values_json,"
+                        "field_states_json FROM post_states WHERE state_id=?",
+                        (state_id,)
+                    ).fetchone()
+                    values, states = pieces[component]
+                    expected_state = (
+                        post["id"], component,
+                        json.dumps(values, ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":")),
+                        json.dumps(states, ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":")),
+                    )
+                    if actual_state is None or tuple(actual_state) != expected_state:
+                        raise OfflineEpochContractError(
+                            "Versioned RAW post state differs"
+                        )
+                children = post.get("children") or []
+                if post.get("media_type") == "CAROUSEL_ALBUM":
+                    members = self.raw._db.execute(
+                        "SELECT position,post_id,media_id,media_type "
+                        "FROM media_structure_members WHERE structure_state_id=? "
+                        "ORDER BY position",(check[5],)
+                    ).fetchall()
+                    if [tuple(row) for row in members] != [
+                            (position, post["id"], child["id"], child.get("media_type"))
+                            for position,child in enumerate(children)]:
+                        raise OfflineEpochContractError(
+                            "Per-observation carousel order differs"
+                        )
+                else:
+                    children = [post]
+                for child in children:
+                    media = self.raw._db.execute(
+                        "SELECT post_id,account_key,media_role FROM post_media "
+                        "WHERE media_id=?", (child["id"],)
+                    ).fetchone()
+                    role = ("carousel_child" if
+                            post.get("media_type") == "CAROUSEL_ALBUM" else "single")
+                    if media is None or tuple(media) != (
+                            post["id"],job["account_key"],role):
+                        raise OfflineEpochContractError(
+                            "RAW media ownership or identity differs"
+                        )
             stage = "epoch_commit"
             return self.epochs.commit_daily_page(
                 job_id, request_id, observed_at=record.observed_at,
