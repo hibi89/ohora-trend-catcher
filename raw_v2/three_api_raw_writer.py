@@ -237,6 +237,7 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
             # aggregate run open for its eventual orchestrator to finalize.
             db.execute("INSERT INTO runs(run_id,started_at,api_version,mode,status) VALUES(?,?,?,?,?)",
                        (run, clock, api_version, "three_api_capture", "started"))
+        media_inserted_count = 0
         for post in posts:
             pid = post["id"]
             old = db.execute("SELECT account_key FROM posts WHERE post_id=?", (pid,)).fetchone()
@@ -261,12 +262,17 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
                     raise RawWriteError("Invalid media ID")
                 role = "carousel_child" if post.get("media_type") == "CAROUSEL_ALBUM" else "single"
                 existing = db.execute("SELECT post_id,account_key,media_role,item_order FROM post_media WHERE media_id=?", (mid,)).fetchone()
-                if existing and tuple(existing) != (pid,account,role,i):
+                # Existing media identity belongs to a post and role, but its
+                # original item_order is not immutable structure history.
+                # A carousel may reorder the SAME child IDs on reobservation.
+                # P2 media_structure_members records the ordered state.
+                if existing and tuple(existing[:3]) != (pid,account,role):
                     raise RawWriteError("Media identity collision")
                 if not existing:
                     db.execute("""INSERT INTO post_media(media_id,post_id,account_key,media_role,item_order,
                         media_type,media_url,thumbnail_url,first_seen_run) VALUES(?,?,?,?,?,?,?,?,?)""",
                         (mid,pid,account,role,i,item.get("media_type"),item.get("media_url"),item.get("thumbnail_url"),run))
+                    media_inserted_count += 1
             if post.get("media_type") == "CAROUSEL_ALBUM":
                 coverage = (carousel_completeness or {}).get(pid, "unknown")
                 db.execute("""INSERT INTO carousel_status(post_id,account_key,child_rows,has_next_page,coverage,last_request_id)
@@ -301,6 +307,12 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
         db.execute("""INSERT INTO request_log(run_id,request_id,account_key,phase,started_at,finished_at,
             status,records_received) VALUES(?,?,?,?,?,?,?,?)""",
             (run,request_id,account,phase,clock,clock,"success",len(posts)))
+        # P2 projection is in the SAME SQLite transaction as legacy RAW rows,
+        # immutable receipts and all request-specific metrics.
+        p2_counts = None
+        if contract_record is not None:
+            from three_api_observation_versions import project_contract_observation
+            p2_counts = project_contract_observation(db, contract_record)
         db.execute("INSERT INTO three_api_raw_receipts VALUES(?,?,?,?,?)",
                    (cid,account,clock,digest,canonical(capture)))
         if contract_record is not None:
@@ -310,15 +322,14 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
                 "posts_observed": db.execute(
                     "SELECT COUNT(*) FROM post_observations WHERE request_id=?", (request_id,)
                 ).fetchone()[0],
-                "media_inserted": db.execute(
-                    "SELECT COUNT(*) FROM post_media WHERE first_seen_run=?", (run,)
-                ).fetchone()[0],
+                "media_inserted": media_inserted_count,
                 "account_observations": db.execute(
                     "SELECT COUNT(*) FROM account_observations WHERE request_id=?", (request_id,)
                 ).fetchone()[0],
                 "field_observations": db.execute(
                     "SELECT COUNT(*) FROM field_observations WHERE request_id=?", (request_id,)
                 ).fetchone()[0],
+                **(p2_counts or {}),
             }
             db.execute("INSERT INTO three_api_contract_receipts VALUES(?,?,?,?,?,?)",
                 (cid, contract_digest, contract_json, _raw_receipt_id(cid),
