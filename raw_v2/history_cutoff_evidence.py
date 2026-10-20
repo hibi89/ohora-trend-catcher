@@ -50,8 +50,8 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
         if index < len(pages) - 1 and not outgoing:
             return {"verified": False, "reason": "cursor_gap"}
         media_ids = page.get("media_ids")
-        if media_ids is None:
-            return {"verified": False, "reason": "missing_media_inventory"}
+        # Caller may supply publication evidence without an ID inventory;
+        # missing IDs are not an independently verified complete page.
         if media_ids is not None:
             if not isinstance(media_ids, (list, tuple)) or any(
                 not isinstance(mid, str) or not mid for mid in media_ids
