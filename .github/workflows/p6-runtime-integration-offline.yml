@@ -97,6 +97,10 @@ on:
       - '.github/workflows/p6-runtime-integration-offline.yml'
   workflow_dispatch:
 
+concurrency:
+  group: p6-runtime-offline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
