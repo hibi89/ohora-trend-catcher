@@ -533,6 +533,26 @@ class P3EpochTests(unittest.TestCase):
             self.store.commit_daily_page(second,"skip-d2",**args)
         self.assertEqual(self.db.total_changes,before)
 
+    def test_daily_replay_rejects_parent_phase_corruption_without_writes(self):
+        first,second=(self.job(1,page) for page in (1,2))
+        self.store.bind_daily(first,"phase-d1",build_request_spec("A","nail_001"),at=NOW)
+        self.store.commit_daily_page(first,"phase-d1",observed_at=NOW,
+            ordered_ids=["101"],next_cursor="phase_cursor",
+            terminal_basis="continued",source_evidence_id="phase-d-e1",
+            raw_receipt_id="phase-d-r1",source_digest="a"*64)
+        self.store.bind_daily(second,"phase-d2",
+            build_request_spec("C","nail_001",after="phase_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["102"],next_cursor="phase_next",
+            terminal_basis="continued",source_evidence_id="phase-d-e2",
+            raw_receipt_id="phase-d-r2",source_digest="b"*64)
+        self.store.commit_daily_page(second,"phase-d2",**args)
+        self.db.execute("UPDATE jobs_v2 SET phase='required_catchup' WHERE job_id=?",
+                        (first,))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_daily_page(second,"phase-d2",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_daily_replay_rejects_parent_no_longer_done_without_writes(self):
         first,second=(self.job(1,page) for page in (1,2))
         self.store.bind_daily(first,"state-d1",build_request_spec("A","nail_001"),at=NOW)
