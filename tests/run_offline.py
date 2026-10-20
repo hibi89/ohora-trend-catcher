@@ -1,7 +1,7 @@
 """Run the RAW suite with outbound socket connections blocked.
 
-Optional named groups divide Windows CI by test *module*, preserving every
-case exactly once across the six independent jobs. Running without --group
+Optional named groups divide Windows CI by stable unittest identities, preserving
+every case exactly once across independent jobs. Running without --group
 continues to execute the complete suite.
 """
 import argparse
@@ -18,8 +18,19 @@ from unittest.mock import patch
 # Assignment uses the full unittest ID: deterministic across OS, enumeration and
 # restart; the 480s watchdog remains in force for genuine stalls.
 ORCHESTRATOR_GROUPS = ("orchestrator", "orchestrator-2", "orchestrator-3", "orchestrator-4")
-GROUP_NAMES = ORCHESTRATOR_GROUPS + (
-    "roster", "report", "observations", "projection", "remaining"
+ROSTER_GROUPS = ("roster", "roster-2", "roster-3")
+# The five full-roster 294-account fixtures take ~100-132 seconds each on
+# Windows. Explicitly distribute known tests 2/2/1 to stay under 480 seconds.
+# New full-roster tests go to the first group, never silently disappear.
+_ROSTER_METHOD_GROUPS = {
+    "test_294_accounts_three_lane_full_front_catchup_and_restart": "roster",
+    "test_restart_does_not_duplicate_294_account_front_evidence": "roster",
+    "test_repeated_reconcile_does_not_inflate_full_roster_raw_counts": "roster-2",
+    "test_restart_does_not_claim_coverage_when_last_account_missing": "roster-2",
+    "test_missing_account_294_blocks_global_gap_without_lying_about_coverage": "roster-3",
+}
+GROUP_NAMES = ORCHESTRATOR_GROUPS + ROSTER_GROUPS + (
+    "report", "observations", "projection", "remaining"
 )
 _ORCHESTRATOR_MODULES = frozenset({
     "test_three_api_daily_orchestrator",
@@ -28,7 +39,6 @@ _ORCHESTRATOR_MODULES = frozenset({
     "test_three_api_serial_contract_bridge",
 })
 _MODULE_GROUPS = {
-    "test_three_api_full_roster_batch": "roster",
     "test_three_api_operator_report": "report",
     "test_three_api_p2_observations": "observations",
     "test_three_api_epoch_contract_projection": "projection",
@@ -76,6 +86,10 @@ def unique_discovered_cases(suite):
 
 def group_for_case(case):
     module = case.__class__.__module__.rsplit(".", 1)[-1]
+    if module == "test_three_api_full_roster_batch":
+        return _ROSTER_METHOD_GROUPS.get(
+            getattr(case, "_testMethodName", ""), "roster"
+        )
     if module in _ORCHESTRATOR_MODULES:
         # Avoid putting all 70 expensive synthetic DB cases into a single
         # 480-second Windows job. Never skip/re-execute a case across shards.
