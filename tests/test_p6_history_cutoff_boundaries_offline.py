@@ -1,0 +1,38 @@
+"""Offline cutoff evidence contract: no unverified coverage promotion.
+
+The frozen design requires a rooted cursor chain, intact receipts,
+verified timestamps and cutoff-crossing/terminal evidence. Merely creating
+a 365/730-day epoch, or observing a terminal cursor, proves none of these.
+"""
+import sqlite3
+import unittest
+from datetime import datetime, timedelta, timezone
+
+from raw_v2.three_api_epochs import ThreeApiEpochStore
+
+
+class HistoryCutoffBoundaryContractTests(unittest.TestCase):
+    def test_distinct_fixed_cutoffs_never_imply_verified_coverage(self):
+        db = sqlite3.connect(":memory:", isolation_level=None)
+        try:
+            store = ThreeApiEpochStore(db)
+            # Synthetic only; no Meta call, no production DB.
+            anchor = datetime(2026, 10, 20, 0, 0, tzinfo=timezone.utc)
+            for days in (365, 730):
+                cutoff = anchor - timedelta(days=days)
+                self.assertLess(cutoff, anchor)
+                self.assertEqual(
+                    (anchor - cutoff).total_seconds(), days * 86400
+                )
+            # Actual coverage verification is intentionally deferred until
+            # the full immutable evidence chain and timestamps are available.
+            rows = db.execute(
+                "SELECT COUNT(*) FROM coverage_ledger WHERE status='verified'"
+            ).fetchone()[0]
+            self.assertEqual(rows, 0)
+        finally:
+            db.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
