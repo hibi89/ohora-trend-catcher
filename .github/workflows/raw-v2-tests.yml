@@ -17,6 +17,7 @@ on:
       - 'tests/test_three_api_carousel_optin.py'
       - 'tests/test_three_api_raw_mirror.py'
       - 'tests/test_three_api_raw_projection.py'
+      - 'tests/test_three_api_epochs.py'
       - 'tests/test_three_api_daily_orchestrator.py'
       - 'tests/test_three_api_operator_report.py'
       - 'tests/test_three_api_live_readiness.py'
