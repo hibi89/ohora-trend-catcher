@@ -1,3 +1,5 @@
+> **2026-10-20 P6 N=3 CI 복구·재실행 회귀:** Three API CI `39401729620`/`39401748522` 실패 원인: 테스트가 RAW mirror.stage_page에 datetime 객체 전달(문자열 ISO 요구). 수정 `a041893`; reconcile_pending 2회 재실행 시 RAW 관측 중복 방지 회귀 `aa16653`; staged fixture 상충 재등록 차단·원본 유지 회귀 `17774e9`. Frozen `39401748533` SUCCESS; 최신 Three API/Runtime CI 대기 중 미검증. Meta/운영 DB/main 미변경.
+
 > **2026-10-20 P6 N단위(현재 N=3) 장애 복구 검증:** RAW mirror promote 후 epoch checkpoint 이전 재실행 중복 관측 방지 `4651742`; stage-only 영속 fixture에서 reconcile_pending 복구 `b31b2e5`; stage source_digest 변조 시 RAW 무변경 차단 `5f7925f`. 이전 `bb79ee6` Three API `39401202456` SUCCESS, Frozen `39401202322` SUCCESS; 신규 테스트 CI는 queued, 통과 미확인. N단위 운영 규칙 `docs/AI_WORK_UNIT_PROTOCOL.md`. Meta/운영 DB/main 변경 없음.
 
 > **2026-10-20 P6 3단위 RAW history 감사:** 페이지별 outgoing cursor 추적 `b921f7f`; checkpoint.anchor_post_id 대조 및 빈 terminal 페이지 상속 예외 `dc82b67`→`d87e442`; 마지막 media ID 변조 회귀 `bb79ee6`. 이전 `7c5d231` Three API/Runtime/Frozen CI 대기 중, 최신 전체 CI PASS 미확인. 운영 DB·Meta·main 미변경.
