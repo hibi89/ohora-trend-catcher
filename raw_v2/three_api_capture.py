@@ -49,6 +49,13 @@ def _restore_request(data):
     spec_data = values.get("request_spec")
     if not isinstance(spec_data, dict):
         raise ValueError("Invalid persisted request spec")
+    # JSON turns opt-in account-field tuples into lists. Restore the immutable
+    # RequestSpec shape while preserving default v1.0 canonical digests.
+    spec_data = dict(spec_data)
+    if "account_fields" in spec_data:
+        if not isinstance(spec_data["account_fields"], list):
+            raise ValueError("Invalid stored account-field selection")
+        spec_data["account_fields"] = tuple(spec_data["account_fields"])
     values["request_spec"] = RequestSpec(**spec_data)
     values["day_kst"] = date.fromisoformat(values["day_kst"])
     values["requested_at"] = _parse_time(values["requested_at"])
