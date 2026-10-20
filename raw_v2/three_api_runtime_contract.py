@@ -49,7 +49,7 @@ _POST_FIELDS = frozenset(("id", "caption", "media_type", "media_url",
 _CHILD_FIELDS = frozenset(("id", "media_type", "media_url", "thumbnail_url"))
 _RECORD_REQUEST_FIELDS = frozenset(("api_version", "target_ig_user_id", "lane",
     "username", "limit", "media_fields", "cursor", "method", "endpoint",
-    "include_carousel_children"))
+    "include_carousel_children", "account_fields"))
 _FORBIDDEN = frozenset(("access_token", "token", "authorization",
     "client_secret", "app_secret", "paging.next", "next", "password",
     "secret", "cookie", "set-cookie", "headers", "usage_headers"))
@@ -221,12 +221,15 @@ def field_status_for(values: Mapping[str, Any], fields_tested: frozenset[str],
 
 def requested_fields(request: "RequestEnvelope") -> dict[str, Any]:
     spec = request.request_spec
-    return {"api_version": request.api_version,
+    values = {"api_version": request.api_version,
             "target_ig_user_id": request.target_ig_user_id,
             "lane": spec.lane, "username": spec.username, "limit": spec.limit,
             "media_fields": spec.media_fields, "cursor": spec.after,
             "method": spec.method, "endpoint": spec.endpoint,
             "include_carousel_children": spec.include_carousel_children}
+    if spec.account_fields != ("id", "username"):
+        values["account_fields"] = list(spec.account_fields)
+    return values
 
 
 def validate_category_scope(category: str, scope: str) -> None:
@@ -248,7 +251,11 @@ def _canonical(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     if is_dataclass(value) and not isinstance(value, type):
-        return {f.name: _canonical(getattr(value, f.name)) for f in fields(value)}
+        # Preserve the canonical bytes/digests of previously persisted v1.0
+        # RequestSpec records. Only opt-in profile fields add a new field.
+        return {f.name: _canonical(getattr(value, f.name)) for f in fields(value)
+                if not (isinstance(value, RequestSpec) and f.name == "account_fields"
+                        and value.account_fields == ("id", "username"))}
     if isinstance(value, Mapping):
         if not all(isinstance(k, str) for k in value):
             raise ValueError("JSON mapping keys must be strings")
