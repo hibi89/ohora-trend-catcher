@@ -816,8 +816,13 @@ class ThreeApiEpochStore:
                         or len(media_id)>64 for media_id in anchored_ids) or
                     len(anchored_ids)>4 or len(set(anchored_ids))!=len(anchored_ids)):
                 raise EpochError("History replay media evidence is invalid")
-            if anchored_ids and cp["anchor_post_id"]!=anchored_ids[-1]:
+            if cp["anchor_post_id"]!=(anchored_ids[-1] if anchored_ids else None):
                 raise EpochError("History replay anchor differs from evidence")
+            if (latest is not None and
+                    ((latest[4]=="continued" and latest[0] is None) or
+                     (latest[4]=="verified_terminal" and
+                      (latest[0] is not None or len(anchored_ids)>=4)))):
+                raise EpochError("History replay latest terminal proof invalid")
             # The latest stored hash must also be derivable from its immutable
             # request and parent receipt, not merely equal to the checkpoint.
             latest_proof=self.db.execute("""SELECT j.job_id,j.page_seq,
