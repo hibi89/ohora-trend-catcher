@@ -1,4 +1,4 @@
-"""Offline guarantees for module-based parallel Windows CI groups."""
+"""Offline guarantees for unique, deterministic parallel Windows CI groups."""
 import importlib.util
 from pathlib import Path
 import unittest
@@ -9,31 +9,46 @@ runner = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(runner)
 
 
-def _case(module_name):
-    klass = type("Fixture", (unittest.TestCase,), {
+def _case(module_name, class_name="Fixture"):
+    klass = type(class_name, (unittest.TestCase,), {
         "__module__": module_name,
         "runTest": lambda self: None,
     })
     return klass()
 
 
+def _orchestrator_case_for(group):
+    # Independent synthetic test IDs for all subshards: do not rely on an
+    # arbitrary CPython hash seed or module discovery order.
+    for index in range(200):
+        case = _case("test_three_api_daily_orchestrator", f"ShardFixture{index}")
+        if runner.group_for_case(case) == group:
+            return case
+    raise AssertionError(f"No synthetic case found for {group}")
+
+
 class OfflineShardTests(unittest.TestCase):
     def setUp(self):
-        self.cases = [
-            _case("test_three_api_daily_orchestrator"),
+        self.orchestrator_cases = [
+            _orchestrator_case_for(group) for group in runner.ORCHESTRATOR_GROUPS
+        ]
+        self.heavy_cases = [
             _case("test_three_api_full_roster_batch"),
             _case("test_three_api_operator_report"),
             _case("test_three_api_p2_observations"),
             _case("test_three_api_epoch_contract_projection"),
+        ]
+        self.remaining_cases = [
             _case("test_other_runtime"),
             _case("tests.test_another_module"),
         ]
+        self.cases = self.orchestrator_cases + self.heavy_cases + self.remaining_cases
         self.suite = unittest.TestSuite([
-            unittest.TestSuite(self.cases[:2]),
-            unittest.TestSuite(self.cases[2:]),
+            unittest.TestSuite(self.cases[:5]),
+            unittest.TestSuite(self.cases[5:]),
         ])
 
-    def test_each_module_appears_in_one_group_only(self):
+    def test_each_case_appears_in_exactly_one_group(self):
         partitions = {
             group: list(runner.iter_cases(runner.select_group(self.suite, group)))
             for group in runner.GROUP_NAMES
@@ -41,16 +56,38 @@ class OfflineShardTests(unittest.TestCase):
         flattened = [case for group in runner.GROUP_NAMES for case in partitions[group]]
         self.assertEqual(len(flattened), len(self.cases))
         self.assertEqual(set(flattened), set(self.cases))
+        self.assertEqual(len({case.id() for case in flattened}), len(self.cases))
 
-    def test_heavy_modules_are_isolated(self):
-        for group, case in zip(runner.GROUP_NAMES[:5], self.cases[:5]):
-            self.assertEqual(list(runner.iter_cases(runner.select_group(self.suite, group))), [case])
+    def test_all_four_orchestrator_shards_are_reachable(self):
+        for group, case in zip(runner.ORCHESTRATOR_GROUPS, self.orchestrator_cases):
+            self.assertEqual(runner.group_for_case(case), group)
+            self.assertEqual(
+                list(runner.iter_cases(runner.select_group(self.suite, group))), [case]
+            )
+
+    def test_other_heavy_modules_are_isolated(self):
+        for group, case in zip(("roster", "report", "observations", "projection"),
+                               self.heavy_cases):
+            self.assertEqual(
+                list(runner.iter_cases(runner.select_group(self.suite, group))), [case]
+            )
 
     def test_remaining_group_has_all_other_modules(self):
         self.assertEqual(
             list(runner.iter_cases(runner.select_group(self.suite, "remaining"))),
-            self.cases[5:],
+            self.remaining_cases,
         )
+
+    def test_orchestrator_partition_is_stable_under_discovery_reordering(self):
+        for case in self.orchestrator_cases:
+            before = runner.group_for_case(case)
+            after = runner.group_for_case(case)
+            self.assertEqual(before, after)
+        reverse_suite = unittest.TestSuite(reversed(self.cases))
+        for group in runner.GROUP_NAMES:
+            expected = set(runner.iter_cases(runner.select_group(self.suite, group)))
+            observed = set(runner.iter_cases(runner.select_group(reverse_suite, group)))
+            self.assertEqual(expected, observed)
 
     def test_empty_group_fails_closed(self):
         with self.assertRaises(ValueError):
