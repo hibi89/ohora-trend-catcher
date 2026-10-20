@@ -4,7 +4,7 @@ The public request/executor must continue refusing any history HTTP dispatch.
 All tests use an isolated P3 SQLite, temp CaptureJournal and in-memory RAW v2.
 """
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime,timedelta
 from pathlib import Path
 import json
 import sqlite3
@@ -29,11 +29,12 @@ from three_api_runtime_contract import (
     commit_raw_and_confirm,
 )
 from three_api_capture import CaptureJournal
-from three_api_raw_writer import ContractRawWriter
+from three_api_raw_writer import ContractRawWriter,RawWriteError,write_capture
 from three_api_contract_executor import (
     ThreeApiContractExecutor,ContractExecutionError,
 )
 from three_api_transport import MetaTransport
+from three_api_epochs import ThreeApiEpochStore
 from three_api_epoch_contract_projection import OfflineEpochContractProjector,OfflineEpochContractError
 from three_api_history_fixture_ingress import OfflineHistoryFixtureIngress,OfflineHistoryFixtureError
 
@@ -200,6 +201,121 @@ class OfflineHistoryP1P2Tests(unittest.TestCase):
             self.projector.project_history_page(self.job["job_id"])
         self.assertEqual(self.fx.store.history_checkpoint(
             self.history,"KR_001")["page_seq"],0)
+
+    def test_bare_history_dict_is_still_blocked_at_raw_writer(self):
+        """Only typed offline CaptureRecords may enter RAW as history."""
+        attempt={
+            "capture_id":"fake-history","account_key":"KR_001",
+            "observed_at":NOW.isoformat(),
+            "phase":"history","posts":[{"id":"99000"}],
+        }
+        before=self.raw_db.total_changes
+        with self.assertRaises(RawWriteError):
+            write_capture(self.raw_db,attempt)
+        self.assertEqual(self.raw_db.total_changes,before)
+
+    def test_two_page_history_receipts_survive_three_db_restart_and_kst_rollover(self):
+        """P1/Capture, P2 RAW and P3 history all resume without new HTTP."""
+        payload=json.loads(json.dumps(self.response.payload))
+        payload["business_discovery"]["media"]["paging"]={
+            "next":"https://example.invalid/unused_page_token",
+            "cursors":{"after":"verified_history_page2"},
+        }
+        response1=replace(
+            self.response,payload=payload,next_cursor="verified_history_page2"
+        )
+        self.ingress.save_supplied_response(
+            self.job["job_id"],self.request,response1
+        )
+        self.assertEqual(
+            self.projector.project_history_page(self.job["job_id"])["status"],
+            "committed"
+        )
+        cp=self.fx.store.history_checkpoint(self.history,"KR_001")
+        self.assertEqual(cp["page_seq"],1)
+        self.assertEqual(cp["cursor"],"verified_history_page2")
+        # Before the day changes, allocate/bind page2 from the real saved
+        # history cursor. The newer daily front will then preempt NEW
+        # history work but must not destroy an already bound response.
+        second=self.fx.store.schedule_one_history_page(
+            self.history,"KR_001","B",at=NOW
+        )
+        request2=self.make_request(second,"req-history-offline-2","unused")
+        self.fx.store.seed_daily(
+            DAY+timedelta(days=1),self.fx.digest,
+            anchor_utc=NOW+timedelta(days=1)
+        )
+        raw_path=Path(self.tmp.name)/"isolated_raw_history.sqlite"
+        p3_path=Path(self.tmp.name)/"isolated_p3_history.sqlite"
+        raw_snapshot=sqlite3.connect(raw_path,isolation_level=None)
+        p3_snapshot=sqlite3.connect(p3_path,isolation_level=None)
+        try:
+            self.raw_db.backup(raw_snapshot)
+            self.fx.db.backup(p3_snapshot)
+        finally:
+            raw_snapshot.close()
+            p3_snapshot.close()
+        self.capture.close()
+        self.raw_db.close()
+        self.fx.db.close()
+        self.capture=CaptureJournal(
+            str(Path(self.tmp.name)/"offline_history_capture.sqlite")
+        )
+        self.raw_db=sqlite3.connect(raw_path,isolation_level=None)
+        self.raw=ContractRawWriter(self.raw_db)
+        self.fx.db=sqlite3.connect(p3_path,isolation_level=None)
+        self.fx.db.row_factory=sqlite3.Row
+        self.fx.store=ThreeApiEpochStore(self.fx.db)
+        self.ingress=OfflineHistoryFixtureIngress(
+            self.fx.store,self.capture,self.raw
+        )
+        self.projector=OfflineEpochContractProjector(
+            self.fx.store,self.capture,self.raw
+        )
+        body2=json.loads(json.dumps(self.make_response(request2).payload))
+        body2["business_discovery"]["media"]["data"][0]["id"]="1234567891"
+        body2["business_discovery"]["media"]["data"][0]["timestamp"]=(
+            "2026-10-19T09:00:00+0000"
+        )
+        response2=replace(
+            self.make_response(request2),payload=body2,
+            received_at=NOW+timedelta(days=1)
+        )
+        self.ingress.save_supplied_response(
+            second["job_id"],request2,response2
+        )
+        self.assertEqual(
+            self.projector.project_history_page(second["job_id"])["status"],
+            "committed"
+        )
+        after=self.fx.store.history_checkpoint(self.history,"KR_001")
+        self.assertEqual(after["page_seq"],2)
+        self.assertEqual(after["status"],"terminal")
+        self.assertEqual(self.raw_db.execute(
+            "SELECT COUNT(*) FROM three_api_contract_receipts"
+        ).fetchone()[0],2)
+        self.assertEqual(self.raw_db.execute(
+            "SELECT COUNT(*) FROM post_observations"
+        ).fetchone()[0],2)
+        self.assertEqual(self.fx.db.execute(
+            "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id IN (?,?)",
+            (self.job["job_id"],second["job_id"])
+        ).fetchone()[0],2)
+        checkpoint_before=dict(after)
+        self.assertEqual(
+            self.projector.project_history_page(second["job_id"])["status"],
+            "already_committed"
+        )
+        self.assertEqual(
+            self.fx.store.history_checkpoint(self.history,"KR_001"),
+            checkpoint_before
+        )
+        self.assertEqual(self.raw_db.execute(
+            "PRAGMA integrity_check").fetchone()[0],"ok")
+        self.assertEqual(self.raw_db.execute(
+            "PRAGMA foreign_key_check").fetchall(),[])
+        self.assertEqual(self.fx.db.execute(
+            "PRAGMA foreign_key_check").fetchall(),[])
 
     def test_replay_history_fixture_with_altered_safe_body_is_rejected(self):
         self.ingress.save_supplied_response(
