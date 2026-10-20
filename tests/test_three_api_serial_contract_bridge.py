@@ -10,16 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 
 from three_api_contract_executor import ThreeApiContractExecutor
 from three_api_serial_contract_bridge import (
-    OfflineSerialContractBridge, SerialContractBridgeError,
+    OfflineSerialContractBridge, OfflineFixtureTransport, SerialContractBridgeError,
 )
 from three_api_serial_lock import serial_tick_lock
 
 
 NOW = datetime(2026, 10, 21, 12, tzinfo=timezone.utc)
-
-
-class FixtureOnly:
-    offline_fixture_only = True
 
 
 class FakeBindings:
@@ -39,7 +35,7 @@ class SerialContractBridgeTests(TestCase):
         self.coordinator = SimpleNamespace(
             path=Path(self.tmp.name) / "isolated-coordinator.sqlite")
         self.bindings = FakeBindings(self.coordinator)
-        self.transport = FixtureOnly()
+        self.transport = OfflineFixtureTransport(response=None)
         self.executor = ThreeApiContractExecutor(
             self.transport, None, None, clock=lambda: NOW)
         patcher = mock.patch(
