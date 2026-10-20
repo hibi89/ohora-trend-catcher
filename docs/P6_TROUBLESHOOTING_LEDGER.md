@@ -186,6 +186,8 @@
 - **한계:** 이 잠금은 **새 synthetic 오케스트레이터의 두 entrypoint에만 적용**한다. 다른 legacy/운영 수집기나 향후 전송 adapter가 같은 gate를 사용한다고 가정하면 안 된다. 실제 Meta 3 API 호출 런타임 직렬화는 여전히 별도 작업/검증이 필요하다. 실 API별 quota 격리는 미검증.
 - **검증/롤백:** 현재 테스트/가드 코드 GitHub 커밋 반영, 오프라인 CI 최종 판정 대기. 필요 시 feature commit만 되돌리고 운영 데이터/동결 설계/main 병합 절대 변경 금지.
 
+> **P6-019 추가 회귀 (2026-10-21):** 동일한 control DB 경로를 `nested/../source.sqlite`처럼 별칭으로 표현해도 잠금을 우회하지 못하는지, lock 파일이 디스크에 남아도 다음 실행이 정상 재획득하는지 검사 2건을 `tests/test_three_api_serial_lock.py`에 추가(`67e5aa3`). 코드로 확인한 경로 정규화 `Path.resolve()` 동작을 대상으로 하며, **새 SHA CI 검증 전**이다. 잠금 파일을 지우는 stale-file 복구는 의도적으로 수행하지 않는다.
+
 ## 새 사건을 추가할 때의 고정 서식
 
 ```markdown
