@@ -142,7 +142,11 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
             raise RawWriteError("Post field evidence must match captured posts")
         for post in posts:
             states = post_field_status[post["id"]]
-            if not isinstance(states, dict) or set(states) != {"like_count", "comments_count"}:
+            expected_fields = {"like_count", "comments_count"}
+            if contract_record is not None and "view_count" in (
+                    contract_record.request.request_spec.media_fields.split(",")):
+                expected_fields.add("view_count")
+            if not isinstance(states, dict) or set(states) != expected_fields:
                 raise RawWriteError("Post field states are incomplete")
             for key, state in states.items():
                 present = key in post
@@ -184,7 +188,7 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
                 raise RawWriteError("Invalid or duplicate carousel child ID")
         elif post.get("children") not in (None, []):
             raise RawWriteError("Non-carousel post cannot contain child media")
-        for field in ("like_count", "comments_count"):
+        for field in ("like_count", "comments_count", "view_count"):
             if field in post and post[field] is not None and (type(post[field]) is not int or post[field] < 0):
                 raise RawWriteError("Invalid engagement count")
     digest = hashlib.sha256(canonical(capture).encode()).hexdigest()
@@ -294,7 +298,7 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
                  int("like_count" in post),int("comments_count" in post),request_id))
             for field in ("like_count","comments_count","shortcode","view_count"):
                 per_post = capture.get("post_field_status", {}).get(pid, {})
-                status = (per_post.get(field) if field in ("like_count", "comments_count") else None)
+                status = (per_post.get(field) if field in ("like_count", "comments_count", "view_count") else None)
                 if status is None:
                     status = ("not_tested" if field in ("shortcode","view_count") else
                               "absent" if field not in post else "null" if post[field] is None else "returned")
