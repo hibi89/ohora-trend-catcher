@@ -27,6 +27,7 @@
 | P6-013 | 변경 관리 | 잦은 커밋이 in-progress CI를 cancel | 완료 전 CI PASS 주장 금지 |
 | P6-014 | 교대/지식보존 | 사건 기록은 있었으나 새 AI 작업자에 대한 명시적 의무 누락 | AGENTS + 작업 프로토콜에 기록 의무 명문화 |
 | P6-015 | 직렬 회귀/CI | 재시작 테스트 fixture 기본값 오인으로 실제 1건 저장 vs 누락 기대 | 명시적 빈 fixture를 재시작에도 전달 |
+| P6-016 | Catch-up 직렬 | front와 catch-up의 서로 다른 API 제한 상태 명칭으로 fallback 누락 위험 | 두 제한 상태 모두 다음 레인으로 이동 |
 | P6-016 | 직렬 Catch-up/한도 | A 쿨다운 중 직렬 단계가 B·C로 넘어가지 못함 | `lane_blocked`를 가용 레인 탐색 사유로 처리, 합성 회귀 |
 
 ## 사건별 상세
@@ -155,6 +156,15 @@
 - **데이터 영향:** 독립 synthetic SQLite만, HTTP/Meta·운영 원본·main 병합 없음. 운영 스케줄러에는 아직 연결하지 않음.
 - **미해결/예방:** 레인 사용량 독립성 미검증, 현재 오프라인 직렬 경로는 블록된 각 레인을 다시 호출하며 reconcile 비용이 발생한다. 추후 최적화 시 성공한 RAW 영수증/커서 순서 훼손 방지. 기술적 기록 발견성 보강 테스트 [`test_p6_troubleshooting_handoff_guard.py`](../tests/test_p6_troubleshooting_handoff_guard.py) (`b83d66c` 및 정규식 수정 `cfcc663`) 추가.
 - **안전한 롤백:** 기능 `1e93561`과 합성 회귀 `3b039fb`를 단독 revert할 수 있으나 임의 운영 DB 되돌리기 금지. 원인과 해결 기록은 유지.
+
+### P6-016 — Catch-up 상태명이 달라 직렬 대체 레인 선택 누락 가능 (2026-10-21)
+
+- **탐지:** 오프라인 소스 정적 검토. front의 레인 중단 반환값은 `front_lane_unavailable`인데 catch-up `OfflineCatchupRunner.run_one()`은 `lane_blocked`를 반환함. 초기 `step_serial()`은 전자만 건너뛰므로 **A의 Catch-up 쿼터 제한이 B/C 처리 가능성도 가릴 위험**이 있었음.
+- **변경/대안:** 직렬 synthetic wrapper가 두 상태를 모두 가용하지 않은 레인으로 간주해 다음 레인을 순차 시도한다. Catch-up fixture 누락/무결성 실패/복구 실패까지 무조건 넘기는 방식은 결함 은폐 위험 때문에 금지. 고정 3레인 작업/쿨다운·cursor 증거·RAW 저장은 그대로.
+- **회귀 근거:** `tests/test_three_api_serial_catchup.py` 신규 (`3b039fb`), A만 제한, A+B 제한, 전체 제한 3가지 오프라인 케이스. 프런트–RAW 재시작 재처리와 잘못된 B fixture 차단은 `e1ad01f` 회귀.
+- **검증:** 위 코드는 개발 브랜치에 반영됨. 최신 CI run의 전체 PASS는 별도 확인 전이며, **실 Meta API 주체별 쿼터 독립성은 검증되지 않음**. 따라서 실제 API에서는 이 synthetic lane fallback만 근거로 global quota 제한을 완화하지 않는다.
+- **보존 위험/롤백:** 합성 DB 외 원본 데이터 변경 없음. 회귀 발생 시 feature 브랜치의 직렬 wrapper·테스트 변경만 되돌리며 운영 DB/원본은 되돌려 쓰지 않는다.
+- **재발 방지:** 서로 다른 단계(front/catchup/history)의 동일한 사용량 제한은 명칭·분류를 일관되게 처리하고, 격리된 제한 범위 확인 전에 다른 인증 주체의 안전성을 단정하지 않는다.
 
 ## 새 사건을 추가할 때의 고정 서식
 
