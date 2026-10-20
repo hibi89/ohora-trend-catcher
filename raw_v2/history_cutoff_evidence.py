@@ -29,6 +29,7 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
     prior = None
     seen_cursors = set()
     seen_receipts = set()
+    seen_media = set()
     oldest = None
     for index, page in enumerate(pages):
         if not isinstance(page, dict) or not page.get("receipt") or not isinstance(page.get("receipt"), str):
@@ -48,6 +49,15 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
             return {"verified": False, "reason": "invalid_cursor"}
         if index < len(pages) - 1 and not outgoing:
             return {"verified": False, "reason": "cursor_gap"}
+        media_ids = page.get("media_ids")
+        if media_ids is not None:
+            if not isinstance(media_ids, (list, tuple)) or any(
+                not isinstance(mid, str) or not mid for mid in media_ids
+            ) or len(set(media_ids)) != len(media_ids):
+                return {"verified": False, "reason": "invalid_media_ids"}
+            if seen_media.intersection(media_ids):
+                return {"verified": False, "reason": "duplicate_media"}
+            seen_media.update(media_ids)
         stamps = page.get("published_at")
         if not isinstance(stamps, (list, tuple)) or not stamps:
             return {"verified": False, "reason": "missing_timestamps"}
