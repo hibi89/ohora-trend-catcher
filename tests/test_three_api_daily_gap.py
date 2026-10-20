@@ -143,6 +143,22 @@ class DailyGapTests(unittest.TestCase):
             "SELECT COUNT(*) FROM page_proof WHERE account_key='KR_001'"
         ).fetchone()[0], 3)
 
+    def test_all_fronts_complete_exposes_gap_and_review_in_roster_order(self):
+        """Early front barrier must not conceal older review or catch-up."""
+        self.seed()
+        self.front()
+        self.l.seed_previous_head("US_151", "200")
+        self.l.begin_day("US_151", "2026-10-19")
+        self.l.record_page("US_151", "2026-10-19",
+                           phase="front", post_ids=["201"])
+        actions = self.l.next_actions(["US_151", "KR_001"], "2026-10-19")
+        self.assertEqual(actions, [
+            {"account_key": "US_151", "phase": "needs_review",
+             "gap_day": "2026-10-19"},
+            {"account_key": "KR_001", "phase": "catchup",
+             "gap_day": "2026-10-19"},
+        ])
+
     def test_front_is_first_for_all_accounts(self):
         self.seed();self.front()
         self.l.seed_previous_head("US_151","200")
