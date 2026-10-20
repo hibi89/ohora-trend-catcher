@@ -1,0 +1,52 @@
+name: P6 Frozen Design Guard
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frozen-baseline:
+    name: Check frozen design and policy SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject unauthorized changes to frozen design and notice
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import sys
+
+          frozen = {
+              "docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md":
+                  ("sha256", "08f9a3858fe40ac48639525d2472ae3ba6a4f789bde5aaa3f17bf2d5954124e5"),
+              "DESIGN_FREEZE_NOTICE.md":
+                  ("git_blob_sha1", "e01883fd5f1625656ea67ced3e4a48546366f618"),
+          }
+          invalid = []
+          for name, (kind, expected) in frozen.items():
+              p = Path(name)
+              if not p.is_file():
+                  invalid.append(f"{name}: MISSING")
+                  continue
+              data = p.read_bytes()
+              if kind == "sha256":
+                  actual = hashlib.sha256(data).hexdigest()
+              else:
+                  actual = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+              if actual != expected:
+                  invalid.append(f"{name}: FROZEN BASELINE VIOLATED (expected {expected}, got {actual})")
+              else:
+                  print(f"LOCK VERIFIED: {name} ({kind}: {actual})")
+          if invalid:
+              for item in invalid:
+                  print("::error::" + item)
+              print("Design/policy changes require new explicit user approval.")
+              sys.exit(1)
+          print("P6 final design and owner policy preserved exactly.")
+          PY
