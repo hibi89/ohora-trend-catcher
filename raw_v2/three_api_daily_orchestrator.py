@@ -590,7 +590,7 @@ class OfflineDailyOrchestrator:
             order = order[pivot:] + order[:pivot]
         for lane in order:
             result = self.step(lane, now=now)
-            if result["status"] == "front_lane_unavailable":
+            if result["status"] in ("front_lane_unavailable", "lane_blocked"):
                 continue
             if result["status"] in ("front_committed", "applied"):
                 self.coordinator.db.execute(
