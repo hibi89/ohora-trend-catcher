@@ -62,6 +62,26 @@ class SerialTickLockTests(unittest.TestCase):
         )
         self.assertEqual(free.returncode, 0, free.stderr)
 
+    def test_crashed_child_process_releases_os_owned_lock(self):
+        # Exit bypasses Python context-manager cleanup intentionally.
+        child = (
+            "from three_api_serial_lock import serial_tick_lock; "
+            "import os, sys\n"
+            "with serial_tick_lock(sys.argv[1]):\n"
+            "    os._exit(17)\n"
+        )
+        environment = dict(__import__("os").environ)
+        environment["PYTHONPATH"] = str(
+            Path(__file__).resolve().parents[1] / "raw_v2"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", child, str(self.source)],
+            env=environment, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 17, result.stderr)
+        with serial_tick_lock(self.source):
+            self.assertTrue(True)
+
     def test_unrelated_offline_source_db_has_independent_gate(self):
         another = self.root / "other.sqlite"
         with serial_tick_lock(self.source):
