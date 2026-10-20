@@ -320,6 +320,20 @@ class P3EpochTests(unittest.TestCase):
         self.assertEqual(before["cursor"],"advanced_history_cursor")
         self.assertEqual(before["page_seq"],1)
 
+    def test_history_cannot_allocate_while_new_daily_front_pending(self):
+        """A new KST day takes precedence over existing history cursor."""
+        history=self.open_history_fixture()
+        before=self.store.history_checkpoint(history,"KR_001")
+        self.store.seed_daily(DAY+timedelta(days=1),self.digest,
+                              anchor_utc=NOW+timedelta(days=1))
+        with self.assertRaises(EpochError):
+            self.store.schedule_one_history_page(
+                history,"KR_001","A",at=NOW+timedelta(days=1))
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001"),before)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM jobs_v2 WHERE epoch_id=?",(history,)
+        ).fetchone()[0],0)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
