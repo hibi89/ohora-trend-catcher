@@ -618,9 +618,10 @@ class OfflineDailyOrchestrator:
             recovered_coverage=self.reconcile()
         except Exception:
             return {"status":"recovery_blocked","lane":lane}
-        # Reuse the phase counts already computed by reconcile(). This avoids
-        # an additional full-roster ledger scan on each synthetic tick.
-        phases=recovered_coverage["action_counts"]
+        return self._step_with_phases(lane, now, recovered_coverage["action_counts"], stage_only=stage_only)
+
+    def _step_with_phases(self, lane, now, phases, *, stage_only=False):
+        """One synthetic phase decision using already reconciled evidence."""
         if phases.get("front",0):
             if stage_only:
                 return {"status":"front_stage_only_unsupported"}
