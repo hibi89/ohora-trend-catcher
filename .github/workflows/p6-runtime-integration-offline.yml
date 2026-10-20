@@ -164,6 +164,8 @@ jobs:
           python-version: '3.11'
       - name: Compile offline modules and tests on Windows
         run: python -m compileall -q raw_v2 tests
+      - name: Audit Windows offline test inventory
+        run: python tests/run_offline.py --list-groups
       - name: Run socket-blocked Windows regression group
         env:
           OFFLINE_TEST_WATCHDOG_SECONDS: '180'
