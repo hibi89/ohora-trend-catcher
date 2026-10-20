@@ -18,6 +18,17 @@ class DailyGapTests(unittest.TestCase):
         self.l = DailyGapLedger(self.path)
         self.addCleanup(lambda: self.l.close())
 
+    def test_gap_lookup_index_is_present(self):
+        """Account/status/day queries stay indexed in fresh offline ledgers."""
+        indexes = self.l.db.execute("PRAGMA index_list(daily_window)").fetchall()
+        names = {row[1] for row in indexes}
+        self.assertIn("idx_daily_window_account_status_day", names)
+        columns = self.l.db.execute(
+            "PRAGMA index_info(idx_daily_window_account_status_day)"
+        ).fetchall()
+        self.assertEqual([row[2] for row in columns],
+                         ["account_key", "status", "day"])
+
     def seed(self, account="KR_001"):
         self.l.seed_previous_head(account,"100")
         self.l.begin_day(account,"2026-10-19")
