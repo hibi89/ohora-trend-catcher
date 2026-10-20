@@ -221,6 +221,104 @@ class OfflineEpochContractProjectionTests(unittest.TestCase):
         self.assertEqual(self.p3db.total_changes, before)
         self.assertEqual(self.state(), "bound")
 
+    def test_corrupt_p2_versioned_content_cannot_advance_cursor(self):
+        self.execute()
+        self.rawdb.execute(
+            "UPDATE post_states SET full_values_json='{}' WHERE state_id=("
+            "SELECT content_state_id FROM post_checks WHERE request_id=?)",
+            (self.request.request_id,),
+        )
+        before = self.p3db.total_changes
+        with self.assertRaisesRegex(
+            OfflineEpochContractError, "Versioned RAW post state differs"
+        ):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.p3db.total_changes, before)
+        self.assertEqual(self.state(), "bound")
+
+    def test_wrong_versioned_query_quality_blocks_p3(self):
+        self.execute()
+        self.rawdb.execute(
+            "UPDATE query_observations SET quality_status='unverified' "
+            "WHERE request_id=?", (self.request.request_id,),
+        )
+        with self.assertRaisesRegex(
+            OfflineEpochContractError, "Versioned RAW query proof incomplete"
+        ):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.state(), "bound")
+
+    def test_single_media_identity_corruption_blocks_p3(self):
+        self.execute()
+        self.rawdb.execute(
+            "UPDATE post_media SET media_role='carousel_child' "
+            "WHERE media_id='1234567890'"
+        )
+        with self.assertRaisesRegex(
+            OfflineEpochContractError, "RAW media ownership or identity differs"
+        ):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.state(), "bound")
+
+    def test_carousel_order_proof_and_media_identity(self):
+        response = make_response(self.request)
+        post = response.payload["business_discovery"]["media"]["data"][0]
+        post["media_type"] = "CAROUSEL_ALBUM"
+        post["children"] = {"data": [
+            {"id": "88001", "media_type": "IMAGE",
+             "media_url": "https://cdn.example.invalid/88001.jpg"},
+            {"id": "88002", "media_type": "VIDEO",
+             "media_url": "https://cdn.example.invalid/88002.mp4"},
+        ]}
+        executor = ThreeApiContractExecutor(
+            FakeTransport(response), self.journal, self.raw,
+            clock=lambda: OBSERVED_AT,
+        )
+        executor.execute(self.request)
+        self.assertEqual(
+            self.rawdb.execute(
+                "SELECT COUNT(*) FROM media_structure_members"
+            ).fetchone()[0], 2
+        )
+        original = self.rawdb.execute(
+            "SELECT structure_state_id FROM post_checks WHERE request_id=?",
+            (self.request.request_id,)
+        ).fetchone()[0]
+        self.rawdb.execute(
+            "UPDATE media_structure_members SET media_id='88999' "
+            "WHERE structure_state_id=? AND position=0", (original,),
+        )
+        before = self.p3db.total_changes
+        with self.assertRaisesRegex(
+            OfflineEpochContractError, "Per-observation carousel order differs"
+        ):
+            self.projector.project_front_page(self.job)
+        self.assertEqual(self.p3db.total_changes, before)
+        self.assertEqual(self.state(), "bound")
+
+    def test_carousel_success_preserves_versioned_order_and_raw_identity(self):
+        response = make_response(self.request)
+        post = response.payload["business_discovery"]["media"]["data"][0]
+        post["media_type"] = "CAROUSEL_ALBUM"
+        post["children"] = {"data": [
+            {"id": "88011", "media_type": "IMAGE"},
+            {"id": "88012", "media_type": "VIDEO"},
+        ]}
+        executor = ThreeApiContractExecutor(
+            FakeTransport(response), self.journal, self.raw,
+            clock=lambda: OBSERVED_AT,
+        )
+        executor.execute(self.request)
+        self.assertEqual(
+            self.projector.project_front_page(self.job)["status"], "committed"
+        )
+        self.assertEqual(self.state(), "done")
+        self.assertEqual([
+            row[0] for row in self.rawdb.execute(
+                "SELECT media_id FROM media_structure_members ORDER BY position"
+            )
+        ], ["88011", "88012"])
+
     def test_raw_observation_corruption_does_not_advance_p3(self):
         self.execute()
         self.rawdb.execute(
