@@ -159,6 +159,29 @@ class DailyGapTests(unittest.TestCase):
              "gap_day": "2026-10-19"},
         ])
 
+    def test_front_barrier_rejects_duplicate_roster_without_sql(self):
+        """Duplicate account input cannot silently duplicate collection actions."""
+        self.seed()
+        statements = []
+        self.l.db.set_trace_callback(statements.append)
+        try:
+            with self.assertRaises(GapEvidenceError):
+                self.l.next_actions(["KR_001", "KR_001"], "2026-10-19")
+        finally:
+            self.l.db.set_trace_callback(None)
+        self.assertEqual(statements, [])
+
+    def test_front_barrier_rejects_invalid_roster_without_sql(self):
+        """Reject malformed account IDs before any SQLite status lookup."""
+        statements = []
+        self.l.db.set_trace_callback(statements.append)
+        try:
+            with self.assertRaises(GapEvidenceError):
+                self.l.next_actions(["KR_001", "bad account"], "2026-10-19")
+        finally:
+            self.l.db.set_trace_callback(None)
+        self.assertEqual(statements, [])
+
     def test_front_is_first_for_all_accounts(self):
         self.seed();self.front()
         self.l.seed_previous_head("US_151","200")
