@@ -105,5 +105,20 @@ class CutoffAssessorTests(unittest.TestCase):
         )["reason"], "future_publication")
 
 
+    def test_duplicate_media_across_pages_is_rejected(self):
+        cutoff = self.anchor - timedelta(days=365)
+        pages = [
+            dict(cursor_in="root", cursor_out="a", receipt="raw:1",
+                 receipt_verified=True, timestamps_verified=True,
+                 media_ids=["m1"], published_at=[self.anchor - timedelta(days=1)]),
+            dict(cursor_in="a", cursor_out="b", receipt="raw:2",
+                 receipt_verified=True, timestamps_verified=True,
+                 media_ids=["m1"], published_at=[cutoff - timedelta(seconds=1)]),
+        ]
+        self.assertEqual(assess_cutoff_evidence(
+            anchor=self.anchor, cutoff=cutoff, pages=pages,
+            rooted=True)["reason"], "duplicate_media")
+
+
 if __name__ == "__main__":
     unittest.main()
