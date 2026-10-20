@@ -10,15 +10,24 @@ import os
 from pathlib import Path
 import sys
 import unittest
+import zlib
 from unittest.mock import patch
 
 
-GROUP_NAMES = ("orchestrator", "roster", "report", "observations", "projection", "remaining")
+# Split slow Windows SQLite orchestrator tests into stable, independent shards.
+# Assignment uses the full unittest ID: deterministic across OS, enumeration and
+# restart; the 480s watchdog remains in force for genuine stalls.
+ORCHESTRATOR_GROUPS = ("orchestrator", "orchestrator-2", "orchestrator-3", "orchestrator-4")
+GROUP_NAMES = ORCHESTRATOR_GROUPS + (
+    "roster", "report", "observations", "projection", "remaining"
+)
+_ORCHESTRATOR_MODULES = frozenset({
+    "test_three_api_daily_orchestrator",
+    "test_three_api_serial_catchup",
+    "test_three_api_serial_lock",
+    "test_three_api_serial_contract_bridge",
+})
 _MODULE_GROUPS = {
-    "test_three_api_daily_orchestrator": "orchestrator",
-    "test_three_api_serial_catchup": "orchestrator",
-    "test_three_api_serial_lock": "orchestrator",
-    "test_three_api_serial_contract_bridge": "orchestrator",
     "test_three_api_full_roster_batch": "roster",
     "test_three_api_operator_report": "report",
     "test_three_api_p2_observations": "observations",
@@ -67,6 +76,11 @@ def unique_discovered_cases(suite):
 
 def group_for_case(case):
     module = case.__class__.__module__.rsplit(".", 1)[-1]
+    if module in _ORCHESTRATOR_MODULES:
+        # Avoid putting all 70 expensive synthetic DB cases into a single
+        # 480-second Windows job. Never skip/re-execute a case across shards.
+        index = zlib.crc32(case.id().encode("utf-8")) % len(ORCHESTRATOR_GROUPS)
+        return ORCHESTRATOR_GROUPS[index]
     return _MODULE_GROUPS.get(module, "remaining")
 
 
