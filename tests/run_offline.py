@@ -1,7 +1,7 @@
 """Run the RAW suite with outbound socket connections blocked.
 
 Optional named groups divide Windows CI by test *module*, preserving every
-case exactly once across the four independent jobs. Running without --group
+case exactly once across the five independent jobs. Running without --group
 continues to execute the complete suite.
 """
 import argparse
