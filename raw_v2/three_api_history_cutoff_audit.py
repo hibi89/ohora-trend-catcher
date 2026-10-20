@@ -218,6 +218,7 @@ def audit_synthetic_history_cutoff(epochs: ThreeApiEpochStore,
             result["pages_checked"]=number
             result["posts_checked"]+=len(posts)
         if (cp["page_seq"]!=len(rows) or cp["last_receipt"]!=rows[-1][11]
+                or cp["updated_at"]!=rows[-1][7]
                 or cp["chain_hash"]!=prev_chain
                 or cp["cursor"]!=prev_cursor or
                 cp["status"]!=("terminal" if last_terminal else "open")):
