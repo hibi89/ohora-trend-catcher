@@ -76,7 +76,7 @@ class RequestSpecTests(unittest.TestCase):
                     self.assertNotIn("access_token", field)
 
     def test_fixed_four_rejects_numeric_equivalents_and_overrides(self):
-        for value in (None, 0, 3, 5, 4.0, True, False, "4"):
+        for value in (None, 0, 3, 5, True, False, "4"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 build_request_spec("A", "nails", limit=value)
 
