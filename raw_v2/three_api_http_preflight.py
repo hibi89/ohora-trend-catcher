@@ -62,7 +62,6 @@ def prepare_graph_request(spec: RequestSpec, credentials: CredentialReference,
     canonical = build_request_spec(spec.lane, spec.username,
                                    after=spec.after, limit=spec.limit,
                                    include_carousel_children=spec.include_carousel_children,
-        include_account_metrics=("followers_count" in spec.account_fields),
                                    include_account_metrics=("followers_count" in spec.account_fields))
     if spec != canonical:
         raise ValueError("Untrusted request specification")
@@ -82,6 +81,7 @@ def prepare_graph_request(spec: RequestSpec, credentials: CredentialReference,
         after_present=spec.after is not None, after=spec.after,
         token_env_name=credentials.token_env_name,
         include_carousel_children=spec.include_carousel_children,
+        include_account_metrics=("followers_count" in spec.account_fields),
     )
 
 
