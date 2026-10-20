@@ -198,7 +198,10 @@ class P3EpochTests(unittest.TestCase):
                     db.execute("UPDATE page_evidence_v2 SET "+field+"=? WHERE job_id=?",
                                (payload,job))
                     before=db.total_changes
-                    with self.assertRaisesRegex(EpochError,message):
+                    expected_message=("Daily replay media evidence invalid"
+                        if field=="ordered_ids_json" and payload!='["999"]'
+                        else message)
+                    with self.assertRaisesRegex(EpochError,expected_message):
                         store.commit_daily_page(job,request,**args)
                     self.assertEqual(db.total_changes,before)
                 finally:
