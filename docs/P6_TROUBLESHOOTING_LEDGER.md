@@ -29,6 +29,8 @@
 | P6-015 | 직렬 회귀/CI | 재시작 테스트 fixture 기본값 오인으로 실제 1건 저장 vs 누락 기대 | 명시적 빈 fixture를 재시작에도 전달 |
 | P6-016 | Catch-up 직렬 | front와 catch-up의 서로 다른 API 제한 상태 명칭으로 fallback 누락 위험 | 두 제한 상태 모두 다음 레인으로 이동 |
 | P6-017 | 동시 기록 충돌 | 두 작업자가 같은 P6-016 사건 번호로 각각 기록 | 사실 통합 + 중복 감지 검사·번호 할당 규칙 |
+| P6-018 | 직렬 성능 | 85% 차단 레인을 건너뛸 때마다 294계정 복구·상태 검사 반복 | 1회 재조정 후 최대 1개 합성 페이지 실행 |
+| P6-019 | 직렬 안전성 | 여러 프로세스가 각자 step_serial을 실행할 수 있음 | synthetic 단계에 OS 프로세스 공통 잠금 추가 |
 
 ## 사건별 상세
 
@@ -166,6 +168,23 @@
 - **검증:** 동일 브랜치의 문서를 재조회해 001~017 ID 중복 0·색인/상세 일치 여부를 확인해야 한다. Python CI/Windows 전체 완료 여부는 별도 확인 전이며, 녹색 성공으로 간주하지 않는다.
 - **후속 규칙:** 사건 신규 생성 직전 항상 최신 feature ledger를 GitHub에서 다시 읽고 번호 중복을 확인한다. 저장 충돌이 나면 **새로운 번호를 임의 재사용하지 말고** 최신본과 병합해 재시도한다. 파일별 SHA 조건 확인만으로 의미상 중복을 막을 수는 없으므로 최종 장부의 유일성 검사도 실행한다.
 - **영향/롤백:** 지침·문서상의 번호 충돌. Meta HTTP/운영 RAW·DB 변경 없음. 과거 실패·해결의 사실 기록을 삭제하지 않고 하나의 사건에 보존한다.
+
+### P6-018 — 직렬 fallback 중 중복 294계정 reconcile 처리 (2026-10-21)
+
+- **발견:** 기존 `step_serial()`이 `A→B→C` 상태 조회마다 `step(lane)`을 호출해, 앞선 API가 85% usage 또는 65분 쿨다운으로 unavailable일 때도 매번 전체 원본/ledger/RAW 재조정과 294계정 상태 검사를 다시 수행함. 추론된 오프라인 처리 병목이며 실 Meta 지연 시간의 측정값은 아님.
+- **원인:** `step()`이 개별 안전 함수로 자체 reconcile을 필수 실행하는데 직렬 wrapper가 이를 세 번 호출했기 때문.
+- **개선:** 기존 `step()`의 외부 안전 계약은 유지하면서, 내부의 단계 선택을 `_step_with_phases()`로 추출(`40c1e89`). 직렬 `step_serial()`은 최초 **1회** `reconcile()` 수행 후 해당 일관된 action snapshot으로 순서대로 레인 하나만 실행(`3850f3f`). 실패/원본 불일치는 다음 레인으로 넘기지 않음.
+- **회귀:** 합성 Catch-up B/C quota fallback에서 reconcile 호출 수=1과 복구 exception 때 RAW/커서 무변경 검사 `9d4d7f6` (`tests/test_three_api_serial_catchup.py`). CI PASS는 **해당 SHA 실행 결과 확인 전까지 미확정**.
+- **경계/롤백:** Meta API·사용자 DB/CSV 원본·동결 설계/main 미변경. 위험하면 `40c1e89`, `3850f3f`를 feature branch에서 revert하되 기존 원본 파일은 건드리지 않음.
+
+### P6-019 — 직렬 wrapper만으로는 프로세스 간 동시 실행을 막지 못함 (2026-10-21)
+
+- **발견:** `step_serial()`의 순차 `for`문은 **하나의 Python 호출** 안에서만 동시 실행을 제거한다. 독립 채팅방/작업자가 각각 별도 프로세스로 같은 SQLite를 열고 tick을 실행하면 상호간 직렬성이 보장되지 않는 아키텍처 위험이 있었다. 실제 다중 프로세스 데이터 손상은 관측하지 않았음.
+- **대안 판단:** `BEGIN IMMEDIATE`를 전체 RAW·control 다중 DB 작업 동안 점유하면 내부 nested SQLite transaction 및 단계별 무결성 복구와 충돌하기 쉽다. 원자적 파일 생성 플래그는 crash 후 남은 파일의 안전한 해제 절차가 어렵다. **OS-owned 파일 잠금**은 프로세스 종료 시 자동 해제되며 DB별 전역 잠금 경계를 제공하므로 채택.
+- **구현:** `raw_v2/three_api_serial_lock.py` (`f5bc1b3`)에 POSIX `flock`/Windows `msvcrt.locking` 비차단 lock 추가. 같은 synthetic coordinator DB의 `step_serial()` **및** 기존 `step()`를 공통 lock decorator로 보호(`5defcb4`); 이미 실행 중이면 `serial_busy`, 새 RAW 저장/커서 승격·공정성 turn 갱신 없음. 잠금 파일 자체는 남을 수 있지만 잠금 권한은 OS가 소멸시키므로 수동 stale-file 삭제 금지.
+- **회귀:** `tests/test_three_api_serial_lock.py` (`5e11b76`, `a9ce108`)에서 동일 DB 중복 lock 차단, 예외 후 lock 해제, 다른 DB 독립성, 잠금 중 수집/RAW 불변, 별도 **자식 프로세스 lock 차단 및 해제 뒤 성공**을 테스트하도록 작성.
+- **한계:** 이 잠금은 **새 synthetic 오케스트레이터의 두 entrypoint에만 적용**한다. 다른 legacy/운영 수집기나 향후 전송 adapter가 같은 gate를 사용한다고 가정하면 안 된다. 실제 Meta 3 API 호출 런타임 직렬화는 여전히 별도 작업/검증이 필요하다. 실 API별 quota 격리는 미검증.
+- **검증/롤백:** 현재 테스트/가드 코드 GitHub 커밋 반영, 오프라인 CI 최종 판정 대기. 필요 시 feature commit만 되돌리고 운영 데이터/동결 설계/main 병합 절대 변경 금지.
 
 ## 새 사건을 추가할 때의 고정 서식
 
