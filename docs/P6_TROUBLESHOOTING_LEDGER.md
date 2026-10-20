@@ -34,6 +34,7 @@
 | P6-020 | 계약 직렬 경계 | OS 잠금만으로는 계약 기반 요청 예약과 오프라인 전송을 한 구역으로 묶지 못함 | fixture-only bridge·잠금·예약 검증 분리 |
 | P6-021 | CI·인수인계 | 최신 오프라인 Runtime 실패: STATUS/HANDOFF 상단 AGENTS 링크 누락, Windows 8분 watchdog | 문서 링크 복구; Windows orchestrator 실행시간 별도 추적 |
 | P6-022 | Windows CI | 294계정 roster 5개 테스트 480초 초과 | 2/2/1 샤딩, SHA 5dfae40 Runtime 12/12 PASS |
+| P6-023 | 직렬·영속 통합 | fixture-only 직렬 전송 후 Capture/RAW·cursor 확정에 별도 잠금 경계가 없었음 | captured-only page commit을 동일 OS gate에 연결; 8개 격리 SQLite 통합 회귀, CI 판정 대기 |
 
 ## 사건별 상세
 
@@ -218,6 +219,15 @@
 ### P6-022 — Windows full-roster CI 480초 초과 / 3그룹 분리 (2026-10-21 KST)
 
 **사건 증거·대안·검증:** [Runtime #39504471845](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39504471845)에서 Linux 및 Windows 9개 중 9개 작업이 성공하고 `offline-windows (roster)`만 실패했다. roster 5개 테스트 중 4개 PASS, 5번째 실행 중 `Timeout (0:08:00)!` 발생. 앞선 테스트가 각각 약 94~132초를 소요한 것이 확인되며, stack `three_api_coordinator.py::lease`는 제한 시점 실행 위치일 뿐 데드락 확정 증거는 아니다. 대안 A) watchdog을 900초로 늘리면 정지 탐지가 늦어진다. **채택 B)** `tests/run_offline.py`의 알려진 5개 294계정 fixture를 `roster`/`roster-2`/`roster-3`에 2/2/1 분리, 신규 테스트는 기본 roster로 fail-visible 배정. `tests/test_offline_shards.py`에서 전수·중복 없는 배정 회귀, Windows CI matrix에 2그룹 추가. 기존 480초 감시·소켓 차단 유지. 커밋 `c7038c2`, `e2f6ad8`, `526736a`. **검증 완료:** commit `5dfae4007a4abcfc0f7b148fcd93e6a4695c384e`의 [Runtime #39510506884](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506884) Linux 1/1, Windows 11/11, 총 12/12 성공. [Three API #39510506964](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506964), [C Contract #39510506960](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506960), [Frozen Guard #39510506972](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506972) 모두 같은 SHA에서 성공. **P6-022 오프라인 CI 병목 해결 판정.** 실제 Meta 운영 성공 판정 아님. 실 Meta/운영 DB/CSV/main 불변.
+
+### P6-023 — fixture 직렬 수집→Capture/RAW→커서 확정의 단일 잠금 경계 (2026-10-21 KST)
+
+- **관찰·범위:** 기존 `OfflineSerialContractBridge.dispatch_fixture_once`는 OS 잠금 안에서 영속 JobRequestBindingStore 예약 후 fixture 전송→Capture→RAW까지 수행한다. 그러나 해당 객체에는 수신 뒤의 `PageEvidenceStore.commit_page`까지 동일 serial gate 아래 검증하는 public 경로가 없었다. 기존 `JobRequestBindingStore.commit_captured_page`를 별도로 호출하는 것은 가능했으나 bridge 차원의 직렬 경계와 end-to-end 검증은 부족했다. **실제 동시 커서 오염 사례가 관측된 것은 아니며, 사전 통합/안전성 보강 결정이다.**
+- **채택·대안:** `raw_v2/three_api_serial_contract_bridge.py`에 `commit_captured_fixture_page` 추가(`918dd35`). 이미 저장된 durable Capture/RAW 포트를 실행기로부터 재사용하고, 동일 coordinator SQLite OS gate 잠금·유효 레인/시간대·정확한 `OfflineFixtureTransport` 타입·잠금 대기 중 포트 바꿔치기 여부를 검사한다. 기존 `bindings.commit_captured_page`의 request digest·lease·RAW receipt·cursor 선행 증거 검증을 재사용한다. **HTTP 전송/신규 intent 생성/재시도는 이 메서드에서 일절 수행하지 않는다.** 대안인 새 live runner 일괄 구현은 미승인 네트워크/DB 위험과 테스트 범위 확대로 배제; 모든 단계 하나의 SQLite 트랜잭션으로 합치기는 이미 분리된 durable DB 경계와 충돌하므로 배제.
+- **테스트:** `tests/test_three_api_serial_contract_bridge.py`에서 실제 격리 coordinator+capture+합성 RAW SQLite, 원래 request binding·executor·fixture transport·page evidence 경로를 사용하는 테스트 5개(`6eb1040`) 추가: 성공 후 페이지 확정, capture 없는 완료 금지, OS gate 점유 중 거절/해제 후 확정, transport 교체 거절, SQLite 파일 재오픈/expired lease recovery 시 두 번째 송신 0. 이후 3개(`e01ae62`) 추가: 잘못된 응답의 안전한 수신 증거 보존·재발송 차단, RAW acknowledgement 중단 이후 재확정, 검증된 cursor로 C레인 page2 unlock. 실호출 없음.
+- **검증 상태:** 코드 커밋 `918dd35df1dd12895a99eb0ad17e38c5ec202521`, 테스트 최종 변경 `e01ae625086b62dff5c9e62bd3bdd46085dc42ef`; **이 단계에서는 신규 HEAD 전체 CI 결과 미확정**. 이전 녹색 `58971b3`의 [Runtime 12/12](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39514325379)는 새 코드 통과 근거가 아니다. 새 SHA의 Linux/Windows Runtime 및 Three API·C Contract·Frozen Guard 결과를 확인해야 한다.
+- **보존 위험·잔여 차단:** fixture 전용이며 운영 자격증명·Meta Graph·운영 SQLite/CSV/RAW·scheduler·main에 접근/변경하지 않는다. 실제 live-transport serial gate·한도 독립성·운영 파일/백업·365일 History 연결은 **미구현/미검증**. Capture 없는 예약은 재송신하지 않고 operator review에 남는다. 응답 수신과 RAW 확정은 여전히 별도 DB이며 중간 실패가 가능하나, durable capture 기반 replay로 복구한다.
+- **롤백·재발 방지:** feature branch에서 신규 commit path/테스트만 revert, 기존 원본/운영 DB를 덮거나 재설정하지 않는다. 신규 직렬 컴포넌트는 transport send·capture 영속화·RAW receipt·page/cursor 확정을 나누어 회귀, 재시작 후 `transport.calls=0` 확인을 필수로 한다.
 
 ## 새 사건을 추가할 때의 고정 서식
 
