@@ -1,3 +1,5 @@
+> **2026-10-20 P6 N=3 immutable stage 입력 변조 회귀:** staged posts_json 변조 차단 `f4c984e`, cursor_in 변조 차단 `07f1fb0`, request_bindings_v2.request_id 변조 차단 `1c64d00`. 기존 Three API CI `39402025249` (`b804766`) SUCCESS, Frozen `39402025222` SUCCESS; 신규 CI queued·미검증. 현재까지의 신규 작업은 오프라인 테스트만, 운영 DB/Meta/main 미변경. 다음 우선순위: 최신 CI 완료 확인 후 P1~P5 통합 완료 판정.
+
 > **2026-10-20 P6 N=3 history 복구 경계 회귀:** RAW 승격 receipt digest 변조 시 cursor advancement 차단 테스트 `0730197`; 동일 stage 2회 입력의 durable capture 단일성 `b804766`; 반복 synthetic reconcile 후 production coverage ledger=partial 보존 `2f0d060`. 이전 Three API CI `39401863902` (`a041893`) SUCCESS, Frozen `39401898301` (`17774e9`) SUCCESS. 최신 테스트 CI 대기·미검증. Meta/운영 DB/main 미변경.
 
 > **2026-10-20 P6 N=3 CI 복구·재실행 회귀:** Three API CI `39401729620`/`39401748522` 실패 원인: 테스트가 RAW mirror.stage_page에 datetime 객체 전달(문자열 ISO 요구). 수정 `a041893`; reconcile_pending 2회 재실행 시 RAW 관측 중복 방지 회귀 `aa16653`; staged fixture 상충 재등록 차단·원본 유지 회귀 `17774e9`. Frozen `39401748533` SUCCESS; 최신 Three API/Runtime CI 대기 중 미검증. Meta/운영 DB/main 미변경.
