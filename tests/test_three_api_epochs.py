@@ -410,8 +410,13 @@ class P3EpochTests(unittest.TestCase):
                 first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
                 self.store.bind_history(first["job_id"],"req-bridge-one",
                     build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
-                posts=[{"id":str(i),"media_type":"IMAGE","like_count":0}
-                       for i in range(501,505)]
+                posts=[
+                    {"id":"501","media_type":"CAROUSEL_ALBUM","like_count":0,
+                     "children":[{"id":"511","media_type":"IMAGE",
+                                  "media_url":"https://cdn.example.invalid/511.jpg"}]},
+                    *[{"id":str(i),"media_type":"IMAGE","like_count":0}
+                      for i in range(502,505)],
+                ]
                 args=dict(observed_at=NOW,posts=posts,
                           next_cursor="bridge_cursor_2",terminal_basis="continued")
                 self.assertEqual(bridge.stage_capture(first["job_id"],"req-bridge-one",
@@ -435,6 +440,12 @@ class P3EpochTests(unittest.TestCase):
                                  "terminal")
                 self.assertEqual(mirror.summary()["raw_posts"],6)
                 self.assertEqual(mirror.summary()["raw_post_observations"],6)
+                self.assertEqual(mirror.summary()["raw_post_media"],7)
+                child=mirror.db.execute(
+                    "SELECT post_id,media_role,item_order,media_url "
+                    "FROM raw_post_media WHERE media_id='511'").fetchone()
+                self.assertEqual(tuple(child),
+                    ("501","child",1,"https://cdn.example.invalid/511.jpg"))
                 self.assertEqual(mirror.summary()["pending_pages"],0)
                 self.assertEqual(self.db.execute(
                     "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id IN (?,?)",
@@ -521,6 +532,52 @@ class P3EpochTests(unittest.TestCase):
                     self.assertEqual(mirror.summary()["raw_posts"],1)
                 finally:
                     disk.close()
+            finally:
+                mirror.close()
+
+    def test_p4_history_bridge_rechecks_committed_mirror_observations(self):
+        history=self.open_history_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror=OfflineRawMirror(Path(tmp)/"three_api_raw_mirror.sqlite")
+            try:
+                bridge=OfflineHistoryRawBridge(self.store,mirror)
+                page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+                self.store.bind_history(page["job_id"],"req-bridge-observation",
+                    build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+                bridge.stage_capture(page["job_id"],"req-bridge-observation",
+                    observed_at=NOW,posts=[{"id":"1101","like_count":0}],
+                    next_cursor="history_after_observation",terminal_basis="continued")
+                self.assertEqual(bridge.reconcile_one(page["job_id"])["status"],"committed")
+                prior=self.store.history_checkpoint(history,"KR_001")
+                mirror.db.execute(
+                    "UPDATE raw_post_observations SET like_count=100 WHERE post_id='1101'")
+                with self.assertRaises(OfflineHistoryBridgeError):
+                    bridge.reconcile_one(page["job_id"])
+                self.assertEqual(self.store.history_checkpoint(history,"KR_001"),prior)
+            finally:
+                mirror.close()
+
+    def test_p4_history_bridge_rejects_conflicting_fixture_replay(self):
+        history=self.open_history_fixture()
+        with tempfile.TemporaryDirectory() as tmp:
+            mirror=OfflineRawMirror(Path(tmp)/"three_api_raw_mirror.sqlite")
+            try:
+                bridge=OfflineHistoryRawBridge(self.store,mirror)
+                page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+                self.store.bind_history(page["job_id"],"req-bridge-immutable",
+                    build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+                kwargs=dict(observed_at=NOW,posts=[{"id":"1201"}],
+                            next_cursor="bridge_next",terminal_basis="continued")
+                bridge.stage_capture(page["job_id"],"req-bridge-immutable",**kwargs)
+                with self.assertRaises(OfflineHistoryBridgeError):
+                    bridge.stage_capture(page["job_id"],"req-bridge-immutable",
+                        **{**kwargs,"posts":[{"id":"1202"}]})
+                with self.assertRaises(OfflineHistoryBridgeError):
+                    bridge.stage_capture(page["job_id"],"req-bridge-immutable",
+                        **{**kwargs,"next_cursor":None})
+                self.assertEqual(bridge.reconcile_one(page["job_id"])["status"],
+                                 "committed")
+                self.assertEqual(mirror.summary()["raw_posts"],1)
             finally:
                 mirror.close()
 
