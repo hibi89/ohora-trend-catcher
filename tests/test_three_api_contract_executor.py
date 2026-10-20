@@ -260,8 +260,14 @@ class ContractExecutorTests(unittest.TestCase):
     def test_missing_usage_blocks_raw_write(self):
         self.assert_usage_blocked({})
 
-    def test_usage_at_threshold_blocks_raw_write(self):
-        self.assert_usage_blocked({"x-app-usage": '{"call_count":85}'})
+    def test_usage_at_threshold_saves_received_capture_and_raw(self):
+        t = FakeTransport(make_response(self.request, usage={"x-app-usage": '{"call_count":85}'}))
+        receipt = self.executor(t).execute(self.request)
+        self.assertEqual(receipt.status, "committed")
+        self.assertEqual(t.calls, 1)
+        self.assertEqual(self.count("post_observations"), 1)
+        evidence = self.journal.get_response_evidence(self.request.request_id)
+        self.assertEqual(evidence["safe_usage"]["max_usage_percent"], 85)
 
     def test_returned_account_identity_must_match_requested_target(self):
         transport = FakeTransport(make_response(self.request, account_id="17840000000000099"))
