@@ -108,6 +108,32 @@ class FullRosterBatchTests(unittest.TestCase):
         ).fetchone()[0], evidence_before)
         self.assertEqual(resumed.mirror.summary()["raw_post_observations"], 309)
 
+    def test_repeated_reconcile_does_not_inflate_full_roster_raw_counts(self):
+        runner=self.open()
+        self.assertEqual(self._drain_lane(runner,"A",151),150)
+        self.assertEqual(self._drain_lane(runner,"B",145),144)
+        self.assertEqual(runner.step("C",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("A",now=NOW)["status"],"applied")
+        initial=runner.coverage()
+        initial_raw=runner.mirror.summary()
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                self.assertEqual(runner.reconcile()["mirror_posts"],309)
+                self.assertEqual(runner.coverage()["front_pages"],
+                                 initial["front_pages"])
+                self.assertEqual(runner.mirror.summary()["raw_post_media"],
+                                 initial_raw["raw_post_media"])
+                self.assertEqual(runner.mirror.summary()["raw_post_observations"],
+                                 initial_raw["raw_post_observations"])
+        runner.close()
+        restarted=self.open(front={},catchup={})
+        for attempt in range(2):
+            with self.subTest(restart_attempt=attempt):
+                self.assertEqual(restarted.reconcile()["mirror_posts"],309)
+                self.assertEqual(restarted.mirror.summary()["raw_post_media"],309)
+                self.assertEqual(restarted.mirror.summary()["raw_post_observations"],309)
+
     def test_missing_account_294_blocks_global_gap_without_lying_about_coverage(self):
         self.front.pop((294,1,None))
         runner=self.open()
