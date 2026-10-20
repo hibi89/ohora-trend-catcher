@@ -95,4 +95,6 @@ jobs:
       - name: Compile offline modules and tests on Windows
         run: python -m compileall -q raw_v2 tests
       - name: Run complete offline regression suite on Windows with sockets blocked
-        run: python tests/run_offline.py
+        env:
+          OFFLINE_TEST_WATCHDOG_SECONDS: '180'
+        run: python -u tests/run_offline.py
