@@ -822,6 +822,23 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
             (page["job_id"],)).fetchone()[0],1)
 
+    def test_history_replay_rejects_corrupt_media_json_without_db_changes(self):
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(page["job_id"],"req-json-replay",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["901","902"],
+                  next_cursor="json_next_cursor",terminal_basis="continued",
+                  source_evidence_id="safe-json",
+                  raw_receipt_id="raw-json",source_digest="a"*64)
+        self.store.commit_history_page(page["job_id"],"req-json-replay",**args)
+        self.db.execute("UPDATE page_evidence_v2 SET ordered_ids_json=? WHERE job_id=?",
+                        ("{corrupt-json",page["job_id"]))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_history_page(page["job_id"],"req-json-replay",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
