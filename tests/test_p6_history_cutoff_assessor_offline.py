@@ -14,7 +14,7 @@ class CutoffAssessorTests(unittest.TestCase):
 
     def check(self, days, offset_microseconds, **changes):
         cutoff = self.anchor - timedelta(days=days)
-        page = dict(cursor_in="root", cursor_out="next", receipt="raw:1",
+        page = dict(cursor_in="root", cursor_out="next", receipt="raw:1", receipt_verified=True, timestamps_verified=True,
                     published_at=[cutoff + timedelta(microseconds=offset_microseconds)])
         page.update(changes)
         return assess_cutoff_evidence(anchor=self.anchor, cutoff=cutoff,
@@ -30,7 +30,7 @@ class CutoffAssessorTests(unittest.TestCase):
     def test_missing_root_receipt_timestamp_or_terminal_proof(self):
         for days in (365, 730):
             cutoff = self.anchor - timedelta(days=days)
-            base = dict(cursor_in="root", cursor_out=None, receipt="raw:1",
+            base = dict(cursor_in="root", cursor_out=None, receipt="raw:1", receipt_verified=True, timestamps_verified=True,
                         published_at=[cutoff + timedelta(seconds=1)])
             for key, value in (("receipt", None), ("published_at", [])):
                 self.assertFalse(self.check(days, 1, **{key: value})["verified"])
@@ -45,14 +45,26 @@ class CutoffAssessorTests(unittest.TestCase):
     def test_chain_gap_fails_closed(self):
         cutoff = self.anchor - timedelta(days=365)
         pages = [
-            dict(cursor_in="root", cursor_out="cursor2", receipt="raw:1",
+            dict(cursor_in="root", cursor_out="cursor2", receipt="raw:1", receipt_verified=True, timestamps_verified=True,
                  published_at=[self.anchor - timedelta(days=1)]),
-            dict(cursor_in="wrong", cursor_out="cursor3", receipt="raw:2",
+            dict(cursor_in="wrong", cursor_out="cursor3", receipt="raw:2", receipt_verified=True, timestamps_verified=True,
                  published_at=[cutoff - timedelta(seconds=1)]),
         ]
         self.assertEqual(assess_cutoff_evidence(
             anchor=self.anchor, cutoff=cutoff, pages=pages,
             rooted=True)["reason"], "cursor_gap")
+
+
+    def test_unverified_receipt_and_timestamp_are_rejected(self):
+        for days in (365, 730):
+            self.assertEqual(self.check(
+                days, -1, receipt_verified=False)["reason"], "receipt_unverified")
+            self.assertEqual(self.check(
+                days, -1, timestamps_verified=False)["reason"], "timestamps_unverified")
+
+    def test_cursor_cycle_is_rejected(self):
+        self.assertEqual(self.check(
+            365, -1, cursor_in="root", cursor_out="root")["reason"], "cursor_cycle")
 
 
 if __name__ == "__main__":
