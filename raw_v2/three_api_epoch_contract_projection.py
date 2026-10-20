@@ -40,6 +40,7 @@ class OfflineEpochContractProjector:
         observation clock, repairs RAW, or marks unresolved outcomes as done.
         Already-bound previous-day responses can complete after KST rollover.
         """
+        stage = "bound_job"
         try:
             job = self.epochs._job_row(job_id)
             if (job["epoch_kind"] != "daily" or job["phase"] != "daily_front"
@@ -52,6 +53,7 @@ class OfflineEpochContractProjector:
             if binding is None:
                 raise OfflineEpochContractError("Durable P3 request binding required")
             request_id, cursor, spec_hash = tuple(binding)
+            stage = "capture_reread"
             record = self.capture.get_capture_for_request(request_id)
             if record is None:
                 raise OfflineEpochContractError("Durable capture missing")
@@ -79,6 +81,7 @@ class OfflineEpochContractProjector:
                 raise OfflineEpochContractError("Epoch and captured request differ")
             # An independent, first-retained safe response proves observation
             # clock/source evidence existed before success normalization.
+            stage = "safe_response_reread"
             source = self.capture.get_response_evidence(request_id)
             if (source is None or source["classification"] != "safe"
                     or source["evidence_id"] != "response-" + request_id
@@ -94,6 +97,7 @@ class OfflineEpochContractProjector:
                     or record.cursor_state.next_cursor is None
                     and len(record.normalized_posts) >= 4):
                 raise OfflineEpochContractError("Response clock or cursor proof invalid")
+            stage = "raw_receipt_reread"
             receipt = self.raw.get_raw_receipt(record.capture_id)
             if receipt is None:
                 raise OfflineEpochContractError("No committed RAW receipt")
@@ -105,6 +109,7 @@ class OfflineEpochContractProjector:
             if confirmation is None or confirmation[0] != receipt.raw_receipt_id:
                 raise OfflineEpochContractError("Unconfirmed RAW acknowledgement")
             # Verify recorded RAW rows, not only the receipt object.
+            stage = "raw_observations"
             rows = self.raw._db.execute(
                 "SELECT post_id,like_count,comments_count,like_present,"
                 "comments_present,observed_at FROM post_observations "
@@ -126,6 +131,7 @@ class OfflineEpochContractProjector:
                 ).fetchone()
                 if owner is None or owner[0] != job["account_key"]:
                     raise OfflineEpochContractError("RAW account ownership differs")
+            stage = "epoch_commit"
             return self.epochs.commit_daily_page(
                 job_id, request_id, observed_at=record.observed_at,
                 ordered_ids=[post["id"] for post in record.normalized_posts],
@@ -140,4 +146,8 @@ class OfflineEpochContractProjector:
         except OfflineEpochContractError:
             raise
         except (EpochError, RawWriteError, sqlite3.Error, ValueError, KeyError, TypeError, AttributeError):
-            raise OfflineEpochContractError("Stored epoch/Capture/RAW proof rejected") from None
+            # Static stage names aid incident diagnosis without logging IDs,
+            # paging cursors, captions, URLs or response contents.
+            raise OfflineEpochContractError(
+                "Stored epoch/Capture/RAW proof rejected at " + stage
+            ) from None
