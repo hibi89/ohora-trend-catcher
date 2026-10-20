@@ -45,7 +45,7 @@ CATEGORY_SCOPE: Mapping[str, FailureScope] = {
 _ACCOUNT_FIELDS = frozenset(("id", "username", "followers_count", "media_count"))
 _POST_FIELDS = frozenset(("id", "caption", "media_type", "media_url",
     "permalink", "timestamp", "like_count", "comments_count", "thumbnail_url",
-    "children"))
+    "media_product_type", "view_count", "children"))
 _CHILD_FIELDS = frozenset(("id", "media_type", "media_url", "thumbnail_url"))
 _RECORD_REQUEST_FIELDS = frozenset(("api_version", "target_ig_user_id", "lane",
     "username", "limit", "media_fields", "cursor", "method", "endpoint",
@@ -64,7 +64,7 @@ _CHILD_MEDIA_TYPES = frozenset(("IMAGE", "VIDEO"))
 _TEXT_FIELDS = frozenset(("caption",))
 _URL_FIELDS = frozenset(("media_url", "permalink", "thumbnail_url"))
 _POST_TEXT_FIELDS = frozenset(("id", "caption", "media_type", "media_url",
-                               "permalink", "timestamp", "thumbnail_url"))
+                               "permalink", "timestamp", "thumbnail_url", "media_product_type"))
 _CHILD_TEXT_FIELDS = frozenset(("id", "media_type", "media_url", "thumbnail_url"))
 
 
@@ -90,7 +90,7 @@ def validate_normalized_posts(posts: Sequence[Mapping[str, Any]],
                         _MAX_TEXT if key == "caption" else
                         _MAX_URL if key in _URL_FIELDS else 128):
                     raise ValueError("Invalid normalized text field")
-            if key in ("like_count", "comments_count") and value is not None:
+            if key in ("like_count", "comments_count", "view_count") and value is not None:
                 if type(value) is not int or value < 0:
                     raise ValueError("Invalid engagement count")
         if "children" in post:
@@ -453,13 +453,14 @@ class CaptureRecord:
                 p.get("id") for p in self.normalized_posts}:
             raise ValueError("Per-post field states are required")
         requested = frozenset(
-            key for key in ("like_count", "comments_count")
+            key for key in ("like_count", "comments_count", "view_count")
             if key in self.request.request_spec.media_fields.split(","))
+        tracked = frozenset(("like_count", "comments_count")) | (
+            frozenset(("view_count",)) if "view_count" in requested else frozenset())
         for post in self.normalized_posts:
-            if any(key in post for key in ("like_count", "comments_count") if key not in requested):
+            if any(key in post for key in ("like_count", "comments_count", "view_count") if key not in requested):
                 raise ValueError("Unrequested engagement field cannot be stored")
-            validate_field_status(post, self.post_field_status[post["id"]],
-                                  frozenset(("like_count", "comments_count")))
+            validate_field_status(post, self.post_field_status[post["id"]], tracked)
             id_ = post["id"]
             status = self.carousel_completeness.get(id_)
             if status not in _CAROUSEL_STATES:
@@ -668,9 +669,11 @@ def capture_from_response(
                 response_received_at=response.received_at, usage_metrics=metrics,
                 post_field_status={
                     post["id"]: field_status_for(post,
-                        frozenset(key for key in ("like_count", "comments_count")
+                        frozenset(key for key in ("like_count", "comments_count", "view_count")
                                   if key in request.request_spec.media_fields.split(",")),
-                        frozenset(("like_count", "comments_count")))
+                        frozenset(("like_count", "comments_count")) | (
+                            frozenset(("view_count",)) if "view_count" in
+                            request.request_spec.media_fields.split(",") else frozenset()))
                     for post in normalized_posts})
     except (ValueError, TypeError, KeyError) as exc:
         category = ("usage_limit" if "Usage limit" in str(exc) else
