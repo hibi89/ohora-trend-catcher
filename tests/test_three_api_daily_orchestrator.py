@@ -300,6 +300,10 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         self.assertEqual(runner.coverage()["front_incomplete"],294)
 
     def test_quota_stop_does_not_prevent_other_lane_commits(self):
+        # The default fixture only covers account 1, assigned to lane A.
+        # Supply deterministic account fixtures for the unaffected B lane.
+        for ordinal in range(2,295):
+            self.front[(ordinal,1,None)]=fixture([30000+ordinal],None)
         runner=self.create()
         self.assertTrue(runner.coordinator.observe_usage("A",85,now=NOW))
         self.assertEqual(runner.step("A",now=NOW)["status"],
