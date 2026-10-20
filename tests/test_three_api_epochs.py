@@ -299,6 +299,27 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
             (page["job_id"],)).fetchone()[0],1)
 
+    def test_history_seed_is_idempotent_without_cursor_rewind(self):
+        """Later daily evidence cannot silently reset a committed history cursor."""
+        history=self.open_history_fixture()
+        page=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(page["job_id"],"req-history-progress",
+            build_request_spec("A","nail_001",
+                               after="history_first_cursor"),at=NOW)
+        self.store.commit_history_page(
+            page["job_id"],"req-history-progress",
+            observed_at=NOW,ordered_ids=["501","502","503","504"],
+            next_cursor="advanced_history_cursor",terminal_basis="continued",
+            source_evidence_id="safe-progress",raw_receipt_id="raw-progress",
+            source_digest="a"*64)
+        before=self.store.history_checkpoint(history,"KR_001")
+        result=self.store.initialize_history_from_verified_daily(
+            history,self.daily,"KR_001",at=NOW+timedelta(hours=1))
+        self.assertEqual(result["status"],"already_initialized")
+        self.assertEqual(self.store.history_checkpoint(history,"KR_001"),before)
+        self.assertEqual(before["cursor"],"advanced_history_cursor")
+        self.assertEqual(before["page_seq"],1)
+
     def test_bound_job_cannot_be_discarded_as_account_exception(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-bound",build_request_spec("A","nail_001"),at=NOW)
