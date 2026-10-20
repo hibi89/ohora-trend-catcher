@@ -26,6 +26,7 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
         return {"verified": False, "reason": "missing_root"}
     prior = None
     seen_cursors = set()
+    seen_receipts = set()
     oldest = None
     for index, page in enumerate(pages):
         if not isinstance(page, dict) or not page.get("receipt") or not isinstance(page.get("receipt"), str):
@@ -34,6 +35,9 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
             return {"verified": False, "reason": "receipt_unverified"}
         if page.get("timestamps_verified") is not True:
             return {"verified": False, "reason": "timestamps_unverified"}
+        if page["receipt"] in seen_receipts:
+            return {"verified": False, "reason": "duplicate_receipt"}
+        seen_receipts.add(page["receipt"])
         incoming = page.get("cursor_in")
         if (index == 0 and incoming != "root") or (index and incoming != prior):
             return {"verified": False, "reason": "cursor_gap"}
