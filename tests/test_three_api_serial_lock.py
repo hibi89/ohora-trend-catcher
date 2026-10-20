@@ -82,6 +82,23 @@ class SerialTickLockTests(unittest.TestCase):
         with serial_tick_lock(self.source):
             self.assertTrue(True)
 
+    def test_same_source_relative_alias_cannot_bypass_gate(self):
+        # Different spelling of the same SQLite path must not create
+        # a second independent serial writer lock.
+        alias = self.root / "nested" / ".." / "source.sqlite"
+        (self.root / "nested").mkdir()
+        with serial_tick_lock(self.source):
+            with self.assertRaises(SerialTickBusy):
+                with serial_tick_lock(alias):
+                    self.fail("Path alias bypassed serial lock")
+
+    def test_lock_file_survives_without_holding_stale_ownership(self):
+        with serial_tick_lock(self.source):
+            self.assertTrue(Path(str(self.source) + ".serial.lock").exists())
+        # An existing file is not proof of a live lock owner.
+        with serial_tick_lock(self.source):
+            self.assertTrue(Path(str(self.source) + ".serial.lock").exists())
+
     def test_unrelated_offline_source_db_has_independent_gate(self):
         another = self.root / "other.sqlite"
         with serial_tick_lock(self.source):
