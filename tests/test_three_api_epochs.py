@@ -366,6 +366,51 @@ class P3EpochTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_daily_replay_latest_chain_and_binding_integrity(self):
+        for field,table,payload in (
+            ("chain_hash","page_evidence_v2","f"*64),
+            ("source_digest","page_evidence_v2","f"*64),
+            ("source_evidence_id","page_evidence_v2","forged-source"),
+            ("requested_cursor","request_bindings_v2","forged-cursor"),
+        ):
+            with self.subTest(field=field):
+                db=sqlite3.connect(":memory:",isolation_level=None)
+                db.row_factory=sqlite3.Row
+                try:
+                    store=ThreeApiEpochStore(db)
+                    digest=store.register_roster(official_shape(),recorded_at=NOW)
+                    daily=store.seed_daily(DAY,digest,anchor_utc=NOW)
+                    jobs=[db.execute("""SELECT job_id FROM jobs_v2
+                        WHERE epoch_id=? AND account_ordinal=1 AND page_seq=?""",
+                        (daily,seq)).fetchone()[0] for seq in (1,2)]
+                    first=dict(observed_at=NOW,ordered_ids=["101"],
+                        next_cursor="integrity_next",terminal_basis="continued",
+                        source_evidence_id="integrity-source",
+                        raw_receipt_id="integrity-raw",source_digest="a"*64)
+                    store.bind_daily(jobs[0],"integrity-first",
+                        build_request_spec("A","nail_001"),at=NOW)
+                    store.commit_daily_page(jobs[0],"integrity-first",**first)
+                    store.bind_daily(jobs[1],"integrity-second",
+                        build_request_spec("C","nail_001",after="integrity_next"),at=NOW)
+                    store.commit_daily_page(jobs[1],"integrity-second",
+                        observed_at=NOW,ordered_ids=["102"],
+                        next_cursor="integrity_third",terminal_basis="continued",
+                        source_evidence_id="integrity-source-2",
+                        raw_receipt_id="integrity-raw-2",source_digest="b"*64)
+                    db.execute("UPDATE "+table+" SET "+field+"=? WHERE job_id=?",
+                        (payload,jobs[1]))
+                    if field=="chain_hash":
+                        db.execute("""UPDATE cursor_checkpoints SET chain_hash=?
+                            WHERE epoch_id=? AND account_key='KR_001'
+                              AND stream='daily'""",(payload,daily))
+                    before=db.total_changes
+                    with self.assertRaisesRegex(EpochError,
+                            "latest (chain digest|request binding) differs"):
+                        store.commit_daily_page(jobs[0],"integrity-first",**first)
+                    self.assertEqual(db.total_changes,before)
+                finally:
+                    db.close()
+
     def test_history_checkpoint_not_reset_on_new_kst_day(self):
         first=self.job(1,1)
         self.store.bind_daily(first,"req-seed",build_request_spec("A","nail_001"),at=NOW)
