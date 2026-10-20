@@ -1,3 +1,5 @@
+> **WINDOWS CI CHECKPOINT (2026-10-20):** Commit `f0835215978879fa46f2adde4862efd63758a639` added a new `offline-windows` job to `.github/workflows/p6-runtime-integration-offline.yml` (Windows latest, Python 3.11, `compileall -q raw_v2 tests`, `python tests/run_offline.py` with blocked socket connections), while retaining Ubuntu. GitHub Actions run **39345203931**: Ubuntu `offline-runtime` job 118376014399 **SUCCESS**; Windows job **118376014666** has passed setup/compile and is **still running full offline suite** at this checkpoint; **do not mark Windows verified before final job conclusion and log check**. Other workflows for code SHA: Three API #39345203940 SUCCESS; C Contract #39345203945 SUCCESS. No Meta/production access, no merge. Next: inspect Windows job end status and logs; if failed/timed out, isolate actual causes without weakening socket block, then update documentation at verified milestone.
+
 # P6 CURRENT STATUS — 2026-10-20 (supersedes historical entries below)
 
 - **Branch:** `codex/p6-readiness-hardening-20261019` · **PR:** Draft #6 · **main merge:** NOT approved.
