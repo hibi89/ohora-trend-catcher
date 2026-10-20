@@ -409,5 +409,28 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertFalse(self.audit()["synthetic_cutoff_verified"])
 
 
+    def test_staging_identical_fixture_twice_is_idempotent(self):
+        checkpoint=self.fixture.store.history_checkpoint(self.history,"KR_001")
+        page=self.fixture.store.schedule_one_history_page(self.history,"KR_001","A",at=NOW)
+        request="req-stage-same"
+        self.fixture.store.bind_history(
+            page["job_id"],request,
+            build_request_spec("A","nail_001",after=checkpoint["cursor"]),at=NOW)
+        kwargs=dict(observed_at=NOW,posts=self.posts([7301,7302],[360,366]),
+                    next_cursor=None,terminal_basis="verified_terminal")
+        first=self.bridge.stage_capture(page["job_id"],request,**kwargs)
+        second=self.bridge.stage_capture(page["job_id"],request,**kwargs)
+        self.assertEqual(first["status"],"staged")
+        self.assertEqual(second["status"],"already_staged")
+        self.assertEqual(self.fixture.db.execute(
+            "SELECT COUNT(*) FROM offline_history_capture WHERE job_id=?",
+            (page["job_id"],)).fetchone()[0],1)
+        self.assertEqual(self.mirror.db.execute(
+            "SELECT COUNT(*) FROM page_receipts WHERE request_id=?",
+            ("history."+page["job_id"],)).fetchone()[0],0)
+        self.bridge.reconcile_one(page["job_id"])
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+
+
 if __name__=="__main__":
     unittest.main()
