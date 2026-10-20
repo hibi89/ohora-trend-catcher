@@ -189,5 +189,26 @@ class SyntheticHistoryCutoffAuditTests(unittest.TestCase):
         self.assertEqual(result["coverage_status"],"insufficient_evidence")
 
 
+    def test_duplicate_raw_receipt_id_fails_closed(self):
+        first=self.append(self.history,"receipt-first",
+            self.posts([6101,6102,6103,6104],[300,320,340,350]),
+            next_cursor="receipt_next")
+        second=self.append(self.history,"receipt-second",
+            self.posts([6105,6106],[360,366]),
+            next_cursor=None,terminal="verified_terminal")
+        self.assertTrue(self.audit()["synthetic_cutoff_verified"])
+        receipt=self.fixture.db.execute(
+            "SELECT raw_receipt_id FROM page_evidence_v2 WHERE job_id=?",
+            (first["job_id"],)).fetchone()[0]
+        self.fixture.db.execute(
+            "UPDATE page_evidence_v2 SET raw_receipt_id=? WHERE job_id=?",
+            (receipt,second["job_id"]))
+        before=(self.fixture.db.total_changes,self.mirror.db.total_changes)
+        report=self.audit()
+        self.assertFalse(report["synthetic_cutoff_verified"])
+        self.assertFalse(report["production_coverage_verified"])
+        self.assertEqual((self.fixture.db.total_changes,self.mirror.db.total_changes),before)
+
+
 if __name__=="__main__":
     unittest.main()
