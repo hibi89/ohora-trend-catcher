@@ -173,6 +173,19 @@ class OfflineHistoryP1P2Tests(unittest.TestCase):
             "already_committed",
         )
 
+    def test_replay_rejects_checkpoint_rolled_back_to_older_done_page(self):
+        """A plausible old receipt cannot disguise a rolled-back recovery head."""
+        self._commit_one_offline_history_page()
+        self.fx.db.execute(
+            "UPDATE cursor_checkpoints SET page_seq=0 "
+            "WHERE epoch_id=? AND account_key=? AND stream='history'",
+            (self.history,"KR_001"),
+        )
+        before=self.fx.db.total_changes
+        with self.assertRaises(OfflineEpochContractError):
+            self.projector.project_history_page(self.job["job_id"])
+        self.assertEqual(self.fx.db.total_changes,before)
+
     def test_replay_rejects_missing_history_checkpoint(self):
         self._commit_one_offline_history_page()
         self.fx.db.execute(
