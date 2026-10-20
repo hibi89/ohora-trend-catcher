@@ -24,6 +24,7 @@ on:
       - 'tests/test_three_api_runtime_contract.py'
       - 'tests/test_three_api_p2_clone_migration.py'
       - 'tests/test_three_api_p2_observations.py'
+      - 'tests/test_three_api_reel_metrics.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
       - 'raw_v2/three_api_daily_orchestrator.py'
@@ -70,6 +71,7 @@ on:
       - 'tests/test_three_api_runtime_contract.py'
       - 'tests/test_three_api_p2_clone_migration.py'
       - 'tests/test_three_api_p2_observations.py'
+      - 'tests/test_three_api_reel_metrics.py'
       - 'tests/test_three_api_raw_writer.py'
       - 'tests/test_three_api_transport.py'
       - 'raw_v2/three_api_daily_orchestrator.py'
@@ -131,6 +133,7 @@ jobs:
             tests/test_three_api_epoch_contract_projection.py \
             tests/test_three_api_history_contract_offline.py \
             tests/test_three_api_p2_observations.py \
+            tests/test_three_api_reel_metrics.py \
             tests/test_three_api_p2_clone_migration.py \
             tests/test_three_api_transport.py
       - name: Run complete offline regression suite with sockets blocked
