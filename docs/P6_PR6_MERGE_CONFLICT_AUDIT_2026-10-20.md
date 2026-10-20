@@ -20,3 +20,19 @@
 - `STATUS.md`/`HANDOFF.md`의 최상위 동결 공지와 상세 이력 양쪽 보존, 동결 원문 blob 동일성 재검증.
 
 **판정:** 8개 점검 완료, 충돌 원인 범주 식별. 실제 충돌 파일·hunk 확정 및 충돌 해결은 미완료. 추가 운영 권한 사용 없음.
+
+## 2026-10-20 후속 점검: 공통 조상 기준 3-way 변경 경로 확인
+
+공통 조상: `bcdb84b640738fdfceaf833dd831a26d401a2427`. PR #6 최신 조회 `mergeable=false`, `mergeable_state=dirty` (HEAD `c193076`). 실제 `git merge-tree`/worktree 실행은 **아직 수행하지 못했으므로** 아래는 확정 conflict hunk가 아니라 3-way 충돌 후보 목록이다.
+
+| 경로 | 공통 조상 | main | p6 | 해석 |
+|---|---|---|---|---|
+| `AGENTS.md` | `6a40d95` | `a5aff41` | `a5aff41` | 양쪽 최종 내용 동일; 해결 대상 아님 |
+| `README.md` | `e4fee14` | `49f45ba` | `49f45ba` | 양쪽 최종 내용 동일; 해결 대상 아님 |
+| `HANDOFF.md` | `24b210b` | `e3c833e` | `a78d696` | 양쪽 별도 변경; 충돌 가능 |
+| `STATUS.md` | `838e9e8` | `43b7cb7` | `575666b` | 양쪽 별도 변경; 충돌 가능 |
+| `.github/workflows/p6-frozen-design-guard.yml` | 없음 | `be386bc` | `c662c8f` | **양쪽 독립 신규 생성(add/add)**; 내용 다름, 충돌 우선 후보 |
+
+**확인된 실질 위험 3경로:** `HANDOFF.md`, `STATUS.md`, `.github/workflows/p6-frozen-design-guard.yml`. 특히 마지막 파일은 공통 조상에 없고 양쪽에서 서로 다른 내용으로 신규 생성된 것이므로 통상 Git merge에서 add/add conflict가 발생한다. 이 검사는 main/p6의 세 버전 blob을 직접 비교한 결과다.
+
+**보존 원칙:** guard workflow는 main의 frozen SHA 검증과 p6의 CI 변경을 병합할 때 함께 유지. STATUS/HANDOFF는 main의 동결 최상위 공지와 p6의 개발·테스트 이력을 모두 유지. 동결 설계 원문 및 CODEOWNERS 수정 금지. GitHub 병합은 별도 승인 필요.
