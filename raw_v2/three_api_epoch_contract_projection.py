@@ -16,7 +16,9 @@ import sqlite3
 from three_api_epochs import ThreeApiEpochStore, EpochError, _hash
 from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter, RawWriteError
-from three_api_runtime_contract import digest_sha256, validate_raw_receipt
+from three_api_runtime_contract import (
+    digest_sha256, sanitize_meta_response, validate_raw_receipt,
+)
 
 
 class OfflineEpochContractError(ValueError):
@@ -91,12 +93,21 @@ class OfflineEpochContractProjector:
                 "+00:00", "Z"
             )
             if (source["received_at"] != actual_at
+                    or source["http_status"] != record.response_http_status
+                    or not 200 <= source["http_status"] < 300
+                    # Retained pre-normalization response must actually be
+                    # the provenance of this successful CaptureRecord. Two
+                    # individually valid digests do not prove linkage.
+                    or sanitize_meta_response(source["safe_body"]) !=
+                    record.sanitized_response
                     or record.cursor_state.source_digest !=
                     digest_sha256(record.sanitized_response)
                     or record.cursor_state.current_cursor != cursor
-                    or record.cursor_state.next_cursor is None
-                    and len(record.normalized_posts) >= 4):
-                raise OfflineEpochContractError("Response clock or cursor proof invalid")
+                    or (record.cursor_state.next_cursor is None
+                        and len(record.normalized_posts) >= 4)):
+                raise OfflineEpochContractError(
+                    "Retained response and CaptureRecord disagree"
+                )
             stage = "raw_receipt_reread"
             receipt = self.raw.get_raw_receipt(record.capture_id)
             if receipt is None:
