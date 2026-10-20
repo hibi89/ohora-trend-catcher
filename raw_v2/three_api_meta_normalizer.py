@@ -21,7 +21,7 @@ _MEDIA_ID = re.compile(r"[0-9]{1,64}\Z")
 _MAX_CHILDREN = 20
 
 
-def _normalize_children(post):
+def _normalize_children(post, *, allow_partial=False):
     """Return allowlisted children in original order, or None if not supplied."""
     if "children" not in post:
         return None
@@ -36,8 +36,10 @@ def _normalize_children(post):
     paging = children.get("paging", {})
     if not isinstance(paging, dict):
         raise ValueError("Invalid carousel child paging evidence")
-    # A paged carousel remains PARTIAL, but already received child rows are
-    # still valuable. Completeness is recorded by the capture contract.
+    # Existing source/mirror callers intentionally reject partial pages:
+    # only the new immutable Capture/RAW contract may opt into preservation.
+    if (paging.get("next") or paging.get("has_next") is True) and not allow_partial:
+        raise ValueError("Partial carousel child page requires capture opt-in")
     seen = {post["id"]}
     normalized = []
     for child in items:
@@ -60,7 +62,7 @@ def _normalize_children(post):
     return normalized
 
 
-def normalize_meta_page(payload, *, requested_cursor=None):
+def normalize_meta_page(payload, *, requested_cursor=None, allow_partial_children=False):
     if not isinstance(payload, dict) or "error" in payload:
         raise ValueError("Meta error or invalid response")
     # Business Discovery may wrap media in business_discovery.media.
@@ -85,7 +87,7 @@ def normalize_meta_page(payload, *, requested_cursor=None):
             if numeric in post and post[numeric] is not None and (type(post[numeric]) is not int or post[numeric] < 0):
                 raise ValueError("Invalid engagement count")
         record = {key: post[key] for key in FIELDS if key in post}
-        children = _normalize_children(post)
+        children = _normalize_children(post, allow_partial=allow_partial_children)
         if children is not None:
             record["children"] = children
         cleaned.append(record)
