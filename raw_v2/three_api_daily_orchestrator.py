@@ -74,6 +74,13 @@ class OfflineDailyOrchestrator:
         self.mirror = None
         try:
             self.coordinator = Coordinator(paths[0])
+            # Only an offline manual fairness cursor. This does not authorize
+            # HTTP, change any per-page A/B/C assignment, or reset a quota.
+            self.coordinator.db.execute("""CREATE TABLE IF NOT EXISTS
+              offline_serial_turn (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                last_lane TEXT NOT NULL CHECK(last_lane IN ('A','B','C'))
+              )""")
             self.evidence = PageEvidenceStore(self.coordinator)
             self.ledger = DailyGapLedger(paths[1])
             self.daily = DailyEvidenceProjector(
@@ -559,23 +566,40 @@ class OfflineDailyOrchestrator:
             return {"status":"front_blocked","lane":lane}
 
     def step_serial(self, *, now, lane_order=("A", "B", "C")):
-        """Run at most one synthetic page, trying eligible lanes sequentially.
+        """One manual synthetic page maximum; rotate lanes across restarts.
 
-        Preserve the frozen per-job A/B/C assignments. A halted lane can be
-        skipped without spawning parallel requests or resetting its quota.
-        A missing fixture or recovery failure is NOT a license to try another
-        lane: the failure remains visible for operator review.
+        Rotate the first lane only after a confirmed page commit. Failed
+        fixtures, recovery errors and unavailable lanes must not advance the
+        durable fairness cursor. Never invent a new job assignment or bypass a
+        predecessor's page/cursor proof. This is NOT an HTTP scheduler.
         """
         if (not isinstance(lane_order, (tuple, list))
                 or len(lane_order) != len(LANES)
+                or any(type(lane) is not str for lane in lane_order)
                 or set(lane_order) != set(LANES)):
             raise OfflineDailyScheduleError("Exactly three unique lanes required")
         if not isinstance(now, datetime) or now.tzinfo is None:
             raise OfflineDailyScheduleError("Timezone-aware time required")
-        for lane in lane_order:
+        order = tuple(lane_order)
+        row = self.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone()
+        if row is not None:
+            # Custom orders remain deterministic; do not hard-code A/B/C here.
+            pivot = order.index(row["last_lane"]) + 1
+            order = order[pivot:] + order[:pivot]
+        for lane in order:
             result = self.step(lane, now=now)
             if result["status"] == "front_lane_unavailable":
                 continue
+            if result["status"] in ("front_committed", "applied"):
+                self.coordinator.db.execute(
+                    """INSERT INTO offline_serial_turn(singleton,last_lane)
+                       VALUES (1,?)
+                       ON CONFLICT(singleton) DO UPDATE
+                       SET last_lane=excluded.last_lane""",
+                    (lane,),
+                )
             return {"selected_lane": lane, **result}
         return {"status": "all_lanes_unavailable", "selected_lane": None}
 
