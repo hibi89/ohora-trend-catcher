@@ -1,3 +1,5 @@
+> **2026-10-20 P6 최종 오프라인 CI 판정:** Runtime Integration Offline run `39403014275` commit `fce1c0a` SUCCESS (Linux 전체 suite + Windows orchestrator/roster/report/remaining 4개 그룹, 5/5 jobs SUCCESS). Three API run `39402632062` SUCCESS; RAW v2 run `39402626109` SUCCESS; Frozen Design Guard run `39403053579` SUCCESS. **P1~P5 오프라인 CI 검증 통과**. 실제 Meta 호출·운영 DB 검증·프로덕션 가동·main 병합은 별도 승인 전까지 미수행이며 운영 준비 완료 판정과 구분. 이전 queued 표기는 당시 이력임.
+
 > **2026-10-20 P6 N=3 Runtime 통합 검증 가시성:** Linux 전체 오프라인 실행 전에 그룹 인벤토리 검사 `8058a43`, Windows 각 그룹 실행 전에 인벤토리 검사 `5bef366`, CI 테스트 산출 pycache 방지 `fce1c0a`. 기존 Three API `39402632062` SUCCESS, RAW `39402626109` SUCCESS, Frozen `39402632123` SUCCESS; 최신 Runtime workflow queued·미검증. Superseded cancelled run은 성공 아님. 운영 DB/Meta/p6 main 미변경.
 
 > **2026-10-20 P6 N=3 CI 병목 정리:** RAW offline workflow 동일 ref 이전 실행 취소 `acb20ad`; Three API workflow 동일 ref 이전 실행 취소 `79ce1e5`; Frozen Guard 동일 ref 이전 실행 취소 `760698a`. CI concurrency 그룹은 workflow+ref별 격리. 기존 Three API `39402283772` (`1c64d00`) SUCCESS 및 Frozen `39402283769` SUCCESS, 최신 전체 Runtime/RAW/Frozen 검증은 queued·미확인. 의도된 superseded 취소는 테스트 PASS가 아니다. Meta/운영 DB/p6 main 미변경.
