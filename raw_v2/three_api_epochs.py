@@ -900,10 +900,13 @@ class ThreeApiEpochStore:
                     or latest_proof[3] is None):
                 raise EpochError("History replay chain binding differs")
             if latest_proof[1]>1:
-                parent=self.db.execute("""SELECT e.chain_hash FROM page_evidence_v2 e
-                    WHERE e.job_id=?""",(latest_proof[2],)).fetchone()
+                parent=self.db.execute("""SELECT e.chain_hash,e.cursor_out
+                    FROM page_evidence_v2 e WHERE e.job_id=?""",
+                    (latest_proof[2],)).fetchone()
                 if parent is None:
                     raise EpochError("History replay parent chain missing")
+                if latest_proof[4]!=parent[1]:
+                    raise EpochError("History replay predecessor cursor differs")
                 parent_hash=parent[0]
             else:
                 # A later daily front may share a cursor string; the original
