@@ -624,6 +624,31 @@ class P3EpochTests(unittest.TestCase):
             "SELECT COUNT(*) FROM page_evidence_v2 WHERE job_id=?",
             (page["job_id"],)).fetchone()[0],0)
 
+    def test_history_replay_rejects_missing_latest_parent_link_without_writes(self):
+        history=self.open_history_fixture()
+        first=self.store.schedule_one_history_page(history,"KR_001","A",at=NOW)
+        self.store.bind_history(first["job_id"],"missing-hparent-1",
+            build_request_spec("A","nail_001",after="history_first_cursor"),at=NOW)
+        args=dict(observed_at=NOW,ordered_ids=["501","502","503","504"],
+            next_cursor="history_second_cursor",terminal_basis="continued",
+            source_evidence_id="missing-hparent-e1",raw_receipt_id="missing-hparent-r1",
+            source_digest="a"*64)
+        self.store.commit_history_page(first["job_id"],"missing-hparent-1",**args)
+        second=self.store.schedule_one_history_page(history,"KR_001","B",at=NOW)
+        self.store.bind_history(second["job_id"],"missing-hparent-2",
+            build_request_spec("B","nail_001",after="history_second_cursor"),at=NOW)
+        self.store.commit_history_page(second["job_id"],"missing-hparent-2",
+            observed_at=NOW,ordered_ids=["505"],next_cursor=None,
+            terminal_basis="verified_terminal",
+            source_evidence_id="missing-hparent-e2",raw_receipt_id="missing-hparent-r2",
+            source_digest="b"*64)
+        self.db.execute("UPDATE jobs_v2 SET parent_job_id=NULL WHERE job_id=?",
+                        (second["job_id"],))
+        before=self.db.total_changes
+        with self.assertRaises(EpochError):
+            self.store.commit_history_page(first["job_id"],"missing-hparent-1",**args)
+        self.assertEqual(self.db.total_changes,before)
+
     def test_history_replay_conflict_cannot_mutate_verified_checkpoint(self):
         """Conflicting duplicate receipts must fail without losing old proof."""
         history=self.open_history_fixture()
