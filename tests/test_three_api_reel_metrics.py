@@ -113,8 +113,10 @@ class ReelMetricTests(unittest.TestCase):
                 t = FakeTransport(replace(response, payload=body))
                 with self.assertRaises(ContractExecutionError):
                     ThreeApiContractExecutor(t, self.capture, self.writer).execute(request)
+                # A rejected response must not even create the receipt table.
                 self.assertEqual(self.db.execute(
-                    "SELECT COUNT(*) FROM three_api_contract_receipts"
+                    "SELECT COUNT(*) FROM sqlite_master "
+                    "WHERE type='table' AND name='three_api_contract_receipts'"
                 ).fetchone()[0], 0)
 
     def test_legacy_request_keeps_old_metric_field_evidence(self):
