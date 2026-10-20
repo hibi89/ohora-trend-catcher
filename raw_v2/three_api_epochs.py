@@ -527,7 +527,8 @@ class ThreeApiEpochStore:
                     any(not isinstance(v,str) or not v.isdecimal() or len(v)>64
                         for v in latest_ids) or len(set(latest_ids))!=len(latest_ids)):
                 raise EpochError("Daily replay media evidence invalid")
-            if (latest[5]=="continued" and latest[0] is None) or (
+            if latest[5] not in ("continued","verified_terminal") or (
+                    latest[5]=="continued" and latest[0] is None) or (
                     latest[5]=="verified_terminal" and
                     (latest[0] is not None or len(latest_ids)>=4)):
                 raise EpochError("Daily replay latest terminal proof invalid")
