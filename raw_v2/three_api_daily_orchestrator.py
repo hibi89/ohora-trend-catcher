@@ -558,6 +558,27 @@ class OfflineDailyOrchestrator:
             self.coordinator.observe_usage(lane,None,now=now)
             return {"status":"front_blocked","lane":lane}
 
+    def step_serial(self, *, now, lane_order=("A", "B", "C")):
+        """Run at most one synthetic page, trying eligible lanes sequentially.
+
+        Preserve the frozen per-job A/B/C assignments. A halted lane can be
+        skipped without spawning parallel requests or resetting its quota.
+        A missing fixture or recovery failure is NOT a license to try another
+        lane: the failure remains visible for operator review.
+        """
+        if (not isinstance(lane_order, (tuple, list))
+                or len(lane_order) != len(LANES)
+                or set(lane_order) != set(LANES)):
+            raise OfflineDailyScheduleError("Exactly three unique lanes required")
+        if not isinstance(now, datetime) or now.tzinfo is None:
+            raise OfflineDailyScheduleError("Timezone-aware time required")
+        for lane in lane_order:
+            result = self.step(lane, now=now)
+            if result["status"] == "front_lane_unavailable":
+                continue
+            return {"selected_lane": lane, **result}
+        return {"status": "all_lanes_unavailable", "selected_lane": None}
+
     def step(self, lane, *, now, stage_only=False):
         """One explicit fixture-only step; never runs autonomously or live.
 
