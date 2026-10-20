@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 
@@ -69,6 +70,31 @@ class SerialCatchupTests(unittest.TestCase):
         self.assertEqual(self.runner.ledger.db.execute(
             "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'"
         ).fetchone()[0], 1)
+
+    def test_serial_catchup_fallback_reconciles_roster_only_once(self):
+        self.runner.coordinator.observe_usage("A", 85, now=NOW)
+        self.runner.coordinator.observe_usage("B", 85, now=NOW)
+        with mock.patch.object(
+            self.runner, "reconcile", wraps=self.runner.reconcile
+        ) as reconcile:
+            result = self.runner.step_serial(now=NOW)
+        self.assertEqual(result["selected_lane"], "C")
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(reconcile.call_count, 1)
+        self.assertEqual(self.runner.mirror.summary()["raw_posts"], 4)
+
+    def test_serial_recovery_failure_stops_before_any_lane_dispatch(self):
+        with mock.patch.object(
+            self.runner, "reconcile", side_effect=RuntimeError("synthetic corrupt evidence")
+        ) as reconcile:
+            result = self.runner.step_serial(now=NOW)
+        self.assertEqual(result["status"], "recovery_blocked")
+        self.assertEqual(result["selected_lane"], "A")
+        self.assertEqual(reconcile.call_count, 1)
+        self.assertEqual(self.runner.mirror.summary()["raw_posts"], 0)
+        self.assertEqual(self.runner.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'"
+        ).fetchone()[0], 0)
 
     def test_serial_catchup_holds_when_all_three_quota_blocked(self):
         for lane in ("A", "B", "C"):
