@@ -110,6 +110,8 @@ def audit_synthetic_history_cutoff(epochs: ThreeApiEpochStore,
         if not rows or any(row[2]!="done" for row in rows):
             return result
         seen=set()
+        seen_raw_receipts=set()
+        seen_source_ids=set()
         oldest=None
         previous_job=None
         last_published=None
@@ -124,6 +126,10 @@ def audit_synthetic_history_cutoff(epochs: ThreeApiEpochStore,
                     raw_id!="history."+job_id or
                     terminal not in ("continued","verified_terminal")):
                 return result
+            if raw_id in seen_raw_receipts or source_id in seen_source_ids:
+                return result
+            seen_raw_receipts.add(raw_id)
+            seen_source_ids.add(source_id)
             bound=epochs.db.execute(
                 "SELECT request_id,requested_cursor FROM request_bindings_v2 "
                 "WHERE job_id=?",(job_id,)
