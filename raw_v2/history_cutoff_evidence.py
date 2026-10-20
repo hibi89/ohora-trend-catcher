@@ -27,12 +27,14 @@ def assess_cutoff_evidence(*, anchor, cutoff, pages, rooted):
     prior = None
     oldest = None
     for index, page in enumerate(pages):
-        if not isinstance(page, dict) or not page.get("receipt"):
+        if not isinstance(page, dict) or not page.get("receipt") or not isinstance(page.get("receipt"), str):
             return {"verified": False, "reason": "missing_receipt"}
         incoming = page.get("cursor_in")
-        if index and incoming != prior:
+        if (index == 0 and incoming != "root") or (index and incoming != prior):
             return {"verified": False, "reason": "cursor_gap"}
         outgoing = page.get("cursor_out")
+        if outgoing is not None and (not isinstance(outgoing, str) or not outgoing):
+            return {"verified": False, "reason": "invalid_cursor"}
         if index < len(pages) - 1 and not outgoing:
             return {"verified": False, "reason": "cursor_gap"}
         stamps = page.get("published_at")
