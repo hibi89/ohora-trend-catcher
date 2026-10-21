@@ -230,6 +230,65 @@ class LiveSerialStepGateTests(unittest.TestCase):
             finally:
                 second.db.close()
 
+    def test_quota_cooldown_boundary_requires_explicit_reset(self):
+        """Passing 65 minutes alone must not authorize fresh HTTP."""
+        import tempfile
+        from pathlib import Path
+        from datetime import timedelta
+        from three_api_coordinator import Coordinator
+        from three_api_job_binding import JobRequestBindingStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(Path(directory) / "cooldown-boundary.sqlite")
+            try:
+                coordinator.seed()
+                JobRequestBindingStore(coordinator)
+                now = self.kwargs["requested_at"]
+                self.assertTrue(coordinator.observe_usage("A", 85, now=now))
+                at_boundary = now + timedelta(minutes=65)
+                self.assertIsNone(
+                    coordinator.lease_for_dispatch("A", now=at_boundary))
+                self.assertFalse(
+                    coordinator.reset_after_verified_cooldown(
+                        "A", now=now + timedelta(minutes=64)))
+                self.assertIsNone(
+                    coordinator.lease_for_dispatch("A", now=at_boundary))
+                self.assertTrue(
+                    coordinator.reset_after_verified_cooldown(
+                        "A", now=at_boundary))
+                self.assertIsNotNone(
+                    coordinator.lease_for_dispatch("A", now=at_boundary))
+            finally:
+                coordinator.db.close()
+
+    def test_quota_halt_on_one_lane_preserves_other_lanes(self):
+        """85% stop is lane-local and cannot block unrelated caller IDs."""
+        import tempfile
+        from pathlib import Path
+        from three_api_coordinator import Coordinator
+        from three_api_job_binding import JobRequestBindingStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(Path(directory) / "lane-isolation.sqlite")
+            try:
+                coordinator.seed()
+                JobRequestBindingStore(coordinator)
+                now = self.kwargs["requested_at"]
+                self.assertTrue(coordinator.observe_usage("B", None, now=now))
+                self.assertIsNone(coordinator.lease_for_dispatch("B", now=now))
+                a = coordinator.lease_for_dispatch("A", now=now)
+                c = coordinator.lease_for_dispatch("C", now=now)
+                self.assertIsNotNone(a)
+                self.assertIsNotNone(c)
+                self.assertNotEqual(a["lane"], c["lane"])
+                state = coordinator.db.execute(
+                    "SELECT halted,reason FROM lanes WHERE lane='B'"
+                ).fetchone()
+                self.assertEqual((state["halted"], state["reason"]),
+                                 (1, "missing_usage"))
+            finally:
+                coordinator.db.close()
+
     def test_blocked_lane_recovery_does_not_dispatch(self):
         """A quota-halted lane must never cause a fresh HTTP dispatch."""
         from unittest.mock import Mock, patch
