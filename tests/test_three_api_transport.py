@@ -146,6 +146,27 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertNotIn("SYNTHETIC_NOT_A_REAL_TOKEN", calls[0].full_url)
 
+    def test_meta_400_persists_only_safe_integer_error_codes(self):
+        """Offline fake HTTP; never retain Graph error messages or secrets."""
+        from urllib.error import HTTPError
+        from io import BytesIO
+        from email.message import Message
+        def sender(request, *, timeout):
+            body = json.dumps({"error": {
+                "code": 100, "error_subcode": 33,
+                "message": "SECRET_TOKEN_SHOULD_NOT_SURVIVE",
+                "fbtrace_id": "PRIVATE_TRACE",
+            }}).encode()
+            raise HTTPError(request.full_url, 400, "Bad Request",
+                            Message(), BytesIO(body))
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "http_error")
+        self.assertIn("code=100", ctx.exception.safe_message)
+        self.assertIn("subcode=33", ctx.exception.safe_message)
+        self.assertNotIn("SECRET_TOKEN", ctx.exception.safe_message)
+        self.assertNotIn("PRIVATE_TRACE", ctx.exception.safe_message)
+
     def test_default_graph_gate_blocks_before_sender(self):
         calls = []
         client = GraphHTTPClient(sender=lambda *_a, **_k: calls.append(1))
