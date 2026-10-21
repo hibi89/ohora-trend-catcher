@@ -38,6 +38,31 @@ class LiveSerialStepGateTests(unittest.TestCase):
             self.runner.step([{} for _ in range(294)], **{
                 **self.kwargs, "caller_ids": {"A": "1"}})
 
+    def test_real_sqlite_quota_halt_blocks_dispatch_and_recovery_lease(self):
+        """Exercise persisted 85% gate, not a mocked coordinator."""
+        import tempfile
+        from pathlib import Path
+        from three_api_coordinator import Coordinator
+        from three_api_job_binding import JobRequestBindingStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(Path(directory) / "offline-quota.sqlite")
+            try:
+                coordinator.seed()
+                JobRequestBindingStore(coordinator)
+                now = self.kwargs["requested_at"]
+                self.assertTrue(coordinator.observe_usage("A", 85, now=now))
+                lane = coordinator.db.execute(
+                    "SELECT halted,reason FROM lanes WHERE lane='A'"
+                ).fetchone()
+                self.assertEqual(lane["halted"], 1)
+                self.assertEqual(lane["reason"], "usage_limit")
+                self.assertIsNone(coordinator.lease_for_dispatch("A", now=now))
+                self.assertIsNone(coordinator.lease_for_recovery("A", now=now))
+                self.assertIsNotNone(coordinator.lease_for_dispatch("B", now=now))
+            finally:
+                coordinator.db.close()
+
     def test_blocked_lane_recovery_does_not_dispatch(self):
         """A quota-halted lane must never cause a fresh HTTP dispatch."""
         from unittest.mock import Mock, patch
