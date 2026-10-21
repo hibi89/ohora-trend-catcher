@@ -104,7 +104,7 @@ def _read_gate(workspace: Path, today: str, now: datetime):
 
 
 def tick(*, source: Path, workspace: Path, credentials_dir: Path,
-         state_file: Path, now: datetime | None = None, max_pages: int = 1,
+         state_file: Path, now: datetime | None = None, max_pages: int = 3,
          live: bool = False, confirm_owner_approval: bool = False) -> dict:
     if type(max_pages) is not int or not 1 <= max_pages <= 3:
         raise ValueError("Per-tick page cap must be 1..3")
@@ -155,7 +155,7 @@ def main(argv=None) -> int:
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--credentials-dir", type=Path, required=True)
     parser.add_argument("--state-file", type=Path, required=True)
-    parser.add_argument("--max-pages", type=int, default=1)
+    parser.add_argument("--max-pages", type=int, default=3)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--confirm-owner-approval", action="store_true")
     args = parser.parse_args(argv)

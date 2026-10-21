@@ -78,6 +78,9 @@ class N8nTickTests(unittest.TestCase):
                        if n["type"] == "n8n-nodes-base.executeCommand")
         self.assertRegex(command, re.compile(r"p6_n8n_tick\.ps1", re.I))
         self.assertTrue(command.isascii())
+        launcher = (Path(__file__).parents[1] / "raw_v2" /
+                    "p6_n8n_tick.ps1").read_text(encoding="utf-8")
+        self.assertRegex(launcher, r"--max-pages\s+3")
         self.assertNotRegex(command, re.compile(r"EA[A-Za-z0-9]{35,}"))
 
 

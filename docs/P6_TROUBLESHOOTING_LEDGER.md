@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-045 — 2026-10-22 · n8n tick 처리량을 정책 상한 3페이지로 조정
+- **근거:** 실제 수동 1페이지 실행과 n8n 스케줄 1페이지 실행이 성공했고, 이후 연속 스케줄에서도 추가 페이지가 영속 수집됐다. n8n이 계속 작동 중인데 tick당 1페이지만 실행하면 전체 294계정 목표가 불필요하게 늘어진다.
+- **수정:** adapter 기본값과 PowerShell launcher를 tick당 최대 3페이지로 설정. n8n Schedule Trigger는 매 5분이며, P6 coordinator는 각 response 뒤 85% 사용량/쿨다운 상태를 확인하고 제한에 도달하면 즉시 중단한다. Cursor recovery는 이 자동 tick에 포함되지 않는다.
+- **검증:** `tests/test_three_api_n8n_tick.py`에서 launcher 상한 3을 확인하고 targeted 76개 오프라인 테스트를 재실행. 현재 확인 시점 기준 오늘 3페이지 / 12개 신규 게시물 관측, 106 durable receipts / 424 observations / 414 unique posts. B/C는 계속 `live_pending_usage` hold, A만 이용 가능.
+- **경계:** 294계정 전체 수집과 B/C 사용량 확인은 여전히 미완료. 매 tick 최대 3페이지이지 한 번에 무제한 수집이 아니다. Legacy 49건과 cursor recovery는 미수정/미실행.
+
 ### P6-044 — 2026-10-22 · n8n KST scheduler와 P6 단일 tick 연결 준비
 - **변경:** `src/collection_schedule.py`를 현재 작업 브랜치에 반영하고, `raw_v2/three_api_n8n_tick.py`가 일정 판단·읽기 전용 coordinator quota/hold 확인·명시적 live gate 뒤 기존 `run_manual_pilot`을 호출하도록 연결했다. PowerShell launcher와 비활성 5분 n8n workflow export를 추가했다. n8n CLI 테스트 실행을 위해 schedule trigger와 함께 `Execute Workflow Trigger`도 둔다.
 - **안전:** 각 tick은 기본 1페이지, 상한 3페이지다. Unknown Capture intent는 `manual_review`; B/C hold/cooldown은 날짜가 바뀌어도 이어진다. 토큰은 파일에서 프로세스 메모리로만 로드되고 출력/상태파일에는 기록되지 않는다. 시작 기준시각은 커밋된 Capture→RAW 성공 결과의 검증된 응답시각만 원자적으로 저장한다. cursor recovery는 자동 스케줄 대상이 아니며 별도 승인과 3페이지 상한을 유지한다.
@@ -145,7 +151,8 @@
 | P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
 | P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C capture-only recovery later completed under P6-040; n8n exports inactive |
 | P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
-| P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + tick당 최대 1페이지 adapter/export; 75/75 offline PASS, live/n8n 미검증 |
+| P6-045 | 자동 수집 처리량 | 검증 후에도 n8n tick이 1페이지만 처리해 진행이 지연됨 | 페이지당 quota/cooldown gate를 유지하며 tick 상한 3으로 상향; 76/76 offline PASS, 실제 스케줄 tick 증거 확인 |
+| P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
 | P6-042 | 무효 커서 재앵커 인수인계 | 기존 3-page planner가 이미 구현돼 있었으나 신규 요구를 top-level handoff/테스트 인덱스에 명시하지 않음 | invalid cursor → resume_required → known-ID overlap → replacement cursor 오프라인 회귀 추가; production runner/live recovery 미구현 |
 | P6-041 | Bounded live progress / n8n setup | A/B/C gates diverged after safe pilot; n8n CLI/runtime unavailable | bounded A batch 3/3 committed, P6 total 103/412; B/C holds unchanged; Docker service start denied |

@@ -24,7 +24,7 @@
         "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$script=Get-ChildItem -Path (Join-Path $env:USERPROFILE 'OneDrive\\Desktop\\*\\ohora-trend-catcher\\raw_v2\\p6_n8n_tick.ps1') -File | Select-Object -First 1; if(-not $script){exit 2}; & $script.FullName\""
       },
       "id": "p6-bounded-runner",
-      "name": "P6 read gates and run at most one page",
+      "name": "P6 read gates and run at most three pages",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [500, 300]
@@ -32,10 +32,10 @@
   ],
   "connections": {
     "Every 5 minutes (KST gate inside P6)": {
-      "main": [[{"node": "P6 read gates and run at most one page", "type": "main", "index": 0}]]
+      "main": [[{"node": "P6 read gates and run at most three pages", "type": "main", "index": 0}]]
     },
     "Manual n8n execution": {
-      "main": [[{"node": "P6 read gates and run at most one page", "type": "main", "index": 0}]]
+      "main": [[{"node": "P6 read gates and run at most three pages", "type": "main", "index": 0}]]
     }
   },
   "active": false,
