@@ -118,5 +118,25 @@ class OfflineShardTests(unittest.TestCase):
         self.assertIs(runner.select_group(self.suite, None), self.suite)
 
 
+    def test_serial_selection_new_cases_never_fall_back_to_remaining(self):
+        import zlib
+        for name in (
+            "test_selects_a_then_b_round_robin_after_durable_success",
+            "test_usage_85_halts_only_fixture_lane_and_b_is_available",
+            "test_pre_send_pending_usage_is_durable_and_released_by_safe_evidence",
+            "test_bound_capture_recovers_after_lease_expiry_without_resend",
+        ):
+            cls = type("SerialFixtureSelectionTests", (unittest.TestCase,), {
+                "__module__": "test_three_api_serial_selection",
+                name: lambda self: None,
+            })
+            case = cls(name)
+            expected = runner.ORCHESTRATOR_GROUPS[
+                zlib.crc32(case.id().encode("utf-8"))
+                % len(runner.ORCHESTRATOR_GROUPS)]
+            self.assertEqual(runner.group_for_case(case), expected)
+            self.assertNotEqual(runner.group_for_case(case), "remaining")
+
+
 if __name__ == "__main__":
     unittest.main()
