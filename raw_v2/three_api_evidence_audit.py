@@ -63,3 +63,56 @@ def audit_page_evidence(connection):
         "external_raw_receipts_verified": False,
         "runtime_authorized": False,
     }
+
+
+def audit_raw_receipt_links(coordinator_db, raw_port, capture_port):
+    """Cross-check committed coordinator receipts against immutable RAW records.
+
+    Read-only. Both ports must be supplied by the caller; this function never
+    opens files or creates a network connection. A receipt string by itself is
+    insufficient: every row needs an original capture and a persisted RAW
+    receipt that validates against the capture's immutable digest.
+    """
+    from three_api_runtime_contract import validate_raw_receipt
+
+    if not callable(getattr(raw_port, "get_raw_receipt", None)):
+        raise ValueError("Read-only RAW receipt port required")
+    if not callable(getattr(capture_port, "get_capture_for_request", None)):
+        raise ValueError("Read-only capture port required")
+    base = audit_page_evidence(coordinator_db)
+    rows = coordinator_db.execute(
+        "SELECT e.receipt,b.request_id FROM page_evidence e "
+        "LEFT JOIN job_request_bindings b ON b.job_id=e.job_id"
+    ).fetchall()
+    findings = set(base["findings"])
+    verified = 0
+    for row in rows:
+        if row["request_id"] is None:
+            findings.add("missing_request_binding")
+            continue
+        try:
+            record = capture_port.get_capture_for_request(row["request_id"])
+            if record is None or record.request.request_id != row["request_id"]:
+                findings.add("missing_durable_capture")
+                continue
+            persisted = raw_port.get_raw_receipt(record.capture_id)
+            if persisted is None:
+                findings.add("missing_raw_receipt")
+                continue
+            validate_raw_receipt(record, persisted)
+            if (persisted.raw_receipt_id != row["receipt"]
+                    or persisted.status not in ("committed", "already_committed")):
+                findings.add("raw_receipt_mismatch")
+                continue
+            verified += 1
+        except (AttributeError, TypeError, ValueError, KeyError):
+            findings.add("invalid_raw_receipt")
+    return {
+        "mode": "OFFLINE_READ_ONLY",
+        "pages_checked": len(rows),
+        "verified_raw_receipts": verified,
+        "valid": not findings and verified == len(rows),
+        "findings": sorted(findings),
+        "external_raw_receipts_verified": not findings and verified == len(rows) and bool(rows),
+        "runtime_authorized": False,
+    }
