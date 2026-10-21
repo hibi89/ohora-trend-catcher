@@ -72,6 +72,17 @@ class N8nTickTests(unittest.TestCase):
 
     @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
     @patch.object(adapter, "run_manual_pilot", return_value={
+        "status": "no_ready_work", "committed_pages": 0, "account_failures": 0,
+        "attempted_steps": 1, "verified_success_at": None})
+    @patch.object(adapter, "load_three_api_environment", return_value={})
+    def test_no_ready_work_does_not_claim_meta_call(self, *_):
+        result = adapter.tick(**self.kw, live=True, confirm_owner_approval=True)
+        self.assertEqual(result["status"], "no_ready_work")
+        self.assertEqual(result["committed_pages"], 0)
+        self.assertFalse(result["live_meta_called"])
+
+    @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
+    @patch.object(adapter, "run_manual_pilot", return_value={
         "status": "account_failed", "committed_pages": 0, "account_failures": 1,
         "attempted_steps": 1, "verified_success_at": None})
     @patch.object(adapter, "load_three_api_environment", return_value={})

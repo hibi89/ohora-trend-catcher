@@ -139,7 +139,12 @@ def tick(*, source: Path, workspace: Path, credentials_dir: Path,
     out.update({"action": "LIVE_TICK_COMPLETE", "status": result["status"],
                 "committed_pages": result["committed_pages"],
                 "account_failures": result["account_failures"],
-                "live_meta_called": result["attempted_steps"] > 0})
+                # A bounded runner step may end as no_ready_work or
+                # serial_busy before transport dispatch. Count only statuses
+                # that prove an HTTP outcome was received; exceptions are
+                # handled separately as unknown_after_live_error.
+                "live_meta_called": result["status"] in
+                ("page_committed", "account_failed")})
     verified = result.get("verified_success_at")
     if result["committed_pages"] and isinstance(verified, str) and not first_success:
         _save_state(state_file, verified)

@@ -1,6 +1,15 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-061 — 2026-10-22 · `no_ready_work` 원인 확인과 tick telemetry 수정
+- **근본 원인:** sanitized latest n8n payload resolves to runner status `no_ready_work`, 0 committed pages, 0 account failures. `LiveSerialStep.step` returns this before request preparation/transport if no dispatchable job exists. Read-only exact dispatch predicates: A is lane-ready but has 0 eligible jobs; B has 144 eligible page1 candidates and C has 146, but both are held and therefore have 0 dispatchable candidates. A's page1 roster has 146 done and 4 leased/bound jobs; all A page2 jobs remain pending on predecessor/evidence.
+- **Telemetry defect/fix:** `three_api_n8n_tick.tick` previously inferred `live_meta_called` from `attempted_steps > 0`, which counted a runner check ending `no_ready_work` as a Meta request. It now reports true only when status is `page_committed` or `account_failed`; unknown live exceptions retain the separate `unknown_after_live_error` path. Added an offline regression that stubs `no_ready_work` with one attempted step and proves `live_meta_called=False`.
+- **Evidence:** n8n wrapper latest status is `LIVE_TICK_COMPLETE`/`no_ready_work`; committed=0, account failures=0. Despite an earlier `live_meta_called=true` field, code-path review proves no transport call for `no_ready_work`; this field was a false positive, not proof of Meta traffic. Read-only DB remains 146 captures. No manual tick, actual Meta request, lane reset, or DB write by this diagnostic.
+- **Tests:** `python -m unittest tests.test_three_api_n8n_tick` — 8/8 PASS. `git diff --check` clean. Full offline suite not rerun for this small adapter change.
+- **Constraints/next:** B/C require fresh safe lane usage evidence for release; their cooldown alone is insufficient. Four bound A page1 requests are no-retry and prevent dependent A page2 progression. Do not manually tick beside schedule or resend them. Cursor recovery remains offline-only; all 294 assignments, 4/page, max 3 pages, 85% cap, and RAW/Capture invariants unchanged. Full collection remains incomplete.
+- **Git:** current work branch `codex/p6-readiness-hardening-20261019`; base SHA `4d63f805d550b2640a6498c3e969d7a9808f872c`; code, test, and handoff changes await commit/push.
+
 ### P6-060 — 2026-10-22 · 예약 tick 성공과 실제 수집 무진척 구분
+- **Correction (superseded by P6-061):** initial interpretation of `live_meta_called=true` as actual HTTP was wrong. The tick result was `no_ready_work`; the wrapper flag was computed from attempted runner steps, not HTTP dispatch. No transport call occurred.
 - **실행/상태:** 격리 n8n workflow 실행은 06:00 및 06:05 KST 모두 `success`. 두 실행 뒤 read-only DB 상태는 146 captures; A=146 done / 4 leased / 144 pending, B/C 각 0 done / 294 pending로 그대로였다. 따라서 wrapper tick 성공은 실제 Meta 수집 성공이나 신규 receipt를 뜻하지 않는다.
 - **재개/안전:** B read-only guarded preflight는 safety conditions not met를 반환했다. hold reset, manual tick, Meta request, DB write 없음. B/C fresh lane-safe usage 증거가 없어 lane hold 및 85%/cooldown/no-retry 보호 유지.
 - **커서/범위:** cursor re-anchor planner는 offline-only이며 production runner에 연결/실행되지 않았다. 전체 collection과 legacy 49건 복구는 미완료/미변경. 기존 roster 294, lane assignment, page size 4, max 3 pages/tick, RAW/Capture 불변성 유지.
@@ -267,6 +276,7 @@
 | P6-058 | n8n 진척 정체·B/C quota gate | 05:50 예약 실행은 success이나 신규 페이지 없음; B/C fresh usage evidence 부재 | 249 receipts / 996 observations / 812 unique; A146, B/C0; guarded B preflight refused; no reset/live request |
 | P6-059 | 예약 실행 정체 재확인 | 05:55 이후 새 실행·수집 진척 없음, n8n 프로세스 미확인 | 146 captures; B resume gate refused; no mutation/request; scheduler continuation unverified |
 | P6-060 | 예약 tick success·수집 무진척 구분 | 06:00/06:05 실행 success이나 receipt/state 변화 없음 | 146 captures unchanged; B gate refused; no mutation/API; sanitized tick-result diagnosis pending |
+| P6-061 | no_ready_work 원인·telemetry 수정 | A=0 eligible, B/C held; step attempt no longer conflated with Meta request | n8n status no_ready_work, 0 committed, 0 account failures; 8/8 adapter tests; no HTTP/DB mutation |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
