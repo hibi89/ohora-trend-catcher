@@ -1,10 +1,12 @@
-**2026-10-21 KST · B/C 인증 설정 오프라인 진단, API 준비도 미확정:** [AGENTS.md](AGENTS.md) · [동결 설계](docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md) · [비밀값 비출력 대조기](raw_v2/three_api_credential_diagnostic.py) · [8개 합성 테스트](tests/test_three_api_credential_diagnostic.py) · [P6 기록](docs/P6_TROUBLESHOOTING_LEDGER.md). GitHub 확인 시 현재 p6 브랜치 HEAD는 bca89f96bbbfa730ea3005e228e309c2e285c2a0; 일일 시작 정책 브랜치 HEAD는 84a06bcaa1141cf0f9812fb907c8161949fb4430이며 참고만 했고 전환·병합하지 않았다. main은 2e55b90a60892fb721295b1faa5207c84b48586b.
+**2026-10-21 KST · P6 A/B/C 인증파일 로더 구현 (오프라인):** 코드·테스트 commit 1646629: [AGENTS.md](AGENTS.md) · [동결 설계](docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md) · [P6/RAW 매핑 로더](raw_v2/three_api_env_loader.py) · [로더 테스트](tests/test_three_api_env_loader.py) · [P6-034 기록](docs/P6_TROUBLESHOOTING_LEDGER.md).
 >
-> **증거:** P6-033 사용자 보고 기록은 성공 영수증 79/게시물 316, A 31페이지/B 48페이지이며 B의 계정별 HTTP 400 실패 3건을 포함한다. 실패 응답 본문·하위 코드는 저장되지 않아 토큰/권한 오류인지 계정별 오류인지 확정할 수 없다. C는 성공 페이지가 보고되지 않았다. P6는 페이지마다 Graph 단일 GET, Authorization Bearer 헤더, 호출자 IG ID 경로를 사용한다. RAW collector.py는 .env.api_b/c의 META_ACCESS_TOKEN/META_IG_USER_ID를 읽어 Batch API form POST를 사용한다. 버전 기본값은 양쪽 v26.0; P6와 RAW의 요청 필드 구성은 일부 다르다.
+> **설정:** C:\Users\haein\OneDrive\Desktop에 .env.api_a/b/c 3개 빈 템플릿을 생성했다. 사전 파일명 검사에서 대상 파일이 없어 백업할 기존 인증파일은 없었다. 토큰·ID는 복사하거나 저장하지 않았다. .gitignore가 **/.env.api_*를 제외한다.
 >
-> **현재 설정 비교 결과:** 이 실행 환경에 P6 B/C 환경변수가 없고 지정 저장소 및 사용자 홈에서 .env.api_b/c를 찾지 못해 토큰·호출자 ID 값 비교는 unavailable이다. 새 도구는 exact match와 형식만 확인하고 Meta 유효성·권한은 검사하지 않는다. 진단 테스트 8/8, 인수인계 guard 4/4 통과. 실제 Meta 호출 0회, DB/RAW/CSV 무변경, 운영 수집기·n8n·main 미수정.
+> **구현:** RAW collector.py는 기존처럼 각 파일의 META_ACCESS_TOKEN, META_IG_USER_ID, META_GRAPH_VERSION을 사용한다. P6 three_api_manual_pilot.py는 새 --credentials-dir 옵션으로 파일을 읽어 P6_META_TOKEN_A/B/C, P6_META_IG_ID_A/B/C, P6_META_GRAPH_VERSION을 프로세스 메모리에 매핑한다. 누락·형식·중복·v26.0을 검사하며 값은 출력하지 않는다.
 >
-> **재개 게이트:** B의 성공 이력은 해당 48페이지에서 인증·기본 요청이 작동했다는 증거이지 현재 자격증명이나 쿼터 해제 증거가 아니다. B의 기존 불확실한 실패를 재전송하지 말고 85%/65분 hold를 임의로 해제하지 않는다. C도 실호출 근거가 없어 재개 가능 판정을 보류한다. --live, quota reset, 기존 실패 재시도, 운영 DB 조작, n8n 활성화는 사용자 별도 승인과 필요한 검증 전 실행 금지. 진단 실행: python raw_v2/three_api_credential_diagnostic.py --raw-env-dir "C:\Users\haein\ohora-trend-catcher" (인증 파일이 다른 폴더에 있으면 해당 폴더 경로 지정).
+> **검증/경계:** loader 9 tests (8 PASS, 1 symlink test SKIP because symlink creation is unavailable), pilot 12/12, prior credential diagnostic 8/8, handoff guard 4/4: **32 PASS, 1 SKIP**. 테스트는 synthetic/offline. Meta 0회, RAW DB/CSV/Capture 무변경, 실 인증 유효성·권한·쿼터·실수집은 미검증. B/C 실수집 재개 승인이 아니다.
+>
+> **다음:** Desktop 템플릿에 사용자가 새 토큰/Instagram ID를 직접 입력한 뒤 offline checker를 실행한다. 실제 Meta 호출은 별도 승인 뒤 수행한다. n8n 연결은 미구현.
 
 > **2026-10-21 · P6-032 Windows SQLite read-only 연결 종료 수정 (CI 대기):** [AGENTS.md](AGENTS.md) · [트러블슈팅 기록 P6-032](docs/P6_TROUBLESHOOTING_LEDGER.md) 필독. `db110cdd` Linux 915/915 PASS, Windows Runtime 11 PASS/1 FAIL: `test_status_is_read_only_and_reports_lanes_without_meta` 종료 시 `coordinator.sqlite` WinError 32. `sqlite3.Connection` context manager는 실제 close를 하지 않으므로 상태·실패 진단 조회 연결을 `contextlib.closing`으로 명시 종료. **새 SHA CI 미확정.** 기존 RAW 12건/451 및 85% quota 상태 유지, Meta 0회, 운영 DB/main/scheduler 미변경.
 >

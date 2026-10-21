@@ -17,6 +17,15 @@
 - **후속:** 진단을 실제 인증파일 디렉터리와 그 PowerShell 프로세스에서 실행해 match/mismatch를 확인한다. match도 active token·scope·app mode를 입증하지 않는다. 별도 승인된 live probe 없이 B/C Meta 권한과 실제 필드 호환성은 미확인 상태로 둔다.
 
 
+### P6-034 — 2026-10-21 · 세 레인 공통 인증파일과 P6 메모리 매핑
+
+- **요청 범위/결정:** 한 세트의 로컬 .env.api_a/b/c에서 RAW와 P6를 설정한다. 공통 파일 규격은 META_ACCESS_TOKEN, META_IG_USER_ID, META_GRAPH_VERSION=v26.0. RAW는 --env로 기존 키를 직접 사용하고, P6의 새 --credentials-dir 로더는 P6_META_TOKEN_A/B/C, P6_META_IG_ID_A/B/C, P6_META_GRAPH_VERSION로 메모리 내 매핑한다. 토큰을 코드·명령행 인자·로그로 복사하지 않는다.
+- **검사:** UTF-8 키 집합, 필수값/형식, 각 토큰과 호출자 ID의 A/B/C 중복, v26.0을 확인한다. 심볼릭 링크 파일은 거부한다. 이는 값의 모양과 설정 일관성만 검사하며 토큰 유효성, 토큰-호출자 실제 연결, Meta 권한/앱 모드/쿼터를 증명하지 않는다.
+- **Desktop 결과:** 요청 경로를 재검사했을 때 기존 .env.api_a/b/c가 없었다. 따라서 기존 인증정보를 백업하거나 재사용하지 않고 빈 템플릿 3개만 생성했다. 파일들은 저장소 밖에 있고 **/.env.api_* Git ignore 규칙을 추가했다.
+- **검증:** test_three_api_env_loader.py 9건 중 8 PASS·심볼릭 링크 생성 제한으로 1 SKIP; manual pilot 12/12; credential diagnostic 8/8; handoff guard 4/4. 총 32 PASS, 1 SKIP. Synthetic/offline만 실행했고 Graph HTTP 0회.
+- **안전/미검증:** 운영 DB·CSV·Capture·quota/bindings 변경 없음. 48페이지 B 이력은 과거 관측이며 현재 B/C 자격증명이나 재개 가능성을 증명하지 않는다. live collection, n8n 연결, main 병합 미실행.
+- **롤백:** 코드/테스트/docs/ignore 변경만 이 브랜치에서 되돌릴 수 있다. Desktop 템플릿은 로컬 설정 파일로 유지하며, rollback 시에도 토큰을 Git에 추가하지 않는다. 코드·테스트 구현 commit: 1646629 (문서 동기화는 후속 commit).
+
 ### P6-033 — 2026-10-21 · Live pilot 계정별 HTTP400 후 전체 레인 정지와 Meta error_subcode 유실
 
 - **사용자 실측:** 2026-10-21 KST 분리 파일럿에서 `durable_receipts=79`, `posts=316`, A 완료 31, B 완료 48. 일괄 `--max-pages 50` 호출 도중 27페이지 커밋 후 종료. 기존 terminal HTTP400 요청은 계정 ordinal 32(A), 151/152/201(B)의 총 4건. 해당 요청은 `failed_no_retry`, Capture/response evidence 없음. 원본 사용자 데이터는 GitHub에 전송·수정하지 않음.
@@ -104,6 +113,7 @@
 
 | P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
 | P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
+| P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
 | P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
 | P6-032 | Windows 임시 파일 핸들 | 읽기 전용 SQLite context manager의 미닫힘으로 WinError 32 | 연결 명시 종료, 새 SHA CI 검증 대기 |
 | P6-031 | CI SQL Mock·인수인계 | terminal 바인딩 SELECT Mock 반환과 상단 AGENTS 링크 누락 | 코드/테스트 수정 후 RAW 915 중 문서 가드 2건 FAIL; 상단 링크 복구 및 전체 SHA CI 재확인 |
