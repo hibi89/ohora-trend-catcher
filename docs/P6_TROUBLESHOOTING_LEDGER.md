@@ -1,5 +1,12 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-057 — 2026-10-22 · 커서 무효화 시 제한형 재연결 요구 및 오프라인 증거
+- **요구/기존 구현:** 사용자 추가 요구는 무효 커서 재시도 대신 `resume_required`로 중단하고, 별도 승인 라운드에서 최신 페이지부터 기존 게시물 ID와 재연결한 뒤 새 커서로 재개하는 것이다. 기존 [planner](../raw_v2/three_api_paging_recovery.py)는 `cursor_failure_disposition`으로 자동 재시도를 금지하고, `plan_cursor_recovery`는 합성 페이지의 ID overlap만으로 연결 후보를 찾으며 3페이지 초과를 거부한다. 삭제 여부는 단정하지 않는다. 재탐색 관측 ID는 중복 포함 보존하고 분석 ID만 deduplicate한다. 별도 [reanchor ledger](../raw_v2/three_api_reanchor.py)는 기존 proof를 지우지 않는 격리 증거 저장소이며, 현재 production Meta runner에 연결된 것은 아니다.
+- **시나리오 검증:** [recovery tests](../tests/test_three_api_paging_recovery.py)는 정상 커서, 기준 ID 부재/주변 ID 연결, cursor invalid 후 resume_required→최신 페이지 overlap→대체 cursor, 순서 변경·추가·다중 누락, 관측 중복과 분석 dedupe, overlap 발견/미발견, 3페이지 한도 및 4페이지 거부를 검증한다. [reanchor tests](../tests/test_three_api_reanchor.py)는 원본 proof 보존과 별도 증거 라운드를 검증한다. 회귀 원인: 첫 전체 serial suite에서 상세 incident 추가 뒤 인덱스 행을 누락해 `test_incident_index_matches_unique_detailed_records`가 실패. 인덱스 행을 보완한 후 cursor/re-anchor 26/26, handoff guard 4/4, 공식 전체 분할 suite 987 run / 986 PASS / 1 SKIP / 0 FAIL로 완료.
+- **현재 한계/안전:** 오프라인 planner는 수집 위치를 계산할 뿐 API 호출·RAW/Capture 기록·운영 DB 변경을 하지 않는다. 실제 무효화·재탐색·재개는 승인되지 않았고 검증되지 않았다. 294 roster와 lane order, page size 4, per-round 3-page ceiling, quota 85%, cooldown/no-retry 및 기존 RAW/Capture immutability 유지. legacy 49건 변경 없음.
+- **진단 차단:** 2026-10-22 05:02 KST의 read-only pilot status refresh가 isolated `p6_pilot_raw.sqlite` Windows ACL `PermissionError`로 거부됨. 파일에 쓰지 않았으며 권한 우회도 하지 않았다. 최신 runtime 상태는 확인 불가; handoff에 마지막 확인 시각(04:50)을 구분하여 기록.
+- **Git 상태:** 시작 시 사용자 작업 트리는 clean, HEAD와 origin 작업 브랜치는 일치했고 `git fetch origin` 성공. 변경/테스트 후 커밋·push 상태를 아래에 보충한다. `main` 병합 없음.
+
 ### P6-056 — 2026-10-22 · 예약 A lane 진행 갱신
 - **관측:** isolated active n8n P6 execution at 04:50 KST `success`. Read-only status: 237 durable receipts / 948 observations / 764 unique posts; A 134 done / 4 leased / 156 pending; B/C each 0 done / 294 pending.
 - **쿼터:** latest sanitized A usage 35% at 04:50, below 85%. B/C still have no stored safe usage and remain held; cooldown alone is not sufficient to release.
@@ -235,6 +242,7 @@
 | P6-054 | 예약 A lane 진척·오류 | A 예약 tick에서 네 번째 계정 단위 HTTP400 발생 | 04:10: 2 page commits + 1 new no-evidence failure; A110/213 receipts, 4 failures no-retry, usage 28%; B/C usage holds 유지 |
 | P6-055 | A lane 예약 진척 | A 수집 도중 추가로 진행된 최신 안전 상태를 기록할 필요 | 04:30 n8n success, A122 / 225 receipts / 900 observations / 716 unique; usage 32%, 4 failed_no_retry, B/C holds unchanged |
 | P6-056 | A lane 예약 진척 | 최신 04:50 예약 tick·쿼터 상태 갱신 | n8n success, A134 / 237 receipts / 948 observations / 764 unique; usage 35%, 4 failed_no_retry; B/C holds unchanged |
+| P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
