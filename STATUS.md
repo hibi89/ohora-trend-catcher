@@ -1,3 +1,5 @@
+> **2026-10-21 · P6 Evidence↔RAW 읽기 전용 교차검증:** `raw_v2/three_api_evidence_audit.py`에 coordinator page cursor/receipt audit 및 `audit_raw_receipt_links` 구현. job binding→Capture→RAW receipt를 원본 capture digest 검증으로 대조, 누락/불일치 차단·비밀값 미출력·live authorization 항상 false. 합성 SQLite/mock 기반 테스트 추가, Runtime CI 경로/컴파일 포함. 최신 SHA `4b1601ea` CI 대기; 이전 `e318878` 4종 주요 CI 성공. 운영 Evidence adapter/365일 history 미완성, 실 Meta/운영 DB/main/scheduler 미변경.
+
 > **P6 필수 인수인계 링크:** [AGENTS.md](AGENTS.md) · [트러블슈팅 장부](docs/P6_TROUBLESHOOTING_LEDGER.md) · [동결 설계](docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md). 채팅방 전환 시 최신 SHA·CI·미해결 사항을 우선 점검한다.
 
 > **2026-10-21 · P6 fail-closed lane release fix.** `37cd84a` changes LiveSerialStep to release live_pending_usage only after commit_captured_page returns successfully; `6054481` documents the invariant, `bca875e` adds a static guard test. No live Meta calls, production DB changes, main merge or scheduler. Runtime evidence remains offline staging only and blocks live. Latest CI not yet verified.
