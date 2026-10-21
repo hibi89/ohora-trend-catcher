@@ -30,6 +30,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner.coordinator = Mock()
         runner.coordinator.path = "synthetic-lock.sqlite"
         runner.coordinator.lease_for_recovery.return_value = None
+        runner.coordinator.dispatch_lane_order.return_value = ("A",)
         runner.coordinator.lease_for_dispatch.return_value = {
             "id": 1, "lane": "A", "account_ordinal": 1, "page": 1}
         runner.coordinator.db.execute.return_value = SimpleNamespace(rowcount=1)
@@ -385,6 +386,44 @@ class LiveSerialStepGateTests(unittest.TestCase):
             finally:
                 coordinator.db.close()
 
+    def test_fair_lane_order_reuses_existing_jobs_without_rewriting_evidence(self):
+        """A->B with front-only jobs; C eligible only with A-page1 cursor."""
+        import tempfile
+        from pathlib import Path
+        from three_api_coordinator import Coordinator
+        from three_api_job_binding import JobRequestBindingStore
+        from three_api_evidence import PageEvidenceStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(Path(directory) / "fair-lanes.sqlite")
+            try:
+                coordinator.seed()
+                JobRequestBindingStore(coordinator)
+                PageEvidenceStore(coordinator)
+                now = self.kwargs["requested_at"]
+                self.assertEqual(coordinator.dispatch_lane_order(now=now), ("A", "B"))
+                first = coordinator.db.execute(
+                    "SELECT id FROM jobs WHERE account_ordinal=1 AND page=1"
+                ).fetchone()["id"]
+                coordinator.db.execute(
+                    "UPDATE jobs SET state='done' WHERE id=?", (first,))
+                coordinator.db.execute(
+                    """INSERT INTO page_evidence
+                       (account_ordinal,page,job_id,receipt,requested_cursor,
+                        response_cursor,terminal) VALUES (1,1,?, ?,NULL,?,0)""",
+                    (first, "synthetic:receipt1", "synthetic:cursor1"))
+                self.assertEqual(coordinator.dispatch_lane_order(now=now),
+                                 ("B", "C", "A"))
+                self.assertTrue(coordinator.observe_usage("B", 85, now=now))
+                self.assertEqual(coordinator.dispatch_lane_order(now=now),
+                                 ("C", "A"))
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(*) FROM jobs").fetchone()[0], 882)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT COUNT(*) FROM page_evidence").fetchone()[0], 1)
+            finally:
+                coordinator.db.close()
+
     def test_missing_bound_capture_fails_closed_before_http(self):
         """A reserved request with no capture must never be sent again."""
         from unittest.mock import Mock, patch
@@ -449,6 +488,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner.coordinator = Mock()
         runner.coordinator.path = "isolated-test.sqlite"
         runner.coordinator.lease_for_recovery.return_value = None
+        runner.coordinator.dispatch_lane_order.return_value = ()
         runner.coordinator.lease_for_dispatch.return_value = None
         runner.bindings = Mock()
         runner.evidence = Mock()

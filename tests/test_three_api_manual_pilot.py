@@ -113,7 +113,7 @@ class ManualPilotTests(unittest.TestCase):
             def sender(req, timeout, *, lane=lane):
                 calls.append(lane)
                 response = MockResponse()
-                target = f"nail_{len(calls)}"
+                target = f"nail_{calls.count(lane) if lane == 'A' else 150 + calls.count(lane)}"
                 response.payload["business_discovery"]["username"] = target
                 response.payload["business_discovery"]["media"]["data"][0]["id"] = str(1234567890 + len(calls))
                 response.payload["business_discovery"]["media"]["data"][0]["username"] = target
@@ -133,7 +133,7 @@ class ManualPilotTests(unittest.TestCase):
         self.assertEqual(result["committed_pages"], 2)
         self.assertEqual(result["attempted_steps"], 2)
         self.assertEqual(result["new_http_attempt_limit"], 2)
-        self.assertEqual(calls, ["A", "A"])
+        self.assertEqual(calls, ["A", "B"])
         raw_db = sqlite3.connect(self.workspace / "p6_pilot_raw.sqlite")
         self.addCleanup(raw_db.close)
         self.assertEqual(raw_db.execute(
@@ -152,7 +152,7 @@ class ManualPilotTests(unittest.TestCase):
             def sender(req, timeout, *, lane=lane):
                 calls.append(lane)
                 response = MockResponse()
-                target = f"nail_{len(calls)}"
+                target = f"nail_{calls.count(lane) if lane == 'A' else 150 + calls.count(lane)}"
                 response.payload["business_discovery"]["username"] = target
                 response.payload["business_discovery"]["media"]["data"][0]["id"] = str(1234567890 + len(calls))
                 response.payload["business_discovery"]["media"]["data"][0]["username"] = target
@@ -174,7 +174,7 @@ class ManualPilotTests(unittest.TestCase):
             )
         self.assertEqual(first["committed_pages"], 1)
         self.assertEqual(second["committed_pages"], 1)
-        self.assertEqual(calls, ["A", "A"])
+        self.assertEqual(calls, ["A", "B"])
         db = sqlite3.connect(self.workspace / "p6_pilot_raw.sqlite")
         self.addCleanup(db.close)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 2)

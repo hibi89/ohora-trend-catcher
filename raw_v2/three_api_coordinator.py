@@ -332,6 +332,28 @@ class Coordinator:
             ],
         }
 
+    def dispatch_lane_order(self, now=None):
+        """Fair, read-only lane preference for eligible first-time sends.
+
+        Keep the frozen A/B/C account/page assignment; only the order of
+        already dispatchable lanes changes. Fewer completed pages win,
+        with stable A/B/C tie breaking. Proof, quota, bound-request and
+        predecessor checks remain owned by the original coordinator lease.
+        No new job, lease, cursor or database column is created here.
+        """
+        ready = self.dispatch_ready_diagnostics(now=now)["lanes"]
+        completed = {
+            row["lane"]: row["done"]
+            for row in self.dispatch_diagnostics(now=now)["lanes"]
+        }
+        available = [
+            row["lane"] for row in ready if row["dispatchable_now"] > 0
+        ]
+        return tuple(sorted(
+            available,
+            key=lambda lane: (completed[lane], LANES.index(lane)),
+        ))
+
     def recovery_ready_diagnostics(self, now=None):
         """Read-only counts of bound recovery candidates per lane.
 

@@ -86,7 +86,11 @@ class LiveSerialStep:
                         return {"status": "recovered", "lane": lane,
                                 "account_ordinal": job["account_ordinal"],
                                 "terminal": result["terminal"]}
-                for lane in LANES:
+                # Rotate only among eligible lanes. A-first dispatch previously
+                # starved B (and eventually C), despite valid frozen jobs.
+                # Recovery above still takes precedence; the original lease
+                # remains the final quota/cursor/binding authorization gate.
+                for lane in self.coordinator.dispatch_lane_order(now=now):
                     job = self.coordinator.lease_for_dispatch(lane, now=now)
                     if job is None:
                         continue
