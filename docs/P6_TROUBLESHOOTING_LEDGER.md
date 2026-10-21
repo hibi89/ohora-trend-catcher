@@ -38,6 +38,8 @@
 | P6-024 | 단일 진입점 설계 | fixture 송신과 페이지·커서 확정을 서로 다른 OS 잠금 구간에서 처리 | 단일 잠금 run_fixture_page_once, 최초 송신/기존 바인딩 replay 분기 및 A/B/C 합성 회귀; 신규 CI 판정 대기 |
 | P6-025 | 직렬 작업선택·사용량 | API 레인 선택과 fixture 송신·정확한 사용량 증거/복구 연결 부족 | 오프라인 job lease + A/B/C turn + pre-send durable quota hold + read-only 진단; 17개 합성 회귀, 신규 CI 판정 대기 |
 
+| P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
+
 ## 사건별 상세
 
 ### P6-001 — 병렬 AI 작업 후 한도 소진 및 원복 위험 (2026-10-19)
@@ -285,3 +287,12 @@
 - [기존 RAW v2.1 트러블슈팅 상세 연대기](RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md) · [오류 대응 SOP](RAW_V2_ERROR_HANDLING_RUNBOOK.md)
 - [Git 커밋 기록](https://github.com/hibi89/ohora-trend-catcher/commits/codex/p6-readiness-hardening-20261019)
 - [GitHub Actions](https://github.com/hibi89/ohora-trend-catcher/actions) · [Draft PR #6](https://github.com/hibi89/ohora-trend-catcher/pull/6)
+
+
+### P6-026 — Quota gate blocked local Capture recovery (2026-10-21)
+
+- **Confirmed in code:** Coordinator.lease checked lane.halted/ready_at before filtering bound-only jobs; a 85% usage stop therefore denied both first-time HTTP dispatch and capture-only recovery.
+- **Fix:** `3a271e1` makes the lane gate apply only to non-bound-only leases; recovery still requires an existing immutable job binding and an eligible lease, and the runner still refuses to resend when Capture is absent.
+- **Regression:** `ee3ed6c` and `414e189` add isolated SQLite quota/lease tests. The blocked lane must refuse new dispatch while a pre-bound page remains recoverable; a different lane can continue. The test does not make a real Meta request.
+- **Verification:** GitHub commits confirmed; full CI on latest documentation HEAD remains unverified. Do not claim production readiness or new-post collection success.
+- **Policy:** Frozen 3 callers, limit=4, 2 daily rounds, 65-minute minimum cooldown and immutable RAW unchanged; no operational DB, scheduler, main merge or Meta call.
