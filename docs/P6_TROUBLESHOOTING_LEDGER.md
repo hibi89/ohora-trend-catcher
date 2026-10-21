@@ -152,6 +152,7 @@
 | P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C capture-only recovery later completed under P6-040; n8n exports inactive |
 | P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
 | P6-045 | 자동 수집 처리량 | 검증 후에도 n8n tick이 1페이지만 처리해 진행이 지연됨 | 페이지당 quota/cooldown gate를 유지하며 tick 상한 3으로 상향; 76/76 offline PASS, 실제 스케줄 tick 증거 확인 |
+| P6-046 | 커서 무효화 재앵커 | 복구 회귀가 새 커서로 재개할 연결 흐름을 직접 고정하지 않음 | 정상 커서, `resume_required`, 최신 ID 겹침, replacement cursor 및 3-page 제한 회귀 추가; recovery 16 tests |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
 | P6-042 | 무효 커서 재앵커 인수인계 | 기존 3-page planner가 이미 구현돼 있었으나 신규 요구를 top-level handoff/테스트 인덱스에 명시하지 않음 | invalid cursor → resume_required → known-ID overlap → replacement cursor 오프라인 회귀 추가; production runner/live recovery 미구현 |
@@ -506,3 +507,10 @@
 - **운영 상태:** 2026-10-21 read-only coordinator status showed B/C held `live_pending_usage`; last persisted successful-response usage values were below 85 but came from prior-day observations and do not prove current usage. No lane reset or live request is recorded for this update. The prior cursor errors remain classified only as account-scoped HTTP 400; missing raw subcodes prevent root-cause attribution.
 - **실패 코드 세분화(read-only 집계):** A의 HTTP 400 1건은 Graph code 110; B의 4건은 code 110 2건, code 100 1건, 코드 미보존 1건이었다. 저장된 실패에는 code 190 인증 거부나 code 10/200 권한 거부가 없었다. **subcode는 보존되지 않아** code 110이 특정 target-user 문제인지, code 100이 어떤 field/parameter 때문인지 확정할 수 없다. C는 기록된 HTTP 400 실패가 없고 lane usage hold만 있다. P6 경로는 Batch API가 아닌 단일 serial GET이다. 계정별 실패는 토큰 인증 오류라고 단정할 근거가 없다.
 - **제약/다음:** n8n 2.44.5 exists in an isolated local folder, but workflow remains unconnected. Only after a verified P6 page receipt should an inactive 5-minute workflow be imported and tested. Any activation is subject to the same current quota gates; do not reset B/C from elapsed cooldown alone.
+### P6-046 — 2026-10-22 · 커서 무효화 재앵커 시나리오 회귀 고정
+
+- **요구 흐름:** 무효 커서는 기존 요청 재전송 없이 `resume_required`로 중단한다. 별도 승인된 재탐색에서 최신 페이지부터 최대 3페이지를 검사하고 기존 게시물 ID 겹침을 연결점으로 사용한다. 새 응답의 `after`만 후속 오래된 페이지 후보로 내보내며, 연결점이 없거나 3페이지 안에 찾지 못하면 `coverage_gap`을 숨기지 않는다.
+- **최소 변경:** `tests/test_three_api_paging_recovery.py`에 정상 커서 후보와 새 커서 재개 전달을 직접 검증하는 오프라인 회귀를 추가했다. 기존 `raw_v2/three_api_paging_recovery.py` 계획 함수는 합성 페이지 입력만 처리한다. 같은 게시물 재관측은 `observation_ids`에 남고 `analysis_media_ids`에서만 deduplicate된다. 게시물 삭제를 확정하지 않는다.
+- **시나리오:** 정상 커서; 기준 게시물 삭제 가정 및 이웃 연결; invalid cursor 후 ID 재발견; 다중 추가/삭제에 따른 순서 변경; 중복 관측; 연결 성공/실패; 세 페이지 안에서 연결 불가; 세 페이지째 연결 후 네 번째 요청 금지.
+- **보존/경계:** 계획 결과는 network_requests=0, mutations=[]; 기존 요청 ID, Capture, RAW, 수집 순서는 수정하지 않는다. 실제 HTTP 오류 분류와 `resume_required`를 운영 coordinator에 기록하는 연결, 승인 UX, 새 요청 발행 runner는 미구현이다. 따라서 실제 복구 실행 준비 완료 또는 실수집 성공으로 해석하지 않는다.
+- **검증/다음:** `tests.test_three_api_paging_recovery` 16 tests, `tests.test_three_api_paging` 16 tests 및 handoff guard 실행 후 결과를 기록한다. Meta 실호출/운영 DB 변경은 0건이며 별도 복구 라운드 승인, 현재 quota 85% gate, cooldown이 계속 필요하다.

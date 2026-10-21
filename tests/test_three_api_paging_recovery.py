@@ -28,6 +28,18 @@ def evidence_row(request_id, *, chain_ok=True):
 
 
 class PagingRecoveryTests(unittest.TestCase):
+    def test_normal_cursor_is_kept_as_a_candidate_without_recovery_or_deletion_claim(self):
+        # An after cursor alone remains a candidate; it is not a reason to
+        # declare the page terminal or to start a recovery round.
+        plan = build_paging_recovery_plan([{
+            **evidence_row("normal-cursor"),
+            "stored_terminal": False,
+            "stored_response_cursor": "persisted-cursor",
+        }])
+        self.assertEqual(plan["rows"][0]["status"], "no_terminal_cursor_mismatch")
+        self.assertEqual(plan["rows"][0]["network_requests"], 0)
+        self.assertEqual(plan["rows"][0]["mutations"], [])
+
     def test_49_immutable_rows_are_only_planned_and_never_applied(self):
         rows = [evidence_row(f"request-{n}") for n in range(49)]
         plan = build_paging_recovery_plan(rows)
@@ -96,6 +108,22 @@ class PagingRecoveryTests(unittest.TestCase):
         self.assertNotEqual(recovery["resume_cursor"], "invalid-cursor")
         self.assertEqual(recovery["network_requests"], 0)
         self.assertEqual(recovery["deleted_media_ids_confirmed"], [])
+
+    def test_replacement_cursor_is_the_only_cursor_offered_for_older_resume(self):
+        # The failed cursor is never an input to the planner. A synthetic
+        # newest-page overlap supplies the replacement cursor for a separately
+        # approved continuation, bounded to this one-page plan.
+        recovery = plan_cursor_recovery(["old-4", "old-5", "old-6"], [{
+            "data": [{"id": "new-1"}, {"id": "new-2"},
+                     {"id": "new-3"}, {"id": "old-5"}],
+            "paging": {"cursors": {"after": "replacement-only"}},
+        }])
+        self.assertEqual(recovery["status"], "resume_ready")
+        self.assertEqual(recovery["anchor_media_id"], "old-5")
+        self.assertEqual(recovery["resume_cursor"], "replacement-only")
+        self.assertEqual(recovery["pages_examined"], 1)
+        self.assertEqual(recovery["max_pages"], 3)
+        self.assertEqual(recovery["network_requests"], 0)
 
     def test_generic_http_400_is_not_inferred_as_cursor_failure(self):
         result = cursor_failure_disposition(error_category="http_400",
