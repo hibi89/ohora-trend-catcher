@@ -67,6 +67,14 @@ class EvidenceAuditTests(unittest.TestCase):
         self.assertIn("head_has_cursor", result["findings"])
         self.assertIn("duplicate_receipt", result["findings"])
 
+    def test_missing_binding_schema_is_redacted_blocker(self):
+        from unittest.mock import Mock
+        self.insert(1)
+        result = audit_raw_receipt_links(self.db, Mock(), Mock())
+        self.assertIn("missing_binding_table", result["findings"])
+        self.assertFalse(result["runtime_authorized"])
+        self.assertFalse(result["valid"])
+
     def test_missing_request_binding_is_fail_closed(self):
         from unittest.mock import Mock
         self.insert(1)
