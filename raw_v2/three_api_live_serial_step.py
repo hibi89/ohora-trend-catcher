@@ -15,6 +15,7 @@ from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter
 from three_api_evidence import PageEvidenceStore
 from three_api_live_request_factory import prepare_job_request
+from three_api_roster_preflight import validate_official_roster, RosterPreflightError
 
 
 class LiveSerialStepError(RuntimeError):
@@ -51,6 +52,10 @@ class LiveSerialStep:
             raise LiveSerialStepError("Timezone-aware request time required")
         if not isinstance(accounts, (list, tuple)) or len(accounts) != 294:
             raise LiveSerialStepError("Official 294-account roster required")
+        try:
+            validate_official_roster(accounts)
+        except RosterPreflightError as exc:
+            raise LiveSerialStepError(str(exc)) from None
         if not isinstance(caller_ids, dict) or set(caller_ids) != set(LANES):
             raise LiveSerialStepError("A/B/C caller identities required")
         if any(caller_ids[lane] != self.executor.transport._lanes[lane]._caller_ig_id
