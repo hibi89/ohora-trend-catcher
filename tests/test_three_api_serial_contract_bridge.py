@@ -287,3 +287,91 @@ class RealFixtureCaptureBridgeTests(TestCase):
             (1, 2, "C"))
         self.assertEqual(self.transport.calls, 1)
 
+    def tick(self, *, job=None, now=OBSERVED_AT):
+        return self.bridge.run_fixture_page_once(
+            self.job if job is None else job,
+            self.request, self.evidence, now=now)
+
+    def test_one_gate_fixture_tick_first_dispatch_commits_page(self):
+        edge = self.tick()
+        self.assertTrue(edge["terminal"])
+        self.assertEqual(self.transport.calls, 1)
+        self.assertEqual(self.raw_count(), 1)
+        self.assertEqual(self.edge_count(), 1)
+        self.assertEqual(self.bindings.lookup(self.job["id"])["request_id"],
+                         self.request.request_id)
+        with self.assertRaises(JobBindingError):
+            self.tick()
+        self.assertEqual(self.transport.calls, 1)
+
+    def test_one_gate_resume_existing_capture_without_any_second_send(self):
+        self.dispatch()
+        self.assertEqual(self.edge_count(), 0)
+        self.assertTrue(self.tick()["terminal"])
+        self.assertEqual(self.transport.calls, 1)
+        self.assertEqual(self.edge_count(), 1)
+        self.assertEqual(self.raw_count(), 1)
+
+    def test_one_gate_recovery_after_cursor_commit_interruption(self):
+        with mock.patch.object(
+                self.evidence, "commit_page",
+                side_effect=OSError("synthetic cursor write interruption")):
+            with self.assertRaises(OSError):
+                self.tick()
+        self.assertEqual(self.transport.calls, 1)
+        self.assertEqual(self.raw_count(), 1)
+        self.assertEqual(self.edge_count(), 0)
+        self.assertTrue(self.tick()["terminal"])
+        self.assertEqual(self.transport.calls, 1)
+        self.assertEqual(self.raw_count(), 1)
+        self.assertEqual(self.edge_count(), 1)
+
+    def test_one_gate_never_resends_a_bound_request_without_capture(self):
+        self.bindings.reserve(
+            self.job, self.request, self.evidence, now=OBSERVED_AT)
+        with self.assertRaisesRegex(JobBindingError, "no durable capture"):
+            self.tick()
+        self.assertEqual(self.transport.calls, 0)
+        self.assertEqual(self.raw_count(), 0)
+        self.assertEqual(self.edge_count(), 0)
+
+    def test_one_gate_refuses_busy_runner_before_binding_or_fixture_send(self):
+        with serial_tick_lock(self.coordinator.path):
+            self.assertEqual(self.tick(), {
+                "status": "serial_busy", "selected_lane": None})
+        self.assertIsNone(self.bindings.lookup(self.job["id"]))
+        self.assertEqual(self.transport.calls, 0)
+        self.assertEqual(self.raw_count(), 0)
+
+    def test_one_gate_covers_both_capture_and_cursor_commit(self):
+        original = self.evidence.commit_page
+        called = []
+
+        def assert_lock_still_owned(*args, **kwargs):
+            from three_api_serial_lock import SerialTickBusy
+            with self.assertRaises(SerialTickBusy):
+                with serial_tick_lock(self.coordinator.path):
+                    self.fail("Serial gate was released before cursor commit")
+            called.append(True)
+            return original(*args, **kwargs)
+
+        with mock.patch.object(
+                self.evidence, "commit_page", side_effect=assert_lock_still_owned):
+            self.assertTrue(self.tick()["terminal"])
+        self.assertEqual(called, [True])
+        self.assertEqual(self.transport.calls, 1)
+
+    def test_one_gate_rejects_foreign_evidence_and_swapped_transport(self):
+        foreign = Coordinator(self.root / "foreign.sqlite")
+        self.addCleanup(foreign.db.close)
+        foreign_evidence = PageEvidenceStore(foreign)
+        with self.assertRaises(SerialContractBridgeError):
+            self.bridge.run_fixture_page_once(
+                self.job, self.request, foreign_evidence, now=OBSERVED_AT)
+        self.executor.transport = SimpleNamespace(
+            offline_fixture_only=True, send=lambda request: None)
+        with self.assertRaises(SerialContractBridgeError):
+            self.tick()
+        self.assertIsNone(self.bindings.lookup(self.job["id"]))
+        self.assertEqual(self.transport.calls, 0)
+
