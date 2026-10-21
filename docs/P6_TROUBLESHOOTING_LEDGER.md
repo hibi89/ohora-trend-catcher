@@ -136,7 +136,8 @@
 | P6-036 | 회귀 fixture | page3의 짧은 응답을 후속 커서가 있는 page-limit 상태로 잘못 만들었음 | fixture를 4개+after로 수정, paging/recovery 29/29 PASS |
 | P6-037 | 문서 인수인계 가드 | 신규 사건 상세는 추가했으나 장부 색인표에서 P6-035 누락 | 색인 보완, 후속 guard 4/4 PASS; 전체 재실행 미수행 |
 | P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
-| P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C response/Capture digest·4 posts·cursor verified, no raw receipt; preserve capture, no resend; n8n exports inactive |
+| P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C capture-only recovery later completed under P6-040; n8n exports inactive |
+| P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
 | P6-035 | 페이징·복구 | after-only cursor가 정상 종료 처리에서 소실 | cursor candidate 보존·49건 read-only 계획·3-page ID 재앵커 |
 | P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
 | P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
@@ -450,3 +451,13 @@
 - **Quota and calls:** No hold was manually cleared and no 85% threshold bypassed. The runner's first failure summary exposed `live_meta_called=unknown`; actual request count from that summary is therefore not asserted. No further live call after post-run evidence review.
 - **n8n:** No local n8n process, CLI, or listener on 5678. The two checked export JSON files are inactive, two-node drafts, without credentials or webhook trigger. No activation/connection performed.
 - **Next safe actions:** After lease expiry, diagnose C RAW promotion using only its existing immutable Capture and an HTTP-disabled path; maintain C usage hold unless verified safe usage permits normal gate release. Reconcile B credentials/permissions/fields offline; existing failed requests stay excluded. n8n needs a reachable instance, user-approved credential binding, and a workflow that consumes verified P6 RAW output. Continue only on this branch, no `main` merge.
+
+### P6-040 — 2026-10-21 · SQLite Row/tuple false digest-collision during Capture replay
+
+- **증상:** A C page2 response had valid safe response digest and immutable Capture digest, 4 posts and a cursor matching the captured response, but remained unprocessed without a RAW receipt. Replaying its Capture through the production RAW projection stopped safely before coordinator completion.
+- **확정 원인:** `raw_v2/three_api_observation_versions.py::_write_state` fetched `sqlite3.Row` values then compared the Row object directly with a tuple. In production `collector.connect` sets `row_factory=sqlite3.Row`; the same stored state therefore compares unequal to its equal tuple, raising a false `Account state digest collision` (and similarly affected post states). Existing offline tests used tuple rows and missed it.
+- **최소 수정:** convert both fetched rows to tuples before comparing persisted state JSON. Added `test_unchanged_recheck_reuses_states_with_sqlite_row_factory`.
+- **증거:** The immutable C Capture failed `write_capture` in a read-only-source/in-memory clone of the current pilot RAW, tracing to `_write_state` account-state comparison. After the fix, the same Capture successfully wrote and validated a receipt in that memory clone. Then, after the existing lease naturally expired, one bounded runner step returned `recovered_pages=1`; no Meta HTTP was needed. Read-only postcheck: 100 durable receipts / 400 posts; the C Capture is processed and its RAW receipt digest validates. C lane remains held at `live_pending_usage`; no manual reset.
+- **검증:** full `tests/run_offline.py` 956 selected, exit 0; P2 observations 15/15, RAW writer 14/14, paging recovery 13/13, handoff guard 4/4. No real cursor invalidation was observed, so the re-anchor flow remains synthetic/offline-only.
+- **커밋:** `28612ec` code/test. Handoff documentation is in the following docs-only commit.
+- **보존/다음:** Existing RAW source DB/CSV/Capture untouched; only new verified P6 pilot observations were appended. B's four and A's one `failed_no_retry` jobs remain excluded. Reconcile credential/permission/field cause for existing HTTP400s offline; n8n remains unconnected because no local server/daemon is available. Do not retry or manually release usage hold.
