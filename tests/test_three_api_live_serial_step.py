@@ -432,5 +432,26 @@ class LiveSerialStepGateTests(unittest.TestCase):
         step.assert_called_once()
 
 
+    def test_offline_evidence_blocks_live_before_coordinator_access(self):
+        from unittest.mock import Mock
+        from three_api_evidence import PageEvidenceStore
+        # Deliberately uninitialized: the gate must not read staging DB or
+        # interact with a transport when a live attempt is requested.
+        self.runner.evidence = object.__new__(PageEvidenceStore)
+        self.runner.coordinator = Mock()
+        self.runner.executor = Mock()
+        with self.assertRaisesRegex(LiveSerialStepError, "Offline staging evidence"):
+            self.runner.step([{} for _ in range(294)], **self.kwargs)
+        self.runner.coordinator.assert_not_called()
+        self.runner.executor.assert_not_called()
+
+    def test_offline_evidence_still_requires_explicit_approval(self):
+        from three_api_evidence import PageEvidenceStore
+        self.runner.evidence = object.__new__(PageEvidenceStore)
+        with self.assertRaisesRegex(LiveSerialStepError, "Explicit live approval"):
+            self.runner.step([{} for _ in range(294)],
+                             **{**self.kwargs, "approved": False})
+
+
 if __name__ == "__main__":
     unittest.main()
