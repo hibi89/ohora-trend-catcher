@@ -213,12 +213,82 @@ def read_pilot_status(workspace, *, day=None):
     }
 
 
+
+def read_pilot_failures(workspace, *, day=None):
+    """Read-only, credential-free blocked-job diagnostics.
+
+    Never returns request IDs, target usernames, payloads, cursors, tokens,
+    or raw Meta response bodies. No transport or coordinator is instantiated.
+    """
+    root = Path(workspace).expanduser()
+    if not root.is_dir() or root.is_symlink():
+        raise PilotConfigurationError("Existing dedicated pilot directory required")
+    root = root.resolve()
+    if day is None:
+        day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+    if not re.fullmatch(r"20[0-9]{2}-[01][0-9]-[0-3][0-9]", day):
+        raise PilotConfigurationError("Invalid pilot date")
+    control = root / day / "coordinator.sqlite"
+    capture = root / day / "capture.sqlite"
+    if (not control.is_file() or not capture.is_file()
+            or control.is_symlink() or capture.is_symlink()
+            or (root / day).is_symlink()):
+        raise PilotConfigurationError("Pilot coordinator or Capture store not found")
+    try:
+        with sqlite3.connect(control.as_uri() + "?mode=ro", uri=True) as jobs, \
+             sqlite3.connect(capture.as_uri() + "?mode=ro", uri=True) as records:
+            bound = jobs.execute(
+                "SELECT j.id,j.lane,j.state,j.account_ordinal,j.page,b.request_id "
+                "FROM jobs j JOIN job_request_bindings b ON b.job_id=j.id "
+                "WHERE j.state!='done' ORDER BY j.id"
+            ).fetchall()
+            result = []
+            for job_id, lane, state, ordinal, page, request_id in bound:
+                intent = records.execute(
+                    "SELECT outcome FROM intents WHERE request_id=?",
+                    (request_id,)).fetchone()
+                failure = records.execute(
+                    "SELECT payload FROM failures WHERE request_id=?",
+                    (request_id,)).fetchone()
+                capture_count = records.execute(
+                    "SELECT COUNT(*) FROM captures WHERE request_id=?",
+                    (request_id,)).fetchone()[0]
+                response_count = records.execute(
+                    "SELECT COUNT(*) FROM response_evidence WHERE request_id=?",
+                    (request_id,)).fetchone()[0]
+                data = json.loads(failure[0]) if failure else {}
+                # Strict allowlist; do not expose even sanitized free-form text.
+                category = data.get("category")
+                scope = data.get("scope")
+                status = data.get("http_status")
+                result.append({
+                    "job_id": job_id, "lane": lane, "state": state,
+                    "account_ordinal": ordinal, "page": page,
+                    "intent_outcome": intent[0] if intent else "missing",
+                    "failure_category": category if category in (
+                        "http_error", "permission", "auth", "rate_limit",
+                        "outcome_unknown", "invalid_response", "capture_io",
+                        "approval_denied", "usage_missing", "usage_limit") else "other",
+                    "failure_scope": scope if scope in ("account", "lane", "global") else "unknown",
+                    "http_status": status if type(status) is int and 100 <= status <= 599 else None,
+                    "has_capture": bool(capture_count),
+                    "has_response_evidence": bool(response_count),
+                    "automatic_retry_allowed": False,
+                })
+    except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+        raise PilotConfigurationError("Read-only failure inspection unavailable") from None
+    return {"mode": "READ_ONLY_FAILURE_DIAGNOSTIC", "day_kst": day,
+            "blocked_jobs": result, "live_meta_called": False, "db_writes": 0}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path,
                         help="Official 294-account account_list.csv (read-only)")
     parser.add_argument("--workspace", type=Path, required=True,
                         help="Dedicated isolated P6 pilot directory")
+    parser.add_argument("--failures", action="store_true",
+                        help="Inspect bound unfinished jobs without Meta or DB writes")
     parser.add_argument("--status", action="store_true",
                         help="Read existing pilot SQLite status only; no credentials/Meta")
     parser.add_argument("--day", type=str, default=None,
@@ -231,7 +301,13 @@ def main(argv=None):
                         help="Explicitly confirm the separate owner authorization")
     options = parser.parse_args(argv)
     try:
-        if options.status:
+        if options.status and options.failures:
+            raise PilotConfigurationError("Choose one read-only mode")
+        if options.failures:
+            if options.live or options.confirm_owner_approval or options.source is not None or options.day is not None and not isinstance(options.day, str):
+                raise PilotConfigurationError("Failure inspection cannot enable Meta")
+            result = read_pilot_failures(options.workspace, day=options.day)
+        elif options.status:
             if options.live or options.confirm_owner_approval:
                 raise PilotConfigurationError("Status mode cannot enable Meta")
             result = read_pilot_status(options.workspace, day=options.day)
