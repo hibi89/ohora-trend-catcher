@@ -80,6 +80,21 @@ def audit_raw_receipt_links(coordinator_db, raw_port, capture_port):
     if not callable(getattr(capture_port, "get_capture_for_request", None)):
         raise ValueError("Read-only capture port required")
     base = audit_page_evidence(coordinator_db)
+    # A missing binding table is a migration/preflight failure, not a crash.
+    table = coordinator_db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='job_request_bindings'"
+    ).fetchone()
+    if table is None:
+        return {
+            "mode": "OFFLINE_READ_ONLY",
+            "pages_checked": base["pages_checked"],
+            "verified_raw_receipts": 0,
+            "valid": False,
+            "findings": sorted(set(base["findings"]) | {"missing_binding_table"}),
+            "external_raw_receipts_verified": False,
+            "runtime_authorized": False,
+        }
     rows = coordinator_db.execute(
         "SELECT e.receipt,b.request_id FROM page_evidence e "
         "LEFT JOIN job_request_bindings b ON b.job_id=e.job_id"
