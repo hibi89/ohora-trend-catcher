@@ -22,6 +22,8 @@ from three_api_evidence import PageEvidenceStore
 from three_api_job_binding import JobBindingError, JobRequestBindingStore
 from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter
+from three_api_request_spec import build_request_spec
+from three_api_runtime_contract import digest_sha256
 from test_three_api_contract_executor import (
     OBSERVED_AT, SCHEMA, make_request, make_response,
 )
@@ -374,4 +376,90 @@ class RealFixtureCaptureBridgeTests(TestCase):
             self.tick()
         self.assertIsNone(self.bindings.lookup(self.job["id"]))
         self.assertEqual(self.transport.calls, 0)
+
+    def test_one_gate_supports_a_then_c_same_account(self):
+        # Coordinator's frozen first-account assignment is A page1, C page2.
+        original = make_response(self.request)
+        root = dict(original.payload["business_discovery"])
+        media = dict(root["media"])
+        media["paging"] = {
+            "next": "https://graph.facebook.com/fixture-next",
+            "cursors": {"after": "synthetic_cursor_2"},
+        }
+        root["media"] = media
+        self.transport.response = replace(
+            original, payload={"business_discovery": root},
+            next_cursor="synthetic_cursor_2")
+        first = self.tick()
+        self.assertFalse(first["terminal"])
+        self.assertEqual(first["next_cursor"], "synthetic_cursor_2")
+
+        next_job = self.coordinator.lease("C", now=OBSERVED_AT)
+        self.assertIsNotNone(next_job)
+        self.assertEqual(
+            (next_job["account_ordinal"], next_job["page"], next_job["lane"]),
+            (1, 2, "C"))
+        spec = build_request_spec(
+            "C", self.request.username, after="synthetic_cursor_2")
+        next_request = replace(
+            self.request, request_id="req-" + "2" * 64,
+            lane="C", phase="catchup", page=2,
+            cursor="synthetic_cursor_2", request_spec=spec,
+            request_spec_digest=digest_sha256({
+                "api_version": self.request.api_version,
+                "target_ig_user_id": self.request.target_ig_user_id,
+                "spec": spec,
+            }),
+        )
+        second_response = make_response(next_request)
+        root = dict(second_response.payload["business_discovery"])
+        media = dict(root["media"])
+        post = dict(media["data"][0])
+        post["id"] = "1234567891"
+        media["data"] = [post]
+        root["media"] = media
+        self.transport.response = replace(
+            second_response, payload={"business_discovery": root})
+        second = self.bridge.run_fixture_page_once(
+            next_job, next_request, self.evidence, now=OBSERVED_AT)
+        self.assertTrue(second["terminal"])
+        self.assertEqual(self.transport.calls, 2)
+        self.assertEqual(self.raw_count(), 2)
+        self.assertEqual(self.edge_count(), 2)
+
+    def test_one_gate_supports_b_front_without_cross_lane_override(self):
+        # Frozen plan places account 151 page1 on B, not A.
+        job_b = self.coordinator.lease("B", now=OBSERVED_AT)
+        self.assertIsNotNone(job_b)
+        self.assertEqual(
+            (job_b["account_ordinal"], job_b["page"], job_b["lane"]),
+            (151, 1, "B"))
+        spec = build_request_spec("B", "nails_151")
+        request_b = replace(
+            self.request, account_ordinal=151, account_key="KR_151",
+            username="nails_151", lane="B",
+            request_id="req-" + "b" * 64, request_spec=spec,
+            request_spec_digest=digest_sha256({
+                "api_version": self.request.api_version,
+                "target_ig_user_id": self.request.target_ig_user_id,
+                "spec": spec,
+            }),
+        )
+        self.raw_db.execute("INSERT INTO accounts VALUES(?)", ("KR_151",))
+        response = make_response(request_b)
+        root = dict(response.payload["business_discovery"])
+        root["username"] = "nails_151"
+        media = dict(root["media"])
+        item = dict(media["data"][0])
+        item["username"] = "nails_151"
+        media["data"] = [item]
+        root["media"] = media
+        self.transport.response = replace(
+            response, payload={"business_discovery": root})
+        self.assertTrue(self.bridge.run_fixture_page_once(
+            job_b, request_b, self.evidence, now=OBSERVED_AT)["terminal"])
+        self.assertEqual(self.transport.calls, 1)
+        self.assertEqual(self.raw_count(), 1)
+        self.assertEqual(self.edge_count(), 1)
+        self.assertIsNone(self.bindings.lookup(self.job["id"]))
 
