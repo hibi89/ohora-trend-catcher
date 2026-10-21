@@ -36,6 +36,7 @@
 | P6-022 | Windows CI | 294계정 roster 5개 테스트 480초 초과 | 2/2/1 샤딩, SHA 5dfae40 Runtime 12/12 PASS |
 | P6-023 | 직렬·영속 통합 | fixture-only 직렬 전송 후 Capture/RAW·cursor 확정에 별도 잠금 경계가 없었음 | captured-only page commit을 동일 OS gate에 연결; 8개 격리 SQLite 통합 회귀, CI 판정 대기 |
 | P6-024 | 단일 진입점 설계 | fixture 송신과 페이지·커서 확정을 서로 다른 OS 잠금 구간에서 처리 | 단일 잠금 run_fixture_page_once, 최초 송신/기존 바인딩 replay 분기 및 A/B/C 합성 회귀; 신규 CI 판정 대기 |
+| P6-025 | 직렬 작업선택·사용량 | API 레인 선택과 fixture 송신·정확한 사용량 증거/복구 연결 부족 | 오프라인 job lease + A/B/C turn + pre-send durable quota hold + read-only 진단; 17개 합성 회귀, 신규 CI 판정 대기 |
 
 ## 사건별 상세
 
@@ -230,6 +231,8 @@
 - **보존 위험·잔여 차단:** fixture 전용이며 운영 자격증명·Meta Graph·운영 SQLite/CSV/RAW·scheduler·main에 접근/변경하지 않는다. 실제 live-transport serial gate·한도 독립성·운영 파일/백업·365일 History 연결은 **미구현/미검증**. Capture 없는 예약은 재송신하지 않고 operator review에 남는다. 응답 수신과 RAW 확정은 여전히 별도 DB이며 중간 실패가 가능하나, durable capture 기반 replay로 복구한다.
 - **롤백·재발 방지:** feature branch에서 신규 commit path/테스트만 revert, 기존 원본/운영 DB를 덮거나 재설정하지 않는다. 신규 직렬 컴포넌트는 transport send·capture 영속화·RAW receipt·page/cursor 확정을 나누어 회귀, 재시작 후 `transport.calls=0` 확인을 필수로 한다.
 
+> **P6-024 CI 후속 확인 (2026-10-21 KST):** `e517436f8bd259f4ccd3826f630e73b7f2a08461` [Runtime #39519036382](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036382) `completed/success` Linux 1 + Windows 11 = 12/12; [Three API #39519036531](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036531), [C Contract #39519036478](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036478), [Frozen Guard #39519036411](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036411) 동일 SHA `completed/success`. 이 판정은 이후 P6-025 변경에는 소급하지 않는다.
+
 ### P6-024 — fixture-only 단일 직렬 진입점에서 binding→Capture/RAW→커서 원자적 직렬화 (2026-10-21 KST)
 
 - **관찰·원인 분리:** P6-020/023의 `dispatch_fixture_once`와 `commit_captured_fixture_page`는 각각 OS 직렬 잠금을 보유했지만 **수신과 커서 확정 사이에는 잠금 해제 구간**이 존재했다. 바인딩으로 이중 HTTP는 차단했으나, 전체 작업을 한 차례의 serial gate 안에서 실행하는 사전 합격 조건은 충족하지 않았다. **실제 데이터 손상·경합 장애는 관측되지 않았고, 아키텍처 연결 보강이다.**
@@ -239,6 +242,16 @@
 - **검증 근거·진행:** 코드 `98416ee0d613f26aa71f767f94d04b419216afe5`, 테스트 `629e75846f997440b8bca1cf030264330072ca01` / `cf25395e90da0ef9ef71dcfbf7b5321733e41e4b`. **기록 시점 최신 전체 CI PASS 미확정**, 변경 SHA와 최종 문서 HEAD가 다르므로 새 Runtime Linux·Windows와 Three API/C Contract/Frozen Guard가 정확한 최종 SHA를 완료할 때만 PASS로 변경. 이전 `b2272de` 성공을 새 코드 성공으로 대용하지 않는다.
 - **안전 경계·잔여 작업:** 단일 tick 처리 자체가 fixture-only이고 `MetaTransport` 및 인증 credential을 받지 않는다. 실 Meta 3 API 호출/독립 쿼터 검증, 294계정 실시간 스케줄 자동선택, 운영 DB/CSV, 365일 History, 배포, `main` 병합은 **미구현·미승인**. 테스트 작성은 운영 데이터 검증이 아니다.
 - **롤백/회귀 방지:** feature 브랜치의 `98416ee`/추가 회귀만 git revert; 운영 원본/토큰/수집 이력은 건드리지 않는다. 후속 개발자는 작업 성공과 중간 중단·중복 발송 0·실패 차단을 별도 검증하고, 85% usage 차단·최소 65분 규칙을 새 runner에서 우회하지 않는다.
+
+### P6-025 — 3 API fixture 직렬 선택·85% quota 회복가능 영속 게이트 (2026-10-21 KST)
+
+- **확인된 기존 공백:** P6-024의 `run_fixture_page_once(job, request, evidence)`는 호출자가 이미 lease/job을 선택해야 했다. 따라서 3개 A/B/C 레인 선택, quota 사용량 기록, durable fairness 순서, 기존 bound capture 복구 우선권은 아직 단일 실행 진입점에 연결되지 않았다. **운영 결함이 발생했다는 보고가 아니라 사전 구현 부족 사항이다.**
+- **구현·선택 정책:** `raw_v2/three_api_serial_contract_bridge.py`에 `step_fixture_serial(fixtures, evidence, now, lane_order)` 추가(`9829596`). **정확히 1개의** 합성 coordinator job을 동일 OS lock 아래 lease→증거 검증→영속 binding→fixture response→Capture/RAW→receipt→cursor로 진행. 초기 순서 A/B/C, 성공 레인 `offline_contract_serial_turn`에 SQLite 보존, 재시작 후 성공한 레인 다음부터 순환. `lease_for_recovery` 우선 → `lease_for_dispatch`; 기존 binding은 원래 Capture를 읽고 **전송 0**, Capture 없으면 operator review 차단. `PageEvidenceStore`의 선행 cursor가 없는 page2/3은 Coordinator가 lease하지 않는다. 잘못됐거나 없는 fixture는 **binding·전송 전** 해당 미사용 lease만 원복 후 fail-closed 처리. `limit=4`는 RequestEnvelope/RequestSpec 기존 계약 검증을 사용하며 공식 294계정 리스트·원본 RAW 입력은 하지 않는다.
+- **quota 사고 차단 개선:** 사용량 안전증거가 유실되는 프로세스 강제 종료를 고려하여 **send 직전** lane에 `fixture_pending_usage` / `halted=1` / 최소 65분 `ready_at`을 영속 기록(`ed09b97`). 정상적인 **safe response + durable Capture**의 verified usage가 85 미만인 경우에만 임시 보류를 해제(`5b90f1f`), 85 이상이면 `usage_limit`, 사용량 누락·전송 결과 불명·schema 실패·Capture 미영속이면 `missing_usage`로 65분 이상 차단. 단순 시간 경과로 자동 해제하지 않고 명시적 operator `reset_after_verified_cooldown`을 유지한다. 이 규칙은 실 Meta quota 독립성을 증명하지 않는다.
+- **진단·테스트:** `fixture_tick_diagnostics(now)` read-only(`7e6a00a`): 레인 차단 사유/해제 가능시각/신규 lease 후보/복구 lease 후보/마지막 성공 레인 조회, 무인 실행·Meta 호출·수집 변경 없음. `tests/test_three_api_serial_selection.py`의 **17개 합성 회귀 작성**(`9dafe40`, `ac946dc`, `011ae6f`, `153160c`): A→B→C cursor 연결, 85%와 무사용량 차단, 예외 응답 재전송 금지, 영속 Capture 재시작 replay, 잃어버린 fixture lease 원복, 잠금 경합, 65분 후에도 operator reset 전 차단, 전송 중 선차단 관찰, schema 실패 시 차단 유지, 무변경 read-only 진단. 신규 테스트가 Windows `remaining` 480초 그룹에 누적되지 않도록 `tests/run_offline.py`(`6b8dd9a`)의 4개 orchestrator CRC32 shard에 분산하고 `tests/test_offline_shards.py`(`c5cf881`)에 배정 회귀 추가, `p6-runtime-integration-offline.yml`(`c8c2350`)에 테스트 파일 path trigger/compile 포함.
+- **검증 상태:** 변경된 모든 커밋은 `codex/p6-readiness-hardening-20261019` 개발 브랜치에만 존재하며 본 장부 작성 시점 최종 HEAD의 **전체 Runtime Linux/Windows 12개 및 3 API/C Contract/Frozen Guard 결과는 미확정**. 이전 `e517436` [Runtime #39519036382](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036382) 12/12 PASS는 이 변경 전 증거. 최신 HEAD의 실제 Actions 결과로 판정할 것; 이전 run의 queued/cancelled는 성공으로 간주하지 말 것.
+- **위험·미구현:** 수동 fixture dict만 사용하고 실제 Meta 전송, 가동 중 API 주체 인증/독립 quota, 운영 DB·RAW/CSV, 원본 294계정 실계정 ID fingerprint, 2라운드/365일 History 자동 정책, 스케줄러, `main` 병합에 연결되지 않았다. quota 분리는 **합성 상태 모델**일 뿐 Meta 비즈니스 자격증명별 quota 분리를 입증하지 않는다. 서로 다른 영속 DB 사이를 단일 원자적 트랜잭션이라고 주장하지 말 것.
+- **롤백·재발방지:** feature branch의 `step_fixture_serial`, `fixture_tick_diagnostics`, 새 합성 테스트 및 샤딩 경로만 순차 revert, 동결 원문·운영 원본 RAW/CSV/DB는 건드리지 말 것. 합성 fixture 없이도 bound Capture는 복구 가능해야 하고, 실제 HTTP의 send 재시도는 별도 승인·재검증 전까지 불허한다.
 
 ## 새 사건을 추가할 때의 고정 서식
 
