@@ -22,6 +22,66 @@ class LiveSerialStepGateTests(unittest.TestCase):
             caller_ids={"A": "1", "B": "2", "C": "3"}, approved=True,
         )
 
+    def _fake_one_page_runner(self):
+        """All ports are mocks; no filesystem, secrets, sockets or HTTP."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        runner = object.__new__(LiveSerialStep)
+        runner.coordinator = Mock()
+        runner.coordinator.path = "synthetic-lock.sqlite"
+        runner.coordinator.lease_for_recovery.return_value = None
+        runner.coordinator.lease_for_dispatch.return_value = {
+            "id": 1, "lane": "A", "account_ordinal": 1, "page": 1}
+        runner.coordinator.db.execute.return_value = SimpleNamespace(rowcount=1)
+        runner.bindings = Mock()
+        runner.bindings.lookup.return_value = {"request_id": "req-" + "a" * 64}
+        runner.evidence = Mock()
+        runner.executor = Mock()
+        runner.executor.transport._lanes = {
+            lane: Mock(_caller_ig_id=caller)
+            for lane, caller in self.kwargs["caller_ids"].items()
+        }
+        runner.executor.capture.get_response_evidence.return_value = {
+            "classification": "safe",
+            "safe_usage": {"max_usage_percent": 30},
+        }
+        runner.executor.capture.get_capture_for_request.return_value = Mock()
+        runner.bindings.commit_captured_page.return_value = {"terminal": False}
+        return runner
+
+    def test_committed_capture_but_failed_page_evidence_keeps_lane_halted(self):
+        """A 30% response cannot reopen quota if RAW/cursor commit failed."""
+        from unittest.mock import Mock, patch
+        runner = self._fake_one_page_runner()
+        runner.bindings.commit_captured_page.side_effect = ValueError(
+            "synthetic cursor receipt not committed")
+        request = Mock(request_id="req-" + "a" * 64)
+        with patch("three_api_live_serial_step.serial_tick_lock"), patch(
+                "three_api_live_serial_step.prepare_job_request",
+                return_value=request):
+            with self.assertRaisesRegex(ValueError, "cursor receipt"):
+                runner.step(valid_official_roster(), **self.kwargs)
+        runner.bindings.dispatch_once.assert_called_once()
+        runner.coordinator.db.execute.assert_called_once()
+        self.assertIn("halted=1",
+                      runner.coordinator.db.execute.call_args.args[0])
+        runner.coordinator.observe_usage.assert_not_called()
+
+    def test_committed_raw_and_cursor_can_release_safe_lane(self):
+        """Completion plus verified 30% usage enables the next serial page."""
+        from unittest.mock import Mock, patch
+        runner = self._fake_one_page_runner()
+        request = Mock(request_id="req-" + "a" * 64)
+        with patch("three_api_live_serial_step.serial_tick_lock"), patch(
+                "three_api_live_serial_step.prepare_job_request",
+                return_value=request):
+            result = runner.step(valid_official_roster(), **self.kwargs)
+        self.assertEqual(result["status"], "page_committed")
+        self.assertEqual(runner.coordinator.db.execute.call_count, 2)
+        self.assertIn("halted=0",
+                      runner.coordinator.db.execute.call_args.args[0])
+        runner.bindings.commit_captured_page.assert_called_once()
+
     def test_quota_release_requires_completed_page(self):
         """Static regression: partial RAW/cursor failure must not clear lane."""
         from pathlib import Path
