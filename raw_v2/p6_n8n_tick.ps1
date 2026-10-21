@@ -5,12 +5,9 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $archive = Split-Path -Parent $repo
-$rosterCandidates = @(Get-ChildItem -LiteralPath $archive -Directory | ForEach-Object {
-    $candidate = Join-Path $_.FullName 'account_list.csv'
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidate }
-})
-if ($rosterCandidates.Count -ne 1) { throw 'Official roster was not uniquely located.' }
-$roster = $rosterCandidates[0]
+$officialDataDirectory = -join (0x32,0xcc28,0x20,0xd504,0xb85c,0xc81d,0xd2b8,0x20,0xb370,0xc774,0xd130 | ForEach-Object { [char]$_ })
+$roster = Join-Path (Join-Path $archive $officialDataDirectory) 'account_list.csv'
+if (-not (Test-Path -LiteralPath $roster -PathType Leaf)) { throw 'Official roster is unavailable.' }
 $pilot = Join-Path $env:LOCALAPPDATA 'OHORA_P6_PILOT'
 $credentials = 'C:\Users\haein\OneDrive\Desktop\ohora_env_a_b_c'
 $state = Join-Path $env:LOCALAPPDATA 'OHORA_P6_PILOT\scheduler_state.json'
