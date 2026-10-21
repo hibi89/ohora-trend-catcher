@@ -136,6 +136,7 @@
 | P6-036 | 회귀 fixture | page3의 짧은 응답을 후속 커서가 있는 page-limit 상태로 잘못 만들었음 | fixture를 4개+after로 수정, paging/recovery 29/29 PASS |
 | P6-037 | 문서 인수인계 가드 | 신규 사건 상세는 추가했으나 장부 색인표에서 P6-035 누락 | 색인 보완, 후속 guard 4/4 PASS; 전체 재실행 미수행 |
 | P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
+| P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C response/Capture digest·4 posts·cursor verified, no raw receipt; preserve capture, no resend; n8n exports inactive |
 | P6-035 | 페이징·복구 | after-only cursor가 정상 종료 처리에서 소실 | cursor candidate 보존·49건 read-only 계획·3-page ID 재앵커 |
 | P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
 | P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
@@ -439,3 +440,13 @@
 - **미실시:** 기존 coordinator/Capture/RAW DB는 수정하지 않았고, 별도 복구 라운드나 Meta 호출도 실행하지 않았다. 기존 failed-no-retry 요청을 재전송하지 않았으며 3페이지·85%·쿨다운 정책을 바꾸지 않았다.
 - **Git:** 이 기록은 기존 작업 브랜치에서만 관리한다. 인증파일·토큰·계정 ID, 사용자 RAW는 포함하지 않는다. main 병합은 하지 않는다.
 - **다음:** 연결된 세 DB의 읽기 전용 digest 재검증과 원래 49건 대상 식별은 여전히 선행 조건이다. 실제 재탐색/수집은 별도 승인된 recovery round와 quota gate 아래에서만 수행한다.
+
+### P6-039 — 2026-10-21 · bounded live pilot partial progress and n8n blocker
+
+- **범위:** `three_api_manual_pilot.py` only; official 294-account roster, credentials directory stored locally, maximum 3 steps in the first invocation and 1 in a follow-up. No main/legacy collector DB used.
+- **Durable result:** Two A pages were committed after the prior 97-receipt status, resulting in 99 durable receipts and 396 posts/observations. This is partial live collection, not full 294-account completion.
+- **Unprocessed Capture:** A C page2 bound response produced HTTP 200 safe evidence, 4 media items, a recomputed-valid response digest, a recomputed-valid Capture digest, and matching response/Capture cursor. It has no RAW receipt and remains an unprocessed Capture under a `live_pending_usage` lane hold. The run stopped safely; no further attempt was made. Do not resend this bound request. Root cause of the first runner exception is not established; stored evidence is internally valid but RAW promotion has not been verified.
+- **Existing B failures:** Four B HTTP400 jobs remain `failed_no_retry`; B `live_pending_usage` hold remains. No cooldown/usage reset performed. Do not retry them.
+- **Quota and calls:** No hold was manually cleared and no 85% threshold bypassed. The runner's first failure summary exposed `live_meta_called=unknown`; actual request count from that summary is therefore not asserted. No further live call after post-run evidence review.
+- **n8n:** No local n8n process, CLI, or listener on 5678. The two checked export JSON files are inactive, two-node drafts, without credentials or webhook trigger. No activation/connection performed.
+- **Next safe actions:** After lease expiry, diagnose C RAW promotion using only its existing immutable Capture and an HTTP-disabled path; maintain C usage hold unless verified safe usage permits normal gate release. Reconcile B credentials/permissions/fields offline; existing failed requests stay excluded. n8n needs a reachable instance, user-approved credential binding, and a workflow that consumes verified P6 RAW output. Continue only on this branch, no `main` merge.
