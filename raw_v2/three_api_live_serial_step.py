@@ -56,8 +56,7 @@ class LiveSerialStep:
         # Constructor is deliberately staging-only. A manually injected or
         # monkey-patched evidence object must not bypass this runtime boundary.
         # There is no reviewed production evidence port yet.
-        if getattr(self, "_production_evidence_verified", False) is not True:
-            raise LiveSerialStepError("Production evidence port is not verified")
+        raise LiveSerialStepError("Production evidence port is not verified")
         try:
             validate_official_roster(accounts)
         except RosterPreflightError as exc:
