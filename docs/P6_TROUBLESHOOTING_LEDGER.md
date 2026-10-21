@@ -40,8 +40,19 @@
 
 | P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
 | P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
+| P6-028 | CI 사전검증·인수인계 | 294계정 검증 도입 뒤 구형 무효 fixture와 문서 링크 누락으로 Linux/Windows 9건 실패 | fail-closed 검사 순서·모의 명단·인수인계 링크 복구, CI 재검증 대기 |
 
 ## 사건별 상세
+
+### P6-028 — 공식 명단 검사 도입 뒤 모의 fixture와 인수인계 CI 회귀 (2026-10-21)
+
+- **증상·증거:** Runtime Actions #39529205568 Linux 870개 테스트 중 failures=7/errors=2; Windows remaining 동일 9건. RAW #39529165958도 실패. 실 Meta/운영 DB 영향 없음.
+- **확정 원인:** 294행 계정 key/username/ordinal 필수검사 후 기존 recovery/no-send 테스트 3건이 빈 객체 294개를 계속 사용하여 후속 게이트를 실행하지 못함. STATUS/HANDOFF 상단 AGENTS.md 링크 밀림, 프로토콜에서 채팅방 인수인계 표현 누락.
+- **수정:** 264c414: A/B/C 및 offline evidence 게이트 우선 확인. 778c5b1: mock recovery/dispatch의 합성 294개를 유효하게. 1db225e: 채팅방 후임자 안내 복구. e236d86/d77bf1d: STATUS/HANDOFF 필수 링크 상단 고정. e3b04a9: RAW/cursor 확정 실패 시 lane halt 유지하는 행동 테스트 추가.
+- **검증:** 최신 SHA의 전체 Linux/Windows, RAW v2, Three API, C Contract, Frozen Guard 완료 전 PASS 미주장. 코드 저장과 CI 성공은 구별.
+- **보존:** 동결 3 API/limit=4/2라운드/85%/65분/원본 불변 유지. 실 Meta 호출·운영 SQLite·스케줄러·main 병합 없음.
+- **남은 리스크:** 운영 Evidence/RAW 저장 포트와 365일 backfill 미연결. fail-closed staging 차단 유지.
+- **롤백:** 기능 브랜치에서 위 변경만 개별 revert, 운영 CSV/RAW/DB를 건드리지 않음.
 
 ### P6-027 — P6-026 쿼터 복구 정책 변경 뒤 구형 테스트 기대값 충돌 (2026-10-21)
 
