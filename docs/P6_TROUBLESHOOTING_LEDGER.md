@@ -8,6 +8,14 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+## P6-029 · 2026-10-21 · 첫 실수집 파일럿 연결 및 Business Discovery ID 오판
+
+- **문제:** 직렬 수집기가 오프라인 staging evidence만 수용해 원본 Capture/RAW가 실제 커서와 연결되지 않았음. 별개로 Business Discovery 응답의 조회 대상 `business_discovery.id`를 요청 URL의 API 호출자 IG ID와 동일해야 한다고 검사해 정상 Meta 응답을 실패로 오판할 수 있었음.
+- **구현:** `raw_v2/three_api_verified_page_evidence.py`에서 원본 Capture와 영속 RAW receipt를 검증한 후 coordinator 커서를 확정. `three_api_serial_bootstrap.py`로 직렬 runner 구성, `three_api_manual_pilot.py`로 기본 offline 294계정 검증/별도 승인 1페이지(limit=4) 경로 제공. 각 SQLite DB 격리, 비밀값 비노출, no-resend crash recovery 회귀 테스트 추가.
+- **검증:** `ee91ca96`에서 Linux 전체 **902/902**, Windows Runtime 11/11, 3 API/C 계약/동결 검사 모두 성공. Business Discovery ID 계약 2곳 수정 `810b6b8` + `057fc785`, 잘못된 테스트 2건을 사용자명 불일치 테스트로 전환 `a6f1c4f` + `ee91ca96`.
+- **현재 상태:** 원본/RAW/커서의 **오프라인 연결 검증 완료**, 실제 Meta HTTP 호출·운영 DB 변경·main 병합·scheduler 활성화 **없음**. 최신 진단/테스트 `6318a3e`/`cc6ccdd` 이후 CI 재확인 필요. 실 Meta 수집 성공을 주장하지 않는다.
+- **다음:** 공식 로컬 계정 CSV로 preflight, 사용자의 별도 명시 승인 후 1페이지 실수집과 영수증 확인, 이어서 365일 history/backfill 검증. 동일 계정 반복수집의 원본 불변/관측 이력은 지속 확인.
+
 ## 빠른 탐색 — 사건 색인
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
