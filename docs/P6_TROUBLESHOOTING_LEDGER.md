@@ -8,6 +8,16 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+### P6-033 — 2026-10-21 · Live pilot 계정별 HTTP400 후 전체 레인 정지와 Meta error_subcode 유실
+
+- **사용자 실측:** 2026-10-21 KST 분리 파일럿에서 `durable_receipts=79`, `posts=316`, A 완료 31, B 완료 48. 일괄 `--max-pages 50` 호출 도중 27페이지 커밋 후 종료. 기존 terminal HTTP400 요청은 계정 ordinal 32(A), 151/152/201(B)의 총 4건. 해당 요청은 `failed_no_retry`, Capture/response evidence 없음. 원본 사용자 데이터는 GitHub에 전송·수정하지 않음.
+- **확정된 코드 원인:** `three_api_graph_http._read_envelope`가 numeric `error_subcode`를 1,000,000까지만 허용해 Meta의 사용자 없음 하위 코드 `2207013`을 삭제했다. `MetaTransport.send`가 모든 비성공 HTTP 상태에 대해 영속 가능한 account error를 던졌고 `LiveSerialStep`은 실패할 때마다 lane을 최소 65분 영속 중단시켰다. `run_bounded_serial_steps`는 첫 예외에서 전체 batch 종료. 계정 차단을 quota 위반과 동치로 해석하는 것은 근거가 없음.
+- **수정(작업 브랜치 전용):** `three_api_graph_http.py`에서 토큰과 free-form 텍스트는 계속 삭제하고 정수 에러 코드/하위 코드 범위만 1e9까지 확장(`a310065`). `three_api_transport.py`에서 **정확히** HTTP400+code110+subcode2207013인 경우를 분류하고, 신뢰되는 quota 헤더가 있으면 상향 반올림한 0~100%만 실패 메시지에 저장(`3f7e146`); 없는 값은 추측 금지. `three_api_live_serial_step.py`에서 성공 이력이 아닌 **영속 실패 증거 + 원래 binding**과 정확히 일치하는 경우만 `account_failed` 반환, 해당 요청 재호출 없음. 오류 사용량 <85%이면 lane 해제, >=85%면 quota 중단, 없으면 기존 65분 hold 유지(`da8c562`, `2473cf2`). 단순 HTTP400, rate/auth/global, outcome_unknown 또는 누락 증거는 절대 자동 건너뛰거나 quota gate 해제하지 않음. `three_api_manual_pilot.py`는 실패 건수를 보고하며 예외시 read-only 누적 RAW 상태만 표시(`7eecb57`, `029717f`).
+- **테스트 작성:** `tests/test_three_api_live_serial_step.py`의 계정 오류/사용량 20, 85, 누락/미확인 HTTP400/배치 결과 mock 안전 테스트(`f5fb57b`). `tests/test_three_api_transport.py`에 subcode2207013과 x-app-usage 21.3% 반올림/헤더 부재 테스트(`e919425`). 모든 테스트는 synthetic in-memory sender, 실제 Meta 0회.
+- **검증 시점:** 코드 HEAD `a310065`에서 GitHub Actions `P6 Frozen Design Guard` 및 `P6 C Contract Offline` **PASS**. `P6 Runtime Integration Offline` 및 `Three API offline tests`는 장부 갱신 직전 진행 중, 최종 판정은 run completion에서 확인. **실제 사용자의 201번 오류가 코드110/2207013이었는지는 미확인**; 기존 실패를 임의 재시도하거나 소급 수정할 근거 없음.
+- **사용자 재개 지침:** 기존 65분 quota hold가 지난 뒤 명시적인 운영자 reset을 거쳐야 한다. 그 전에 `git pull --ff-only`와 오프라인 suite 통과를 확인. 기존 RAW 316건과 4개 immutable 실패 요청을 유지하고, 추가 실호출은 사용자가 별도 승인한 `--live --confirm-owner-approval` 경로에서만.
+- **범위/롤백:** 지정 branch 코드·offline tests·이 장부만 변경. 동결 설계/3 API·limit4·2 rounds/운영 DB/main 미변경. 오류 분류와 bounded driver를 해당 커밋 단위로 revert 가능; 원본 RAW/DB/CSV 재작성 금지.
+
 ### P6-032 — 2026-10-21 · Windows pilot status SQLite read-only handle leak
 
 - **Observed:** At commit `db110cdd`, [Runtime #39546089085](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39546089085) Linux complete offline suite **915/915 PASS**, C Contract/Three API/Frozen Guard PASS, but Windows `offline-windows (remaining)` **756 tests / errors=1**. The `test_status_is_read_only_and_reports_lanes_without_meta` temporary-directory cleanup raised `PermissionError [WinError 32]` for `coordinator.sqlite`. Other Runtime jobs 11/11 PASS.
