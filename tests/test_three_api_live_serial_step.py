@@ -38,7 +38,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
             self.runner.step([{} for _ in range(294)], **{
                 **self.kwargs, "caller_ids": {"A": "1"}})
 
-    def test_real_sqlite_quota_halt_blocks_dispatch_and_recovery_lease(self):
+    def test_real_sqlite_quota_halt_blocks_dispatch_but_allows_bound_recovery(self):
         """Exercise persisted 85% gate, not a mocked coordinator."""
         import tempfile
         from pathlib import Path
@@ -58,7 +58,21 @@ class LiveSerialStepGateTests(unittest.TestCase):
                 self.assertEqual(lane["halted"], 1)
                 self.assertEqual(lane["reason"], "usage_limit")
                 self.assertIsNone(coordinator.lease_for_dispatch("A", now=now))
-                self.assertIsNone(coordinator.lease_for_recovery("A", now=now))
+                first = coordinator.db.execute(
+                    "SELECT id FROM jobs WHERE lane='A' AND page=1 "
+                    "ORDER BY account_ordinal LIMIT 1"
+                ).fetchone()
+                coordinator.db.execute(
+                    "INSERT INTO job_request_bindings "
+                    "(job_id,request_id,request_digest,reserved_at) "
+                    "VALUES (?,?,?,?)",
+                    (first["id"], "req-" + "a" * 64, "offline-digest",
+                     now.isoformat()),
+                )
+                recovery = coordinator.lease_for_recovery("A", now=now)
+                self.assertIsNotNone(recovery)
+                self.assertEqual(recovery["id"], first["id"])
+                self.assertIsNone(coordinator.lease_for_dispatch("A", now=now))
                 self.assertIsNotNone(coordinator.lease_for_dispatch("B", now=now))
             finally:
                 coordinator.db.close()
