@@ -49,6 +49,9 @@ on:
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_evidence.py'
       - 'raw_v2/three_api_evidence_audit.py'
+      - 'raw_v2/three_api_verified_page_evidence.py'
+      - 'raw_v2/three_api_live_serial_step.py'
+      - 'tests/test_three_api_verified_page_evidence.py'
       - 'tests/test_three_api_evidence_audit.py'
       - 'raw_v2/three_api_job_binding.py'
       - 'raw_v2/three_api_adapter_guard.py'
@@ -104,6 +107,9 @@ on:
       - 'raw_v2/three_api_coordinator.py'
       - 'raw_v2/three_api_evidence.py'
       - 'raw_v2/three_api_evidence_audit.py'
+      - 'raw_v2/three_api_verified_page_evidence.py'
+      - 'raw_v2/three_api_live_serial_step.py'
+      - 'tests/test_three_api_verified_page_evidence.py'
       - 'tests/test_three_api_evidence_audit.py'
       - 'raw_v2/three_api_job_binding.py'
       - 'raw_v2/three_api_adapter_guard.py'
@@ -141,6 +147,9 @@ jobs:
             raw_v2/three_api_raw_writer.py \
             raw_v2/three_api_serial_lock.py \
             raw_v2/three_api_evidence_audit.py \
+            raw_v2/three_api_verified_page_evidence.py \
+            raw_v2/three_api_live_serial_step.py \
+            tests/test_three_api_verified_page_evidence.py \
             tests/test_three_api_evidence_audit.py \
             raw_v2/three_api_serial_contract_bridge.py \
             tests/test_three_api_serial_contract_bridge.py \
