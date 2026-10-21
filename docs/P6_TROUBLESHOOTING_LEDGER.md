@@ -8,6 +8,15 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+## P6-031 · 2026-10-21 · Terminal-bound recovery SQL / Mock fixture CI regression
+
+- **Evidence:** `5d55a1f8` RAW v2 Actions [#39544886165](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39544886165) returned 3 failures and 3 errors, mainly six tests in `test_three_api_live_serial_step.py`. The new mandatory read `SELECT job_id,request_id FROM job_request_bindings` made `Mock.fetchall()` return non-iterable Mock and increased recorded `db.execute` calls.
+- **Cause:** Incomplete mock DB contract and assertions that counted read-only SELECT as a database mutation. `hasattr(Mock, 'fetchall')` is always true for ordinary Mock objects. This was a regression of test fidelity, not evidence of a Meta transport or live SQLite corruption.
+- **Repair (this branch, SHA to be verified):** Keep a mandatory real SQLite terminal-binding read and remove the ineffective `hasattr` fallback; explicitly model an empty iterable SELECT result in mocked tests; assert SQL mutations separately from reads. Add a temporary real-SQLite test with synthetic failed job 451 and a separate B-lane bound job, preserving 451 binding and stale lease, preventing request dispatch, and keeping the 85% quota hold.
+- **Rejected:** Dropping the binding scan, ignoring scan exceptions, deleting/resetting failed job 451, or retriggering failed HTTP. These bypass the immutable no-resend invariant.
+- **Data safety:** Offline code/test only; the real user's pilot DB, 12 posts, API credentials, quota holds and request 451 are not accessed. Real Meta HTTP 0 calls. Frozen design, scheduler and main remain unchanged.
+- **Verification:** Pending CI on the new exact SHA. Roll back via normal feature-branch revert of this repair only, after preserving the terminal exclusion safety invariant.
+
 ## P6-030 · 2026-10-21 · 실 Meta 파일럿 12건 보존 및 A 레인 편중 해소
 
 - **실운영 관측 — 사용자 직접 실행·보고:** 공식 계정 CSV 294행 preflight 및 분리된 API A/B/C 자격증명 검증 성공. 명시 승인된 단일 페이지 1회, 이어서 2페이지 수동 실행에서 모두 `page_committed`. pilot SQLite 읽기 전용 결과 `posts=12`, `post_observations=12`, `account_observations=3`. 동일 날짜 coordinator에서 `jobs`: A done=3, B done=0, C done=0. 원본 SQLite/응답은 사용자 PC에 있으며 GitHub에서 직접 감사한 데이터가 아님.

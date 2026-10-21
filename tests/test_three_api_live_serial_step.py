@@ -33,7 +33,13 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner.coordinator.dispatch_lane_order.return_value = ("A",)
         runner.coordinator.lease_for_dispatch.return_value = {
             "id": 1, "lane": "A", "account_ordinal": 1, "page": 1}
-        runner.coordinator.db.execute.return_value = SimpleNamespace(rowcount=1)
+        def fake_db_execute(sql, *args):
+            # A SELECT is a read, not a mutation. Never return an iterable
+            # synthetic Mock from fetchall(): model the actual SQLite API.
+            if sql.lstrip().upper().startswith("SELECT "):
+                return SimpleNamespace(fetchall=lambda: ())
+            return SimpleNamespace(rowcount=1)
+        runner.coordinator.db.execute.side_effect = fake_db_execute
         runner.bindings = Mock()
         runner.bindings.lookup.return_value = {"request_id": "req-" + "a" * 64}
         runner.evidence = Mock()
@@ -49,6 +55,12 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner.executor.capture.get_capture_for_request.return_value = Mock()
         runner.bindings.commit_captured_page.return_value = {"terminal": False}
         return runner
+
+    @staticmethod
+    def _write_calls(db):
+        return [call for call in db.execute.call_args_list
+                if call.args[0].lstrip().upper().startswith(
+                    ("INSERT ", "UPDATE ", "DELETE ", "REPLACE "))]
 
     def test_terminal_http_400_binding_is_not_resent_or_recovered(self):
         """Expired B failure is preserved; other eligible lane may progress."""
@@ -68,9 +80,95 @@ class LiveSerialStepGateTests(unittest.TestCase):
         self.assertEqual(result["status"], "no_ready_work")
         runner.bindings.dispatch_once.assert_not_called()
         runner.bindings.commit_captured_page.assert_not_called()
-        runner.coordinator.db.execute.assert_not_called()
+        self.assertEqual(self._write_calls(runner.coordinator.db), [])
         runner.executor.capture.get_intent_outcome.assert_called_once_with(
             "req-" + "b" * 64)
+
+    def test_real_sqlite_skips_terminal_451_and_recovers_next_bound_b_job(self):
+        """Real SQLite chooses another B binding without altering failed 451."""
+        import tempfile
+        from datetime import timedelta
+        from pathlib import Path
+        from unittest.mock import Mock, patch
+        from three_api_coordinator import Coordinator, stamp
+        from three_api_job_binding import JobRequestBindingStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(Path(directory) / "terminal-selection.sqlite")
+            try:
+                coordinator.seed()
+                JobRequestBindingStore(coordinator)
+                failed_job = coordinator.db.execute(
+                    "SELECT id FROM jobs WHERE account_ordinal=151 AND page=1"
+                ).fetchone()["id"]
+                healthy_job = coordinator.db.execute(
+                    "SELECT id FROM jobs WHERE account_ordinal=152 AND page=1"
+                ).fetchone()["id"]
+                self.assertEqual(failed_job, 451)
+                self.assertNotEqual(failed_job, healthy_job)
+                now = self.kwargs["requested_at"]
+                failed_request = "req-" + "a" * 64
+                healthy_request = "req-" + "b" * 64
+                coordinator.db.executemany(
+                    "INSERT INTO job_request_bindings "
+                    "(job_id,request_id,request_digest,reserved_at) "
+                    "VALUES (?,?,?,?)",
+                    [(failed_job, failed_request, "offline-digest", stamp(now)),
+                     (healthy_job, healthy_request, "offline-digest", stamp(now))])
+                coordinator.db.execute(
+                    "UPDATE jobs SET state='leased',lease_id=?,leased_until=? "
+                    "WHERE id=?",
+                    ("old-lease-451", stamp(now - timedelta(minutes=16)), failed_job))
+                self.assertTrue(coordinator.observe_usage("B", 85, now=now))
+                failed_before = tuple(coordinator.db.execute(
+                    "SELECT state,lease_id,leased_until FROM jobs WHERE id=?",
+                    (failed_job,)).fetchone())
+                binding_before = tuple(coordinator.db.execute(
+                    "SELECT job_id,request_id,request_digest,reserved_at "
+                    "FROM job_request_bindings WHERE job_id=?", (failed_job,)).fetchone())
+
+                runner = object.__new__(LiveSerialStep)
+                runner.coordinator = coordinator
+                runner.bindings = Mock()
+                runner.bindings.lookup.side_effect = lambda job_id: {
+                    "request_id": failed_request if job_id == failed_job else healthy_request}
+                runner.bindings.commit_captured_page.return_value = {"terminal": False}
+                runner.evidence = Mock()
+                runner.executor = Mock()
+                runner.executor.transport._lanes = {
+                    lane: Mock(_caller_ig_id=caller)
+                    for lane, caller in self.kwargs["caller_ids"].items()}
+                runner.executor.capture.get_intent_outcome.side_effect = (
+                    lambda request_id: "failed_no_retry"
+                    if request_id == failed_request else "safe")
+                runner.executor.capture.get_capture_for_request.side_effect = (
+                    lambda request_id: None if request_id == failed_request
+                    else Mock(request=Mock()))
+                with patch("three_api_live_serial_step.serial_tick_lock"):
+                    result = runner.step(valid_official_roster(), **self.kwargs)
+
+                self.assertEqual(result["status"], "recovered")
+                self.assertEqual(result["lane"], "B")
+                self.assertEqual(result["account_ordinal"], 152)
+                self.assertEqual(tuple(coordinator.db.execute(
+                    "SELECT state,lease_id,leased_until FROM jobs WHERE id=?",
+                    (failed_job,)).fetchone()), failed_before)
+                self.assertEqual(tuple(coordinator.db.execute(
+                    "SELECT job_id,request_id,request_digest,reserved_at "
+                    "FROM job_request_bindings WHERE job_id=?", (failed_job,)).fetchone()),
+                    binding_before)
+                self.assertEqual(coordinator.db.execute(
+                    "SELECT state FROM jobs WHERE id=?",
+                    (healthy_job,)).fetchone()["state"], "leased")
+                lane = coordinator.db.execute(
+                    "SELECT halted,reason FROM lanes WHERE lane='B'").fetchone()
+                self.assertEqual((lane["halted"], lane["reason"]), (1, "usage_limit"))
+                runner.bindings.dispatch_once.assert_not_called()
+                runner.executor.capture.get_capture_for_request.assert_called_once_with(
+                    healthy_request)
+                runner.bindings.commit_captured_page.assert_called_once()
+            finally:
+                coordinator.db.close()
 
     def test_unknown_bound_request_still_blocks_without_resend(self):
         from unittest.mock import patch
@@ -97,9 +195,9 @@ class LiveSerialStepGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "cursor receipt"):
                 runner.step(valid_official_roster(), **self.kwargs)
         runner.bindings.dispatch_once.assert_called_once()
-        runner.coordinator.db.execute.assert_called_once()
-        self.assertIn("halted=1",
-                      runner.coordinator.db.execute.call_args.args[0])
+        writes = self._write_calls(runner.coordinator.db)
+        self.assertEqual(len(writes), 1)
+        self.assertIn("halted=1", writes[0].args[0])
         runner.coordinator.observe_usage.assert_not_called()
 
     def test_committed_raw_and_cursor_can_release_safe_lane(self):
@@ -112,9 +210,9 @@ class LiveSerialStepGateTests(unittest.TestCase):
                 return_value=request):
             result = runner.step(valid_official_roster(), **self.kwargs)
         self.assertEqual(result["status"], "page_committed")
-        self.assertEqual(runner.coordinator.db.execute.call_count, 2)
-        self.assertIn("halted=0",
-                      runner.coordinator.db.execute.call_args.args[0])
+        writes = self._write_calls(runner.coordinator.db)
+        self.assertEqual(len(writes), 2)
+        self.assertIn("halted=0", writes[-1].args[0])
         runner.bindings.commit_captured_page.assert_called_once()
 
     def test_quota_release_requires_completed_page(self):
@@ -464,6 +562,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner = object.__new__(LiveSerialStep)
         runner.coordinator = Mock()
         runner.coordinator.path = "isolated-test.sqlite"
+        runner.coordinator.db.execute.return_value.fetchall.return_value = []
         runner.coordinator.lease_for_recovery.side_effect = [
             {"id": 1, "account_ordinal": 1, "lane": "A"}]
         runner.bindings = Mock()
@@ -491,6 +590,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner = object.__new__(LiveSerialStep)
         runner.coordinator = Mock()
         runner.coordinator.path = "isolated-test.sqlite"
+        runner.coordinator.db.execute.return_value.fetchall.return_value = []
         job = {"id": 1, "account_ordinal": 1, "lane": "A"}
         runner.coordinator.lease_for_recovery.side_effect = [job]
         runner.bindings = Mock()
@@ -521,6 +621,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner = object.__new__(LiveSerialStep)
         runner.coordinator = Mock()
         runner.coordinator.path = "isolated-test.sqlite"
+        runner.coordinator.db.execute.return_value.fetchall.return_value = []
         runner.coordinator.lease_for_recovery.return_value = None
         runner.coordinator.dispatch_lane_order.return_value = ()
         runner.coordinator.lease_for_dispatch.return_value = None

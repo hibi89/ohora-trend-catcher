@@ -75,19 +75,14 @@ class LiveSerialStep:
                 # Read-only scan of immutable bindings: terminal failed requests
                 # must not be re-leased or starve other recoverable captures.
                 excluded = []
-                # Use the real SQLite cursor when present. Lightweight offline
-                # test doubles without a binding scan retain their existing
-                # fail-closed recovery path; they never authorize an HTTP send.
-                database = getattr(self.coordinator, "db", None)
-                if database is not None:
-                    cursor = database.execute(
-                        "SELECT job_id,request_id FROM job_request_bindings"
-                    )
-                    if hasattr(cursor, "fetchall"):
-                        for binding in cursor.fetchall():
-                            if (self.executor.capture.get_intent_outcome(binding["request_id"])
-                                    == "failed_no_retry"):
-                                excluded.append(binding["job_id"])
+                # This is a mandatory real SQLite read. Tests must explicitly
+                # model rows, not rely on Mock.fetchall() being iterable.
+                # If the scan fails, abort before any recovery lease or HTTP.
+                for binding in self.coordinator.db.execute(
+                        "SELECT job_id,request_id FROM job_request_bindings").fetchall():
+                    if (self.executor.capture.get_intent_outcome(binding["request_id"])
+                            == "failed_no_retry"):
+                        excluded.append(binding["job_id"])
                 for lane in LANES:
                     job = (self.coordinator.lease_for_recovery(
                         lane, now=now, exclude_job_ids=excluded)
