@@ -169,7 +169,8 @@ class OfflineSerialContractBridge:
         from three_api_evidence import PageEvidenceStore
         from three_api_raw_writer import ContractRawWriter
         from three_api_runtime_contract import RequestEnvelope, ResponseEnvelope
-        from three_api_coordinator import LANES
+        from three_api_coordinator import LANES, COOLDOWN_MINUTES, stamp
+        from datetime import timedelta
 
         if not isinstance(now, datetime) or now.utcoffset() is None:
             raise SerialContractBridgeError("Timezone-aware time required")
@@ -229,15 +230,35 @@ class OfflineSerialContractBridge:
                             "next_cursor_present": edge["next_cursor"] is not None,
                             "recovery_only": recovery}
 
+                def mark_inflight_usage_unknown(lane):
+                    # Commit the quota hold BEFORE dispatch. A hard process
+                    # crash after transport.send must never leave the lane
+                    # falsely available for another send on restart.
+                    hold = stamp(now + timedelta(minutes=COOLDOWN_MINUTES))
+                    changed = db.execute(
+                        """UPDATE lanes SET halted=1,reason='fixture_pending_usage',
+                               ready_at=MAX(ready_at,?)
+                           WHERE lane=? AND halted=0 AND ready_at<=?""",
+                        (hold, lane, stamp(now))).rowcount
+                    if changed != 1:
+                        raise SerialContractBridgeError("Fixture lane was not available")
+
                 def apply_durable_usage(lane, request):
-                    # Missing/malformed response evidence fails closed with a
-                    # persisted >=65 min gate, NOT an inferred healthy quota.
+                    # Only authenticated safe response evidence can release
+                    # the preflight hold; an uncertain/missing response keeps
+                    # the >=65 min operator-only cooldown in durable SQLite.
                     saved = capture.get_response_evidence(request.request_id)
                     usage = None if saved is None else saved.get("safe_usage", {}).get(
                         "max_usage_percent")
                     if type(usage) is not int or not 0 <= usage <= 100:
                         usage = None
-                    self.coordinator.observe_usage(lane, usage, now=now)
+                    if usage is not None and usage < 85:
+                        db.execute(
+                            """UPDATE lanes SET halted=0,reason=NULL,ready_at=?
+                               WHERE lane=? AND reason='fixture_pending_usage'""",
+                            (stamp(now), lane))
+                    else:
+                        self.coordinator.observe_usage(lane, usage, now=now)
 
                 for lane in order:
                     # Lease predicates enforce halted/cooldown and predecessor
@@ -293,6 +314,7 @@ class OfflineSerialContractBridge:
                             raise
                         raise
                     transport.response = response
+                    mark_inflight_usage_unknown(lane)
                     try:
                         return finish(lane, job, request, recovery=False)
                     finally:
