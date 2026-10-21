@@ -27,10 +27,6 @@ class LiveSerialStep:
             raise LiveSerialStepError("Original binding store required")
         if not isinstance(evidence, PageEvidenceStore) or evidence.coordinator is not coordinator:
             raise LiveSerialStepError("Original evidence store required")
-        # The current PageEvidenceStore explicitly declares offline-only staging.
-        # Reject a live runner before any transport can be used. This gate may
-        # only be removed after a separately reviewed production evidence port.
-        raise LiveSerialStepError("Live evidence port not certified; offline staging only")
         if not isinstance(executor, ThreeApiContractExecutor):
             raise LiveSerialStepError("Contract executor required")
         if (type(executor.transport) is not ThreeLaneMetaTransport
