@@ -162,26 +162,84 @@ def run_manual_pilot(source, workspace, *, live=False,
     }
 
 
+
+def read_pilot_status(workspace, *, day=None):
+    """Inspect existing isolated pilot SQLite stores without creating or editing.
+
+    No credentials, HTTP client, official roster file, coordinator construction,
+    or scheduler are involved. Missing stores fail closed rather than silently
+    producing an empty database. SQLite is opened in URI read-only mode.
+    """
+    root = Path(workspace).expanduser()
+    if not root.is_dir() or root.is_symlink():
+        raise PilotConfigurationError("Existing dedicated pilot directory required")
+    root = root.resolve()
+    if day is None:
+        day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+    if not re.fullmatch(r"20[0-9]{2}-[01][0-9]-[0-3][0-9]", day):
+        raise PilotConfigurationError("Invalid pilot date")
+    raw_path = root / "p6_pilot_raw.sqlite"
+    control_path = root / day / "coordinator.sqlite"
+    if (not raw_path.is_file() or not control_path.is_file()
+            or raw_path.is_symlink() or control_path.is_symlink()
+            or (root / day).is_symlink()):
+        raise PilotConfigurationError("Pilot RAW or coordinator store not found")
+    def readonly(path):
+        # URI mode=ro prevents SQLite from creating a missing file.
+        return sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+    try:
+        with readonly(raw_path) as raw, readonly(control_path) as control:
+            posts = raw.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
+            observations = raw.execute(
+                "SELECT COUNT(*) FROM post_observations").fetchone()[0]
+            receipts = raw.execute(
+                "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0]
+            lanes = {
+                lane: {"done": 0, "pending": 0, "leased": 0}
+                for lane in LANES
+            }
+            for lane, state, count in control.execute(
+                    "SELECT lane,state,COUNT(*) FROM jobs GROUP BY lane,state"):
+                if lane not in lanes or state not in lanes[lane]:
+                    raise PilotConfigurationError("Unexpected pilot job state")
+                lanes[lane][state] = count
+    except sqlite3.Error as exc:
+        raise PilotConfigurationError("Pilot read-only status unavailable") from exc
+    return {
+        "mode": "READ_ONLY_PILOT_STATUS", "day_kst": day,
+        "posts": posts, "post_observations": observations,
+        "durable_receipts": receipts, "lanes": lanes,
+        "live_meta_called": False, "db_writes": 0,
+    }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True,
+    parser.add_argument("--source", type=Path,
                         help="Official 294-account account_list.csv (read-only)")
     parser.add_argument("--workspace", type=Path, required=True,
                         help="Dedicated isolated P6 pilot directory")
-    parser.add_argument("--max-pages", type=int, default=1,
+    parser.add_argument("--status", action="store_true",\n                        help="Read existing pilot SQLite status only; no credentials/Meta")\n    parser.add_argument("--day", type=str, default=None,\n                        help="KST date YYYY-MM-DD for --status (default today)")\n    parser.add_argument("--max-pages", type=int, default=1,
                         help="Explicit serial page cap, 1..294 (default 1)")
     parser.add_argument("--live", action="store_true",
-                        help="Enable at most one Meta page; requires separate owner approval")
+                        help="Enable bounded Meta pages; requires separate owner approval")
     parser.add_argument("--confirm-owner-approval", action="store_true",
                         help="Explicitly confirm the separate owner authorization")
     options = parser.parse_args(argv)
     try:
-        result = run_manual_pilot(
-            options.source, options.workspace,
-            live=options.live,
-            confirm_owner_approval=options.confirm_owner_approval,
-            max_pages=options.max_pages,
-        )
+        if options.status:
+            if options.live or options.confirm_owner_approval:
+                raise PilotConfigurationError("Status mode cannot enable Meta")
+            result = read_pilot_status(options.workspace, day=options.day)
+        else:
+            if options.source is None or options.day is not None:
+                raise PilotConfigurationError("Source required; day is status-only")
+            result = run_manual_pilot(
+                options.source, options.workspace,
+                live=options.live,
+                confirm_owner_approval=options.confirm_owner_approval,
+                max_pages=options.max_pages,
+            )
     except (ValueError, TypeError, RuntimeError, sqlite3.Error):
         parser.exit(2, "P6 pilot stopped safely; check local input/configuration.\n")
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
