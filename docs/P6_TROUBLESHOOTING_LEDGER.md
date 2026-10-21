@@ -138,6 +138,7 @@
 | P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
 | P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C capture-only recovery later completed under P6-040; n8n exports inactive |
 | P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
+| P6-041 | Bounded live progress / n8n setup | A/B/C gates diverged after safe pilot; n8n CLI/runtime unavailable | bounded A batch 3/3 committed, P6 total 103/412; B/C holds unchanged; Docker service start denied |
 | P6-035 | 페이징·복구 | after-only cursor가 정상 종료 처리에서 소실 | cursor candidate 보존·49건 read-only 계획·3-page ID 재앵커 |
 | P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
 | P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
@@ -461,3 +462,11 @@
 - **검증:** full `tests/run_offline.py` 956 selected, exit 0; P2 observations 15/15, RAW writer 14/14, paging recovery 13/13, handoff guard 4/4. No real cursor invalidation was observed, so the re-anchor flow remains synthetic/offline-only.
 - **커밋:** `28612ec` code/test. Handoff documentation is in the following docs-only commit.
 - **보존/다음:** Existing RAW source DB/CSV/Capture untouched; only new verified P6 pilot observations were appended. B's four and A's one `failed_no_retry` jobs remain excluded. Reconcile credential/permission/field cause for existing HTTP400s offline; n8n remains unconnected because no local server/daemon is available. Do not retry or manually release usage hold.
+
+### P6-041 — 2026-10-21 · bounded A progress and unavailable n8n runtime
+
+- **Bounded live result:** With the read-only preflight showing lane A open and B/C held, one `--max-pages 3` invocation completed all 3/3 page steps. Postcheck: 103 durable receipts / 412 post observations; A=54 done, B=48, C=1. No jobs for B/C were dispatched and all previously failed requests remain `failed_no_retry`.
+- **Safety:** This was the final live batch in this work session. No further API request was made, no lane hold was manually cleared, and existing production RAW files remain unchanged. The P6 pilot store contains only verified append observations. Continue future calls only after the required cooldown and fresh usage gate.
+- **n8n runtime check:** No n8n CLI/process/local listener. Docker CLI and service are installed, but the daemon was unavailable. A user-authorized attempt to start the service failed with Windows service permission denial; no container/data was created. Existing two exports remain inactive 2-node manual-trigger/execute-command drafts without credential refs or webhook trigger. Automation integration remains incomplete.
+- **Git:** This state and the preceding P6-040 fix are documented on `codex/p6-readiness-hardening-20261019`; branch push/remote SHA verification follows this docs commit.
+- **Next:** Continue P6 collection only under the 65-minute cooldown and existing 85% stop gate, starting with read-only status/quota. Diagnose B's existing 400s offline; never replay them. n8n requires a locally available runtime or user-provided reachable endpoint and safe credential binding before activation.
