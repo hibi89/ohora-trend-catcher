@@ -1,0 +1,182 @@
+"""Manual single-page P6 collection pilot. OFFLINE PREFLIGHT BY DEFAULT.
+
+This command uses the existing official 294-account CSV parser and the
+repository's additive RAW v2 schema. It never contacts Meta unless BOTH
+--live and --confirm-owner-approval are supplied by the operator. Source
+CSV and any existing operating collection.sqlite remain untouched.
+
+Only ONE page (limit=4) is attempted per invocation. No scheduler, hidden
+retry or automatic looping. Three caller credentials must be in process
+environment, never in command arguments, files or Git. Do not use this
+entrypoint until the repository owner separately authorizes a Meta pilot.
+"""
+from __future__ import annotations
+
+import argparse
+from contextlib import ExitStack
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+from zoneinfo import ZoneInfo
+
+from collector import connect, load_accounts
+from three_api_coordinator import Coordinator
+from three_api_capture import CaptureJournal
+from three_api_credentials import make_references, validate_identity_value
+from three_api_graph_http import GraphHTTPClient, make_strict_sender
+from three_api_live_lane_router import ThreeLaneMetaTransport
+from three_api_raw_writer import ContractRawWriter
+from three_api_roster_preflight import validate_official_roster
+from three_api_serial_bootstrap import build_verified_serial_runner
+from three_api_transport import MetaTransport
+
+LANES = ("A", "B", "C")
+VERSION = re.compile(r"v[0-9]{1,3}\.[0-9]{1,2}\Z")
+
+
+class PilotConfigurationError(ValueError):
+    """Sanitized failure; never includes tokens, file contents or account IDs."""
+
+
+def _validated_roster(source):
+    # The original collector enforces 294 rows in the official KR/US/JP
+    # ordering and returns the immutable original CSV fingerprint.
+    accounts, digest = load_accounts(source)
+    validate_official_roster(accounts)
+    return accounts, digest
+
+
+def _credentials(environment):
+    mapping = {
+        lane: {
+            "token_env_name": f"P6_META_TOKEN_{lane}",
+            "ig_user_id_env_name": f"P6_META_IG_ID_{lane}",
+        }
+        for lane in LANES
+    }
+    refs = make_references(mapping)
+    values = {}
+    for lane in LANES:
+        ref = refs[lane]
+        token = environment.get(ref.token_env_name)
+        caller = environment.get(ref.ig_user_id_env_name)
+        if (not isinstance(token, str) or not 1 <= len(token) <= 4096
+                or any(ord(c) < 33 or ord(c) > 126 for c in token)
+                or not validate_identity_value(caller)):
+            raise PilotConfigurationError("Three lane credentials are not configured")
+        values[lane] = (ref, caller, token)
+    if (len({values[lane][1] for lane in LANES}) != 3
+            or len({values[lane][2] for lane in LANES}) != 3):
+        raise PilotConfigurationError("Three independent caller configurations required")
+    return values
+
+
+def _transports(values):
+    # The strict HTTPS opener denies redirects and implicit proxy routing.
+    # It is CONSTRUCTED only within the separately approved --live path.
+    client = GraphHTTPClient(sender=make_strict_sender(), approved=True)
+    return ThreeLaneMetaTransport({
+        lane: MetaTransport(
+            client=client, credentials=values[lane][0],
+            caller_ig_id=values[lane][1], token=values[lane][2],
+        ) for lane in LANES
+    })
+
+
+def run_manual_pilot(source, workspace, *, live=False,
+                     confirm_owner_approval=False, environment=None):
+    """Read-only preflight, or one explicitly authorized page in a NEW store.
+
+    Never opens a preexisting operational DB. A private work directory holds
+    isolated coordinator and Capture databases and a dedicated RAW v2 DB.
+    """
+    accounts, digest = _validated_roster(source)
+    if live is not True:
+        return {
+            "mode": "OFFLINE_ROSTER_PREFLIGHT",
+            "official_accounts": len(accounts),
+            "api_lanes": len(LANES),
+            "post_limit": 4,
+            "live_meta_called": False,
+        }
+    if confirm_owner_approval is not True:
+        raise PilotConfigurationError("Separate owner approval is required for Meta HTTP")
+
+    env = os.environ if environment is None else environment
+    values = _credentials(env)
+    version = env.get("P6_META_GRAPH_VERSION", "v26.0")
+    if not isinstance(version, str) or not VERSION.fullmatch(version):
+        raise PilotConfigurationError("Invalid Graph API version")
+
+    root = Path(workspace).expanduser()
+    if root.is_symlink() or root.name.lower() == "collection.sqlite":
+        raise PilotConfigurationError("Dedicated pilot directory required")
+    root = root.resolve()
+    day = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    raw_path = root / "p6_pilot_raw.sqlite"
+    control = root / day.isoformat() / "coordinator.sqlite"
+    capture_path = root / day.isoformat() / "capture.sqlite"
+
+    # Explicit port checks are done before any source is touched.
+    if len({raw_path, control, capture_path}) != 3:
+        raise PilotConfigurationError("Independent P6 databases required")
+
+    with ExitStack() as stack:
+        raw_db = connect(raw_path, accounts, digest)
+        stack.callback(raw_db.close)
+        # The RAW contract writer explicitly owns BEGIN/COMMIT transactions.
+        raw_db.isolation_level = None
+        raw = ContractRawWriter(raw_db)
+        coordinator = Coordinator(control)
+        stack.callback(coordinator.db.close)
+        coordinator.seed()
+        capture = CaptureJournal(str(capture_path))
+        stack.callback(capture.close)
+        runner = build_verified_serial_runner(
+            coordinator, capture, raw, _transports(values),
+        )
+        result = runner.step(
+            accounts, run_id="p6-" + day.strftime("%Y%m%d"),
+            roster_digest=digest, day_kst=day,
+            requested_at=datetime.now(timezone.utc),
+            api_version=version,
+            caller_ids={lane: values[lane][1] for lane in LANES},
+            approved=True,
+        )
+    return {
+        "mode": "EXPLICIT_SINGLE_PAGE_ATTEMPT",
+        "status": result["status"],
+        "lane": result.get("lane"),
+        "account_ordinal": result.get("account_ordinal"),
+        "new_http_attempt_limit": 1,
+    }
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, required=True,
+                        help="Official 294-account account_list.csv (read-only)")
+    parser.add_argument("--workspace", type=Path, required=True,
+                        help="Dedicated isolated P6 pilot directory")
+    parser.add_argument("--live", action="store_true",
+                        help="Enable at most one Meta page; requires separate owner approval")
+    parser.add_argument("--confirm-owner-approval", action="store_true",
+                        help="Explicitly confirm the separate owner authorization")
+    options = parser.parse_args(argv)
+    try:
+        result = run_manual_pilot(
+            options.source, options.workspace,
+            live=options.live,
+            confirm_owner_approval=options.confirm_owner_approval,
+        )
+    except (ValueError, TypeError, RuntimeError, sqlite3.Error):
+        parser.exit(2, "P6 pilot stopped safely; check local input/configuration.\n")
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
