@@ -1,7 +1,14 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-072 lane gate diagnosis](docs/P6_TROUBLESHOOTING_LEDGER.md) · A=0 eligible; B/C held; no-progress explained without live calls.
 > Index: [P6-071 n8n verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · 08:35 trigger success; C=69 pages. A/B blockers and duplicate workflow records remain.
 > Index: [P6-070 overnight progress](docs/P6_TROUBLESHOOTING_LEDGER.md) · Read-only P6 snapshot: C=60 done; B held, A four failed_no_retry. Full collection incomplete.
 > Index: [P6-069 cursor recovery verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · [planner](raw_v2/three_api_paging_recovery.py) · Offline only; no live re-anchor.
+
+### P6-072 — 2026-10-22 · 성공 tick이 페이지를 커밋하지 않는 lane gate 진단
+- **실행/데이터:** 08:50 KST active n8n P6 workflow `trigger` execution은 `success`; 마지막 커밋된 페이지는 08:40 KST 이후 증가하지 않았다. Read-only status는 321 receipts / 1284 observations / 1065 unique; A=146 done / 4 leased / 144 pending; B=0/0/294; C=72/0/222.
+- **정확한 eligibility:** coordinator와 동일한 read-only dispatch predicates로 확인: A ready, eligible=0; B halted `live_pending_usage`, eligible=216, dispatchable=0; C halted `usage_limit`, eligible=74, dispatchable=0. C의 `ready_at`은 09:45 KST. B의 ready_at이 지났어도 halted 플래그와 usage proof 없이 재개할 수 없다.
+- **원인 경계:** n8n wrapper `success`는 실제 page commit을 뜻하지 않는다. 지금 no-progress는 lane candidate 부재가 아니라 eligible jobs가 B/C gate에 막히고 A가 predecessor 조건을 만족하는 job을 갖지 않는 상태로 설명된다. B/C 토큰/API 원인이나 개별 Meta failure cause는 여기서 판정하지 않는다.
+- **안전/다음:** no manual tick, lane reset, retry, >85%/cooldown bypass, RAW/Capture/DB mutation, or assistant-initiated Meta request. Latest user explicitly denied new live calls. Existing n8n process/workflow remains active but cannot advance until lane-safe quota evidence and allowed gate transitions exist. Full collection is incomplete; wait for owner direction rather than weaken gates.
 
 ### P6-071 — 2026-10-22 · n8n 예약 tick과 P6 페이지 진척의 교차 확인
 - **P6 상태:** sanitized read-only status 08:36 KST: `db_writes=0`, `live_meta_called=false`, 318 receipts / 1260 observations / 1041 unique posts; A 146 done / 4 leased / 144 pending; B 0/0/294; C 69/0/225. Since P6-070, C committed 3 additional pages (+12 observations).
@@ -356,6 +363,7 @@
 | P6-069 | 커서 무효화 재연결 인수검증 | 신규 요구가 기존 planner/runtime 구현과 오프라인 사례로 충족되는지 확인 | 60 targeted + 4 handoff PASS; full suite 987 PASS / 1 SKIP / 0 FAIL; live recovery 미실행 |
 | P6-070 | 야간 예약 수집 진척 | read-only snapshot confirms C +30 pages since 07:31; B held and four A failures remain no-retry | 309 receipts / 1236 observations / 1017 unique; no Meta call or DB write by status check |
 | P6-071 | n8n 예약 경로 검증 | active P6 workflow의 08:35 trigger success가 C +3 page / +12 observations와 일치 | 1 active + 2 same-name inactive; full collection incomplete; no assistant Meta call |
+| P6-072 | n8n no-progress 진단 | 08:50 wrapper success but no page commit; A eligible 0, B/C lanes held | C 85% usage stop/cooldown to 09:45 KST; no reset or live call |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
