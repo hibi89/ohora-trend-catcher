@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-047 — 2026-10-22 · 예약 실행 진행 확인 및 레인 게이트 보존
+- **관측:** 02:10 KST 읽기 전용 상태에서 durable receipts 144, 전체 post observations 576, unique posts 438; 오늘 A done 41 / leased 1 / pending 252, B/C done 0 / pending 294. 이전 관측(138 receipts, A 35) 이후 예약 스케줄 구간에서 +6 receipts, +24 observations가 확인됐다. n8n loopback 프로세스 PID 20464는 계속 존재한다.
+- **레인 게이트:** A `halted=0`. B/C `halted=1`, reason `live_pending_usage`; 각 `ready_at`은 이미 지났지만 별도 최신 quota 증거가 없으므로 hold를 해제하지 않았다. 조회 출력은 현재 usage percentage를 제공하지 않았다.
+- **실패 바인딩:** A의 account-scope HTTP400 한 건은 `failed_no_retry`, `has_capture=false`, `has_response_evidence=false`, `automatic_retry_allowed=false`; 재전송 금지 유지.
+- **안전/완료도:** 해당 점검은 SQLite mode=ro, DB writes=0, Meta requests=0. 수치는 예약된 라이브 진행을 보여주지만 294계정 완료가 아니다. Cursor invalidation은 관측되지 않았고, recovery planner는 오프라인 전용이며 운영 recovery runner는 미구현이다. A만 정책 게이트로 계속 진행; B/C는 fresh usage 확인 전 보류.
+
 ### P6-045 — 2026-10-22 · n8n tick 처리량을 정책 상한 3페이지로 조정
 - **근거:** 실제 수동 1페이지 실행과 n8n 스케줄 1페이지 실행이 성공했고, 이후 연속 스케줄에서도 추가 페이지가 영속 수집됐다. n8n이 계속 작동 중인데 tick당 1페이지만 실행하면 전체 294계정 목표가 불필요하게 늘어진다.
 - **수정:** adapter 기본값과 PowerShell launcher를 tick당 최대 3페이지로 설정. n8n Schedule Trigger는 매 5분이며, P6 coordinator는 각 response 뒤 85% 사용량/쿨다운 상태를 확인하고 제한에 도달하면 즉시 중단한다. Cursor recovery는 이 자동 tick에 포함되지 않는다.
@@ -153,6 +159,7 @@
 | P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
 | P6-045 | 자동 수집 처리량 | 검증 후에도 n8n tick이 1페이지만 처리해 진행이 지연됨 | 페이지당 quota/cooldown gate를 유지하며 tick 상한 3으로 상향; 76/76 offline PASS, 실제 스케줄 tick 증거 확인 |
 | P6-046 | 커서 무효화 재앵커 | 복구 회귀가 새 커서로 재개할 연결 흐름을 직접 고정하지 않음 | 정상 커서, `resume_required`, 최신 ID 겹침, replacement cursor 및 3-page 제한 회귀 추가; recovery 16 tests |
+| P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
 | P6-042 | 무효 커서 재앵커 인수인계 | 기존 3-page planner가 이미 구현돼 있었으나 신규 요구를 top-level handoff/테스트 인덱스에 명시하지 않음 | invalid cursor → resume_required → known-ID overlap → replacement cursor 오프라인 회귀 추가; production runner/live recovery 미구현 |
