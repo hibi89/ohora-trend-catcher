@@ -14,7 +14,7 @@ entrypoint until the repository owner separately authorizes a Meta pilot.
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from datetime import datetime, timezone, timedelta
 import json
 import os
@@ -188,7 +188,9 @@ def read_pilot_status(workspace, *, day=None):
         # URI mode=ro prevents SQLite from creating a missing file.
         return sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
     try:
-        with readonly(raw_path) as raw, readonly(control_path) as control:
+        # sqlite3.Connection.__exit__ commits/rolls back but does NOT close.
+        # Explicit closing is essential for Windows file-lock cleanup.
+        with closing(readonly(raw_path)) as raw, closing(readonly(control_path)) as control:
             posts = raw.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
             observations = raw.execute(
                 "SELECT COUNT(*) FROM post_observations").fetchone()[0]
@@ -235,8 +237,8 @@ def read_pilot_failures(workspace, *, day=None):
             or (root / day).is_symlink()):
         raise PilotConfigurationError("Pilot coordinator or Capture store not found")
     try:
-        with sqlite3.connect(control.as_uri() + "?mode=ro", uri=True) as jobs, \
-             sqlite3.connect(capture.as_uri() + "?mode=ro", uri=True) as records:
+        with closing(sqlite3.connect(control.as_uri() + "?mode=ro", uri=True)) as jobs, \
+             closing(sqlite3.connect(capture.as_uri() + "?mode=ro", uri=True)) as records:
             bound = jobs.execute(
                 "SELECT j.id,j.lane,j.state,j.account_ordinal,j.page,b.request_id "
                 "FROM jobs j JOIN job_request_bindings b ON b.job_id=j.id "

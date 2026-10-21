@@ -8,6 +8,15 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+### P6-032 — 2026-10-21 · Windows pilot status SQLite read-only handle leak
+
+- **Observed:** At commit `db110cdd`, [Runtime #39546089085](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39546089085) Linux complete offline suite **915/915 PASS**, C Contract/Three API/Frozen Guard PASS, but Windows `offline-windows (remaining)` **756 tests / errors=1**. The `test_status_is_read_only_and_reports_lanes_without_meta` temporary-directory cleanup raised `PermissionError [WinError 32]` for `coordinator.sqlite`. Other Runtime jobs 11/11 PASS.
+- **Confirmed cause:** `read_pilot_status` and the companion `read_pilot_failures` used `with sqlite3.connect(...) as connection`. Python's SQLite connection context manager controls a transaction but does **not** guarantee `close()`; a lingering handle prevents temporary SQLite deletion on Windows. This is not a Meta HTTP failure or evidence of user pilot DB corruption.
+- **Fix:** Use `contextlib.closing` around both status and failure diagnostic read-only SQLite connections. Preserve `?mode=ro`, no secrets, and the existing failure/usage semantics. Existing Windows regression exercises a real temp SQLite file and cleanup.
+- **Rejected:** Ignoring Windows cleanup errors, deleting/recreating a user DB, changing quota release, or retrying HTTP requests.
+- **Risk/rollback:** Only diagnostic connection lifecycle; no operating DB access, no live Meta calls, no user RAW/451 changes, no scheduler/main/frozen-design edits. Revert this feature-branch diagnostic-only code change if the new exact-SHA tests show regression.
+- **Verification:** New SHA CI pending. The previous `db110cdd` Runtime overall verdict is **FAIL**, despite 915 Linux PASS; do not report full CI completion from that SHA.
+
 ### P6-031 — 2026-10-21 · Terminal-bound recovery SQL / Mock fixture CI regression
 
 - **Evidence:** `5d55a1f8` RAW v2 Actions [#39544886165](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39544886165) returned 3 failures and 3 errors, mainly six tests in `test_three_api_live_serial_step.py`. The new mandatory read `SELECT job_id,request_id FROM job_request_bindings` made `Mock.fetchall()` return non-iterable Mock and increased recorded `db.execute` calls.
@@ -66,6 +75,7 @@
 
 | P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
 | P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
+| P6-032 | Windows 임시 파일 핸들 | 읽기 전용 SQLite context manager의 미닫힘으로 WinError 32 | 연결 명시 종료, 새 SHA CI 검증 대기 |
 | P6-031 | CI SQL Mock·인수인계 | terminal 바인딩 SELECT Mock 반환과 상단 AGENTS 링크 누락 | 코드/테스트 수정 후 RAW 915 중 문서 가드 2건 FAIL; 상단 링크 복구 및 전체 SHA CI 재확인 |
 | P6-028 | CI 사전검증·인수인계 | 294계정 검증 도입 뒤 구형 무효 fixture와 문서 링크 누락으로 Linux/Windows 9건 실패 | fail-closed 검사 순서·모의 명단·인수인계 링크 복구, CI 재검증 대기 |
 
