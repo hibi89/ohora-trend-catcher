@@ -47,17 +47,16 @@ class LiveSerialStep:
             raise LiveSerialStepError("Timezone-aware request time required")
         if not isinstance(accounts, (list, tuple)) or len(accounts) != 294:
             raise LiveSerialStepError("Official 294-account roster required")
+        # Reject missing A/B/C callers and forbidden offline evidence before
+        # touching an injected transport or coordinator, even with bad rows.
+        if not isinstance(caller_ids, dict) or set(caller_ids) != set(LANES):
+            raise LiveSerialStepError("A/B/C caller identities required")
+        if isinstance(getattr(self, "evidence", None), PageEvidenceStore):
+            raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
         try:
             validate_official_roster(accounts)
         except RosterPreflightError as exc:
             raise LiveSerialStepError(str(exc)) from None
-        if not isinstance(caller_ids, dict) or set(caller_ids) != set(LANES):
-            raise LiveSerialStepError("A/B/C caller identities required")
-        # The injected PageEvidenceStore declares itself offline staging only.
-        # Do not reach coordinator leasing or HTTP until a reviewed production
-        # evidence adapter replaces it. Keep constructor tests and fixture work.
-        if isinstance(getattr(self, "evidence", None), PageEvidenceStore):
-            raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
         if any(caller_ids[lane] != self.executor.transport._lanes[lane]._caller_ig_id
                for lane in LANES):
             raise LiveSerialStepError("Caller identities do not match transport")
