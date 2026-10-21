@@ -141,6 +141,45 @@ class ManualPilotTests(unittest.TestCase):
         self.assertEqual(raw_db.execute(
             "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 2)
 
+    def test_second_invocation_resumes_existing_raw_without_duplicate(self):
+        calls = []
+        environment = {"P6_META_GRAPH_VERSION": "v26.0"}
+        lanes = {}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            environment[f"P6_META_TOKEN_{lane}"] = f"synthetic-token-{lane}"
+            environment[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}", f"P6_META_IG_ID_{lane}")
+            def sender(req, timeout, *, lane=lane):
+                calls.append(lane)
+                response = MockResponse()
+                target = f"nail_{len(calls)}"
+                response.payload["business_discovery"]["username"] = target
+                response.payload["business_discovery"]["media"]["data"][0]["id"] = str(1234567890 + len(calls))
+                response.payload["business_discovery"]["media"]["data"][0]["username"] = target
+                return response
+            lanes[lane] = MetaTransport(
+                client=GraphHTTPClient(sender=sender, approved=True),
+                credentials=ref, caller_ig_id=caller,
+                token=environment[f"P6_META_TOKEN_{lane}"],
+            )
+        with patch("three_api_manual_pilot._transports",
+                   return_value=ThreeLaneMetaTransport(lanes)):
+            first = run_manual_pilot(
+                self.csv, self.workspace, live=True,
+                confirm_owner_approval=True, environment=environment,
+            )
+            second = run_manual_pilot(
+                self.csv, self.workspace, live=True,
+                confirm_owner_approval=True, environment=environment,
+            )
+        self.assertEqual(first["committed_pages"], 1)
+        self.assertEqual(second["committed_pages"], 1)
+        self.assertEqual(calls, ["A", "A"])
+        db = sqlite3.connect(self.workspace / "p6_pilot_raw.sqlite")
+        self.addCleanup(db.close)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 2)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 2)
+
     def test_invalid_roster_fails_before_env_read(self):
         self.csv.write_text("account_key,username,country\nKR_001,nail_1,KR\n", encoding="utf-8")
         with self.assertRaises(ValueError):
