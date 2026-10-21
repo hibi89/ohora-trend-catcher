@@ -166,7 +166,7 @@ class LiveSerialStep:
                                 raise
                             match = re.fullmatch(
                                 r"Target account unavailable code=110 subcode=2207013"
-                                r"(?: usage_pct=(\\d{1,3}))?",
+                                r"(?: usage_pct=(\d{1,3}))?",
                                 failure.safe_message,
                             )
                             if match is None:
