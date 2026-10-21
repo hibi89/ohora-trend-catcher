@@ -5,7 +5,9 @@
 - **쿼터:** latest sanitized A usage 35% at 04:50, below 85%. B/C still have no stored safe usage and remain held; cooldown alone is not sufficient to release.
 - **오류:** Four account-scoped A HTTP400 jobs have no Capture/response evidence and remain `failed_no_retry`; no retries. Root cause remains indeterminate. Historic B's 48 successful P6 pages do not prove current B credential validity or explain the separate 400s.
 - **상태:** five-minute n8n P6 workflow remains active and advancing A. 294×3 frozen page plan is incomplete; B/C and cursor re-anchor remain pending/unverified. Existing assignment order, page size=4, max 3 pages/tick, quota/cooldown, no retry, RAW/Capture invariants preserved.
+- **legacy 49건:** Prior immutable-row recovery planner/49-row evidence is read-only only; no repair/materialization was applied. State remains untouched and unverified.
 - **다음:** let active schedule continue, perform read-only checks after bounded intervals, never manually tick alongside it. No B/C hold reset without fresh lane-specific usage evidence.
+- **다음 확인 명령:** `$py='C:\Users\haein\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'; & $py raw_v2/three_api_manual_pilot.py --workspace (Join-Path $env:LOCALAPPDATA 'OHORA_P6_PILOT') --status --day (Get-Date -Format yyyy-MM-dd)` (repo root; read-only; no Meta call or DB write).
 
 ### P6-055 — 2026-10-22 · 예약 A lane 추가 진척, 오류·보류 유지
 - **관측:** isolated-runtime active n8n P6 execution 04:30 KST `success`; P6 read-only status 225 durable receipts / 900 post observations / 716 unique posts; A 122 done / 4 leased / 168 pending; B/C each 0 done / 294 pending.
