@@ -95,6 +95,8 @@ def audit_raw_receipt_links(coordinator_db, raw_port, capture_port):
             "external_raw_receipts_verified": False,
             "runtime_authorized": False,
         }
+    # Avoid reading an inconsistent snapshot while another writer commits.
+    # The coordinator's SQLite transaction guarantees a single view.
     rows = coordinator_db.execute(
         "SELECT e.receipt,b.request_id FROM page_evidence e "
         "LEFT JOIN job_request_bindings b ON b.job_id=e.job_id"
