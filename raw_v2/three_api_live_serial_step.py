@@ -205,8 +205,10 @@ def offline_live_readiness_report(runner):
         raise LiveSerialStepError("Original live serial runner required")
     evidence = getattr(runner, "evidence", None)
     blockers = []
-    if isinstance(evidence, PageEvidenceStore):
+    if type(evidence) is PageEvidenceStore:
         blockers.append("offline_staging_evidence_port")
+    elif type(evidence) is VerifiedRawPageEvidenceStore:
+        blockers.append("external_meta_pilot_not_authorized_or_verified")
     else:
         blockers.append("production_evidence_port_not_verified")
     blockers.append("live_runtime_and_raw_integration_not_accepted")
