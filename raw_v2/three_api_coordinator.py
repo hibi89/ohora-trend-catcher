@@ -96,7 +96,8 @@ class Coordinator:
             state = self.db.execute(
                 "SELECT * FROM lanes WHERE lane=?", (lane,)
             ).fetchone()
-            if state["halted"] or state["ready_at"] > current:
+            # Quota gates apply to HTTP dispatch only. Bound recovery never sends HTTP.
+            if not only_bound and (state["halted"] or state["ready_at"] > current):
                 self.db.execute("COMMIT")
                 return None
             # Evidence-aware mode is enabled only after PageEvidenceStore
