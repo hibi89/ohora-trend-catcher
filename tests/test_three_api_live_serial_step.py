@@ -33,6 +33,20 @@ class LiveSerialStepGateTests(unittest.TestCase):
         with self.assertRaisesRegex(LiveSerialStepError, "294-account"):
             self.runner.step([{}], **self.kwargs)
 
+    def test_duplicate_official_username_denied_before_transport(self):
+        accounts = [{"ordinal": n, "key": f"KR_{n:03}", "username": f"nail_{n}"}
+                    for n in range(1, 295)]
+        accounts[1]["username"] = "NAIL_1"
+        with self.assertRaisesRegex(LiveSerialStepError, "Duplicate"):
+            self.runner.step(accounts, **self.kwargs)
+
+    def test_reordered_official_roster_denied_before_transport(self):
+        accounts = [{"ordinal": n, "key": f"KR_{n:03}", "username": f"nail_{n}"}
+                    for n in range(1, 295)]
+        accounts[1]["ordinal"] = 3
+        with self.assertRaisesRegex(LiveSerialStepError, "ordinal"):
+            self.runner.step(accounts, **self.kwargs)
+
     def test_partial_lane_identities_denied(self):
         with self.assertRaisesRegex(LiveSerialStepError, "A/B/C"):
             self.runner.step([{} for _ in range(294)], **{
