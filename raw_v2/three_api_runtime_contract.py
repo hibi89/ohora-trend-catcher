@@ -435,9 +435,15 @@ class CaptureRecord:
         account = self.sanitized_response.get("account")
         if not isinstance(account, Mapping):
             raise ValueError("Target account identity evidence required")
-        if (account.get("id") != self.request.target_ig_user_id or
-                not isinstance(account.get("username"), str) or
-                account["username"].casefold() != self.request.username.casefold()):
+        # Business Discovery returns the TARGET account's id inside
+        # business_discovery, not the calling IG user id in the request URL.
+        # Authenticate the caller through the bound outbound RequestSpec; on
+        # the inbound side verify the requested target username and valid id.
+        target_id = account.get("id")
+        if (not isinstance(target_id, str) or not target_id.isascii()
+                or not target_id.isdigit() or not 1 <= len(target_id) <= 32
+                or not isinstance(account.get("username"), str)
+                or account["username"].casefold() != self.request.username.casefold()):
             raise ValueError("Returned Instagram identity differs from request")
         validate_normalized_posts(self.normalized_posts, max_posts=self.request.request_spec.limit)
         assert_safe_tree(self.account_observation, top_keys=_ACCOUNT_FIELDS)
