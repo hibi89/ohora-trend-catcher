@@ -655,14 +655,20 @@ def capture_from_response(
         sanitized = sanitize_meta_response(response.payload)
         metrics = safe_usage_metrics(response.usage_headers)
         identity = sanitized["account"]
-        if (identity.get("id") != request.target_ig_user_id or
-                not isinstance(identity.get("username"), str) or
-                identity["username"].casefold() != request.username.casefold()):
-            raise ValueError("Returned Instagram identity mismatch")
-        if account_observation.get("id") != request.target_ig_user_id or (
+        # Nested Business Discovery id identifies the DISCOVERED TARGET.
+        # The request URL's target_ig_user_id identifies the API CALLER.
+        # Keep the target id consistent across sanitized source and observation.
+        discovered_id = identity.get("id")
+        if (not isinstance(discovered_id, str)
+                or not discovered_id.isascii() or not discovered_id.isdigit()
+                or not 1 <= len(discovered_id) <= 32
+                or not isinstance(identity.get("username"), str)
+                or identity["username"].casefold() != request.username.casefold()):
+            raise ValueError("Returned Instagram target identity mismatch")
+        if account_observation.get("id") != discovered_id or (
                 not isinstance(account_observation.get("username"), str) or
                 account_observation["username"].casefold() != request.username.casefold()):
-            raise ValueError("Account observation identity mismatch")
+            raise ValueError("Account observation target identity mismatch")
         states = field_status_for(account_observation, account_fields_tested,
                     frozenset(("followers_count", "media_count")))
         cursor_state = CursorState(CONTRACT_VERSION, request.request_id,
