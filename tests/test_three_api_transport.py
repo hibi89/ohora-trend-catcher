@@ -193,6 +193,28 @@ class QuotaTests(unittest.TestCase):
                     t.send(request_envelope())
                 self.assertEqual(ctx.exception.category, category)
 
+    def test_missing_user_code_is_safely_classified_with_quota(self):
+        sender = lambda *_a, **_k: MemoryResponse(
+            {"error": {"code": 110, "error_subcode": 2207013}},
+            status=400, headers={"X-App-Usage": '{"call_count":21.3}'})
+        t = transport(sender=sender)
+        with self.assertRaises(TransportFailure) as error:
+            t.send(request_envelope())
+        failure = error.exception
+        self.assertEqual((failure.http_status, failure.category, failure.scope),
+                         (400, "http_error", "account"))
+        self.assertEqual(failure.safe_message,
+                         "Target account unavailable code=110 subcode=2207013 usage_pct=22")
+
+    def test_missing_user_code_without_usage_does_not_claim_quota(self):
+        sender = lambda *_a, **_k: MemoryResponse(
+            {"error": {"code": 110, "error_subcode": 2207013}},
+            status=400, headers={})
+        with self.assertRaises(TransportFailure) as error:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(error.exception.safe_message,
+                         "Target account unavailable code=110 subcode=2207013")
+
     def test_lane_and_target_identity_are_bound_before_send(self):
         calls = []
         client = GraphHTTPClient(sender=lambda *_a, **_k: calls.append(1), approved=True)
