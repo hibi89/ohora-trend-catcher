@@ -269,13 +269,35 @@ class ContractExecutorTests(unittest.TestCase):
         evidence = self.journal.get_response_evidence(self.request.request_id)
         self.assertEqual(evidence["safe_usage"]["max_usage_percent"], 85)
 
-    def test_returned_account_identity_must_match_requested_target(self):
-        transport = FakeTransport(make_response(self.request, account_id="17840000000000099"))
+    def test_business_discovery_target_id_differs_from_caller_but_saves(self):
+        """Meta returns the discovered target id, not the requesting IG id."""
+        target_id = "17840000000000099"
+        transport = FakeTransport(make_response(self.request, account_id=target_id))
+        receipt = self.executor(transport).execute(self.request)
+        self.assertEqual(receipt.status, "committed")
+        record = self.journal.get_capture_for_request(self.request.request_id)
+        self.assertEqual(record.sanitized_response["account"]["id"], target_id)
+        self.assertNotEqual(target_id, self.request.target_ig_user_id)
+        self.assertEqual(transport.calls, 1)
+        self.assertEqual(self.count("post_observations"), 1)
+
+    def test_business_discovery_wrong_username_still_rejected(self):
+        response = make_response(self.request, account_id="17840000000000099")
+        payload = dict(response.payload)
+        business = dict(payload["business_discovery"])
+        business["username"] = "wrong-target"
+        payload["business_discovery"] = business
+        transport = FakeTransport(replace(response, payload=payload))
         with self.assertRaises(ContractExecutionError):
             self.executor(transport).execute(self.request)
-        self.assertEqual(transport.calls, 1)
-        self.assertEqual(self.count("three_api_contract_receipts"), 0)
         self.assertEqual(self.count("posts"), 0)
+        self.assertEqual(transport.calls, 1)
+
+    def test_business_discovery_non_numeric_id_rejected(self):
+        transport = FakeTransport(make_response(self.request, account_id="not-an-ig-id"))
+        with self.assertRaises(ContractExecutionError):
+            self.executor(transport).execute(self.request)
+        self.assertEqual(self.count("three_api_contract_receipts"), 0)
 
 
 if __name__ == "__main__":
