@@ -157,6 +157,7 @@ def run_manual_pilot(source, workspace, *, live=False,
         "status": result["last_status"],
         "committed_pages": result["committed_pages"],
         "recovered_pages": result["recovered_pages"],
+        "account_failures": result["account_failures"],
         "attempted_steps": result["attempted_steps"],
         "new_http_attempt_limit": max_pages,
     }
