@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-044 — 2026-10-22 · n8n KST scheduler와 P6 단일 tick 연결 준비
+- **변경:** `src/collection_schedule.py`를 현재 작업 브랜치에 반영하고, `raw_v2/three_api_n8n_tick.py`가 일정 판단·읽기 전용 coordinator quota/hold 확인·명시적 live gate 뒤 기존 `run_manual_pilot`을 호출하도록 연결했다. PowerShell launcher와 비활성 5분 n8n workflow export를 추가했다.
+- **안전:** 각 tick은 기본 1페이지, 상한 3페이지다. Unknown Capture intent는 `manual_review`; B/C hold/cooldown은 날짜가 바뀌어도 이어진다. 토큰은 파일에서 프로세스 메모리로만 로드되고 출력/상태파일에는 기록되지 않는다. 시작 기준시각은 커밋된 Capture→RAW 성공 결과의 검증된 응답시각만 원자적으로 저장한다. cursor recovery는 자동 스케줄 대상이 아니며 별도 승인과 3페이지 상한을 유지한다.
+- **검증:** schedule, n8n adapter, manual pilot, paging, recovery, credential diagnostic, handoff guard **75/75 PASS**; Python compile PASS. Mock 테스트뿐이며 실 Meta 호출·n8n import/execution·실제 294계정 진행은 아직 검증되지 않았다.
+- **다음 단계:** 로컬 격리 n8n에 비활성 workflow를 import하고 1페이지 한정 실행 후 Capture/RAW durable evidence 및 사용량을 확인한다. 이 증거와 quota gate가 정상일 때만 스케줄을 활성화한다. 토큰 유효성은 실 API 성공 전까지 미확인.
+
 > 최초 작성: 2026-10-21 · 범위: OHORA Trend Catcher p6의 확인 가능한 Git 이력, `STATUS.md`/`HANDOFF.md` 기록, 해당 대화에서 확인된 CI 로그 및 사용자 보고.
 >
 > **목적:** 지금 성공/실패한 실험 모두를 미래의 레거시 분석, 재설계, API 증설 및 인수인계에 재사용한다. **완전한 전수 감사 기록이 아니다.** 문서화되지 않은 과거 작업은 Git/Actions/기존 인수인계 자료를 대조하여 계속 보강한다.
@@ -138,6 +144,7 @@
 | P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
 | P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C capture-only recovery later completed under P6-040; n8n exports inactive |
 | P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
+| P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + tick당 최대 1페이지 adapter/export; 75/75 offline PASS, live/n8n 미검증 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
 | P6-042 | 무효 커서 재앵커 인수인계 | 기존 3-page planner가 이미 구현돼 있었으나 신규 요구를 top-level handoff/테스트 인덱스에 명시하지 않음 | invalid cursor → resume_required → known-ID overlap → replacement cursor 오프라인 회귀 추가; production runner/live recovery 미구현 |
 | P6-041 | Bounded live progress / n8n setup | A/B/C gates diverged after safe pilot; n8n CLI/runtime unavailable | bounded A batch 3/3 committed, P6 total 103/412; B/C holds unchanged; Docker service start denied |

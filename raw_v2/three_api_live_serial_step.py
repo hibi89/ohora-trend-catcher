@@ -212,7 +212,11 @@ class LiveSerialStep:
                                 "terminal": True}
                     return {"status": "page_committed", "lane": lane,
                             "account_ordinal": job["account_ordinal"],
-                            "terminal": result["terminal"]}
+                            "terminal": result["terminal"],
+                            "verified_response_received_at": (
+                                saved.get("received_at") if saved
+                                and saved.get("classification") == "safe"
+                                and page_committed else None)}
                 return {"status": "no_ready_work"}
         except SerialTickBusy:
             return {"status": "serial_busy"}

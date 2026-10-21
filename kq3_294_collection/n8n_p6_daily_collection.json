@@ -1,0 +1,35 @@
+{
+  "name": "OHORA P6 bounded daily collection",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}
+      },
+      "id": "p6-five-minute-schedule",
+      "name": "Every 5 minutes (KST gate inside P6)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:\\Users\\haein\\OneDrive\\Desktop\\2차 프로젝트 아카이브\\ohora-trend-catcher\\raw_v2\\p6_n8n_tick.ps1\""
+      },
+      "id": "p6-bounded-runner",
+      "name": "P6 read gates and run at most one page",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 300]
+    }
+  ],
+  "connections": {
+    "Every 5 minutes (KST gate inside P6)": {
+      "main": [[{"node": "P6 read gates and run at most one page", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {"timezone": "Asia/Seoul", "executionOrder": "v1"},
+  "versionId": "p6-v1",
+  "meta": {"templateCredsSetupCompleted": true},
+  "tags": []
+}

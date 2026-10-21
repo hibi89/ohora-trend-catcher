@@ -246,6 +246,12 @@ def run_manual_pilot(source, workspace, *, live=False,
         "account_failures": result["account_failures"],
         "attempted_steps": result["attempted_steps"],
         "new_http_attempt_limit": max_pages,
+        "verified_success_at": next((
+            item.get("verified_response_received_at")
+            for item in result["results"]
+            if item.get("status") == "page_committed"
+            and isinstance(item.get("verified_response_received_at"), str)
+        ), None),
     }
 
 

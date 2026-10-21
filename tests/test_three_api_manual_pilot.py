@@ -91,6 +91,7 @@ class ManualPilotTests(unittest.TestCase):
         self.assertEqual(result["committed_pages"], 1)
         self.assertEqual(result["attempted_steps"], 1)
         self.assertEqual(result["new_http_attempt_limit"], 1)
+        self.assertIsInstance(result["verified_success_at"], str)
         self.assertEqual(calls, ["A"])
         raw_db = sqlite3.connect(self.workspace / "p6_pilot_raw.sqlite")
         self.addCleanup(raw_db.close)
