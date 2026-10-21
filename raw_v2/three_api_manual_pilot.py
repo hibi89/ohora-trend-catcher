@@ -323,6 +323,23 @@ def main(argv=None):
                 max_pages=options.max_pages,
             )
     except (ValueError, TypeError, RuntimeError, sqlite3.Error):
+        # Preserve the fail-closed exit and never print credentials or exception
+        # strings. On live failure, show verified, read-only durable progress so
+        # operators can distinguish a partial batch from zero committed pages.
+        if options.live and not options.status and not options.failures:
+            try:
+                progress = read_pilot_status(options.workspace)
+                print(json.dumps({
+                    "mode": "LIVE_STOPPED_SAFE_PROGRESS",
+                    "status": "stopped_safely",
+                    "durable_receipts": progress["durable_receipts"],
+                    "posts": progress["posts"],
+                    "lanes": progress["lanes"],
+                    "live_meta_called": "unknown",
+                    "db_writes": 0,
+                }, ensure_ascii=False, sort_keys=True))
+            except (ValueError, TypeError, RuntimeError, sqlite3.Error):
+                pass
         parser.exit(2, "P6 pilot stopped safely; check local input/configuration.\n")
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
