@@ -8,6 +8,15 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+### B/C 인증 설정 비교 (오프라인) — 2026-10-21
+
+- **정적 호출 방식:** P6 three_api_manual_pilot.py는 P6_META_TOKEN_B/C 및 P6_META_IG_ID_B/C를 현재 프로세스 환경에서 읽고, 페이지당 단일 Graph GET을 Bearer 헤더로 보낸다. RAW collector.py는 --env 파일에서 META_ACCESS_TOKEN·META_IG_USER_ID·선택 META_GRAPH_VERSION을 읽고, URL-encoded batch POST 본문으로 요청한다. 양쪽 Graph 버전 기본값은 v26.0; account/media 요청 필드는 완전히 같지 않다.
+- **기존 실측:** P6-033의 사용자 보고에 B 완료 48페이지와 계정별 HTTP 400 세 건이 함께 있다. 오류 응답은 영속 저장되지 않았으므로 토큰 만료·호출자 불일치·권한·필드 거부·특정 대상 계정 오류 중 무엇인지 원본 코드/하위 코드로 판정할 수 없다. 2207013은 일반적인 missing-user 코드 분류를 위한 후속 처리이지, 기존 세 오류에 확인된 코드가 아니다. C 성공/실패 요청은 기록에서 확인하지 못했다.
+- **오프라인 진단:** raw_v2/three_api_credential_diagnostic.py는 지정 폴더의 .env.api_b·.env.api_c만 읽어 P6 프로세스 환경과 토큰/호출자 ID/Graph 버전을 비교한다. 비밀값과 ID를 출력하지 않고 형식 및 일치 여부만 출력한다. 현재 실행 컨텍스트에서는 두 파일과 P6 B/C 환경값이 없어 비교 결과는 unavailable; 실제 토큰 유효성 및 Meta 권한은 확인하지 못했다.
+- **검증 및 경계:** tests/test_three_api_credential_diagnostic.py 8/8 PASS, tests/test_p6_troubleshooting_handoff_guard.py 4/4 PASS, AST compile check PASS. 같은 P6-033 사건의 영어 요약 heading을 구분해 인덱스 검사와 일치시켰다. 합성 설정만 사용했다. Meta 0회, 기존 RAW·DB·CSV·실패 바인딩 및 quota 상태 변경 없음. 결과만으로 B/C 실수집 재개를 승인하지 않으며, 기존 실패 재전송/65분 hold 해제/85% 제한 우회 금지.
+- **후속:** 진단을 실제 인증파일 디렉터리와 그 PowerShell 프로세스에서 실행해 match/mismatch를 확인한다. match도 active token·scope·app mode를 입증하지 않는다. 별도 승인된 live probe 없이 B/C Meta 권한과 실제 필드 호환성은 미확인 상태로 둔다.
+
+
 ### P6-033 — 2026-10-21 · Live pilot 계정별 HTTP400 후 전체 레인 정지와 Meta error_subcode 유실
 
 - **사용자 실측:** 2026-10-21 KST 분리 파일럿에서 `durable_receipts=79`, `posts=316`, A 완료 31, B 완료 48. 일괄 `--max-pages 50` 호출 도중 27페이지 커밋 후 종료. 기존 terminal HTTP400 요청은 계정 ordinal 32(A), 151/152/201(B)의 총 4건. 해당 요청은 `failed_no_retry`, Capture/response evidence 없음. 원본 사용자 데이터는 GitHub에 전송·수정하지 않음.
@@ -18,7 +27,7 @@
 - **사용자 재개 지침:** 기존 65분 quota hold가 지난 뒤 명시적인 운영자 reset을 거쳐야 한다. 그 전에 `git pull --ff-only`와 오프라인 suite 통과를 확인. 기존 RAW 316건과 4개 immutable 실패 요청을 유지하고, 추가 실호출은 사용자가 별도 승인한 `--live --confirm-owner-approval` 경로에서만.
 - **범위/롤백:** 지정 branch 코드·offline tests·이 장부만 변경. 동결 설계/3 API·limit4·2 rounds/운영 DB/main 미변경. 오류 분류와 bounded driver를 해당 커밋 단위로 revert 가능; 원본 RAW/DB/CSV 재작성 금지.
 
-### P6-033 — 2026-10-21 · Meta missing-user 400 classification and serial continuation
+### English summary for P6-033 — 2026-10-21 · Meta missing-user 400 classification and serial continuation
 
 - **Observed:** User's isolated live pilot returned HTTP 400 for account-specific jobs; immutable failed requests were retained without Capture, while A/B lanes remained held for 65 minutes. The live code could not distinguish a known missing-user error from other 400 responses and stopped the bounded serial driver on any failure.
 - **Confirmed code issue:** Graph HTTP sanitization bounded numeric error subcodes to 1,000,000; Meta missing-user subcode 2207013 was discarded. Live serial step halted its lane before HTTP and only released it after successful RAW commit; a known account failure always left a hold.
@@ -95,6 +104,7 @@
 
 | P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
 | P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
+| P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
 | P6-032 | Windows 임시 파일 핸들 | 읽기 전용 SQLite context manager의 미닫힘으로 WinError 32 | 연결 명시 종료, 새 SHA CI 검증 대기 |
 | P6-031 | CI SQL Mock·인수인계 | terminal 바인딩 SELECT Mock 반환과 상단 AGENTS 링크 누락 | 코드/테스트 수정 후 RAW 915 중 문서 가드 2건 FAIL; 상단 링크 복구 및 전체 SHA CI 재확인 |
 | P6-028 | CI 사전검증·인수인계 | 294계정 검증 도입 뒤 구형 무효 fixture와 문서 링크 누락으로 Linux/Windows 9건 실패 | fail-closed 검사 순서·모의 명단·인수인계 링크 복구, CI 재검증 대기 |
