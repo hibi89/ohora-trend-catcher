@@ -1,0 +1,31 @@
+name: P6 Daily Clock Offline
+on:
+  push:
+    branches:
+      - feature/p6-kst-daily-start-policy-20261021
+    paths:
+      - src/collection_schedule.py
+      - tests/test_collection_schedule.py
+      - .github/workflows/p6-daily-clock-offline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-clock:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Offline schedule tests, without Meta credentials
+        run: python -m unittest discover -s tests -p test_collection_schedule.py -v
+      - name: Preview pre-midnight bootstrap
+        run: python -m src.collection_schedule --now 2026-10-21T23:55:00+09:00 --live-runner-verified --lane-dispatch-allowed
