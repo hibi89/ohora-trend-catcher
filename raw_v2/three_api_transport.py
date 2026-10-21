@@ -108,6 +108,10 @@ class MetaTransport:
         error = result["body"].get("error")
         code = error.get("code") if isinstance(error, dict) else None
         subcode = error.get("error_subcode") if isinstance(error, dict) else None
+        if (status == 400 and code == 100 and isinstance(error, dict)
+                and error.get("cursor_invalid") is True):
+            _fail(request.request_id, "cursor_invalid", "account",
+                  "Meta explicitly rejected the supplied cursor", status=status)
         # GraphHTTPClient already strips all free-form Meta text and tokens.
         # Retain only bounded integer diagnostics for *future* failures.
         safe_codes = []

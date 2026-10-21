@@ -25,7 +25,7 @@ RawStatus = Literal["committed", "already_committed"]
 FailureScope = Literal["account", "lane", "global"]
 ErrorCategory = Literal[
     "usage_missing", "rate_limit", "auth", "permission", "transport",
-    "http_error", "invalid_response", "outcome_unknown", "capture_io",
+    "http_error", "cursor_invalid", "invalid_response", "outcome_unknown", "capture_io",
     "capture_conflict", "raw_io", "raw_conflict", "cursor_conflict",
     "approval_denied", "budget_expired", "interrupted", "usage_limit",
 ]
@@ -35,7 +35,7 @@ ErrorCategory = Literal[
 CATEGORY_SCOPE: Mapping[str, FailureScope] = {
     "usage_missing": "global", "usage_limit": "global", "rate_limit": "global",
     "auth": "global", "permission": "account", "transport": "account",
-    "http_error": "account", "invalid_response": "account",
+    "http_error": "account", "cursor_invalid": "account", "invalid_response": "account",
     "outcome_unknown": "account", "capture_io": "global",
     "capture_conflict": "global", "raw_io": "global",
     "raw_conflict": "global", "cursor_conflict": "lane",

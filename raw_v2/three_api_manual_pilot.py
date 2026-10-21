@@ -361,7 +361,7 @@ def read_pilot_failures(workspace, *, day=None):
                     "account_ordinal": ordinal, "page": page,
                     "intent_outcome": intent[0] if intent else "missing",
                     "failure_category": category if category in (
-                        "http_error", "permission", "auth", "rate_limit",
+                        "http_error", "cursor_invalid", "permission", "auth", "rate_limit",
                         "outcome_unknown", "invalid_response", "capture_io",
                         "approval_denied", "usage_missing", "usage_limit") else "other",
                     "failure_scope": scope if scope in ("account", "lane", "global") else "unknown",
@@ -369,6 +369,10 @@ def read_pilot_failures(workspace, *, day=None):
                     "has_capture": bool(capture_count),
                     "has_response_evidence": bool(response_count),
                     "automatic_retry_allowed": False,
+                    "recovery_status": ("resume_required" if category == "cursor_invalid"
+                                        and intent and intent[0] == "failed_no_retry"
+                                        else "operator_review" if intent and intent[0] == "failed_no_retry"
+                                        else "not_applicable"),
                 })
     except (sqlite3.Error, ValueError, TypeError, KeyError) as exc:
         raise PilotConfigurationError("Read-only failure inspection unavailable") from None

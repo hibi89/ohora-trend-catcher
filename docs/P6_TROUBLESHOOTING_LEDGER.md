@@ -1,5 +1,13 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-048 — 2026-10-22 · 명시적 커서 오류 런타임 분류 및 재개 요구 기록
+- **근본 원인:** GraphHTTPClient는 토큰 노출 방지를 위해 비성공 응답에서 `code`/`error_subcode`만 남기고 Meta `message`를 버렸다. 따라서 일반 HTTP400과 명시적 cursor invalid 응답은 모두 `http_error`가 되어 운영 진단에 `resume_required`가 나타나지 않았다.
+- **최소 수정:** 원문 메시지를 저장하지 않고, HTTP400 + Graph code 100 + 명시적 `invalid/expired/stale cursor` 문구가 모두 일치할 때만 정규화된 boolean `cursor_invalid` marker를 추가한다. `MetaTransport`는 이 marker를 typed `cursor_invalid` failure로 바꾼다. 기존 journal에 category/outcome이 영속화되며 읽기 전용 `--failures` 결과에서 `failed_no_retry` intent에만 `recovery_status=resume_required`를 파생한다. 다른 요청/인증/권한 오류는 기존 분류 `operator_review`로 남는다.
+- **중단 동작:** 실패 요청은 `failed_no_retry`로 남고 serial tick 예외로 중단된다. 어떠한 retry 또는 first-page fetch도 여기서 시작하지 않는다. Recovery planner와 3-page 상한은 별도 승인 라운드에서만 사용한다. 새 coordinator schema/RAW/Capture 변형은 없다.
+- **n8n 실패 출력:** 승인된 live 실행 중 예외가 나면 전송 여부를 입증하지 못하므로 `live_meta_called=false`로 잘못 기록하지 않는다. `live_meta_called=null`, `live_meta_call_status=unknown_after_live_error`로 바꾸고 오프라인 테스트로 고정했다.
+- **검증:** Graph error sanitization, transport classification, isolated manual-pilot failure journal, serial step, runtime contract, paging/recovery, n8n tick, handoff guard 합계 155/155 PASS; py_compile PASS. 모든 HTTP는 가짜 sender; Meta/운영 DB/RAW/Capture 호출·변경 0건.
+- **한계:** Meta cursor 오류 문구는 현재 살아있는 응답으로 확인하지 못했다. locale/문구 변형은 자동 분류하지 않고 `operator_review`로 fail-closed한다. 실제 새 페이지를 조회해 기존 ID와 연결하고 새 커서로 재개하는 production runner 및 live recovery는 여전히 미구현이다. 현 시점 A44 done/1 leased/249 pending, 전체 receipts147/observations588/unique442; B/C는 `live_pending_usage` hold 유지.
+
 ### P6-047 — 2026-10-22 · 예약 실행 진행 확인 및 레인 게이트 보존
 - **관측:** 02:10 KST 읽기 전용 상태에서 durable receipts 144, 전체 post observations 576, unique posts 438; 오늘 A done 41 / leased 1 / pending 252, B/C done 0 / pending 294. 이전 관측(138 receipts, A 35) 이후 예약 스케줄 구간에서 +6 receipts, +24 observations가 확인됐다. n8n loopback 프로세스 PID 20464는 계속 존재한다.
 - **레인 게이트:** A `halted=0`. B/C `halted=1`, reason `live_pending_usage`; 각 `ready_at`은 이미 지났지만 별도 최신 quota 증거가 없으므로 hold를 해제하지 않았다. 조회 출력은 현재 usage percentage를 제공하지 않았다.
@@ -159,6 +167,7 @@
 | P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
 | P6-045 | 자동 수집 처리량 | 검증 후에도 n8n tick이 1페이지만 처리해 진행이 지연됨 | 페이지당 quota/cooldown gate를 유지하며 tick 상한 3으로 상향; 76/76 offline PASS, 실제 스케줄 tick 증거 확인 |
 | P6-046 | 커서 무효화 재앵커 | 복구 회귀가 새 커서로 재개할 연결 흐름을 직접 고정하지 않음 | 정상 커서, `resume_required`, 최신 ID 겹침, replacement cursor 및 3-page 제한 회귀 추가; recovery 16 tests |
+| P6-048 | 커서 오류 런타임 분류 | HTTP 비성공 응답 메시지 제거로 invalid-cursor와 일반 400이 같은 진단으로 남음 | 원문 미보존 명시 문구 분류, durable `cursor_invalid`, read-only `resume_required`; 155 offline PASS; live recovery 미구현 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |

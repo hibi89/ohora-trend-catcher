@@ -166,7 +166,17 @@ def main(argv=None) -> int:
                       live=args.live,
                       confirm_owner_approval=args.confirm_owner_approval)
     except Exception:
-        result = {"action": "MANUAL_REVIEW", "live_meta_called": False}
+        # Once an explicitly approved live run starts, an exception may occur
+        # after the request has reached Meta. Do not claim zero calls without
+        # durable transport evidence proving that no attempt began.
+        live_status = ("unknown_after_live_error"
+                       if args.live and args.confirm_owner_approval
+                       else "not_attempted")
+        result = {
+            "action": "MANUAL_REVIEW",
+            "live_meta_called": None if live_status.startswith("unknown") else False,
+            "live_meta_call_status": live_status,
+        }
         print(json.dumps(result, separators=(",", ":")))
         return 2
     print(json.dumps(result, separators=(",", ":")))

@@ -167,6 +167,42 @@ class QuotaTests(unittest.TestCase):
         self.assertNotIn("SECRET_TOKEN", ctx.exception.safe_message)
         self.assertNotIn("PRIVATE_TRACE", ctx.exception.safe_message)
 
+    def test_explicit_invalid_cursor_stops_as_cursor_invalid_without_retry(self):
+        calls = []
+        def sender(request, *, timeout):
+            calls.append(request)
+            body = json.dumps({"error": {
+                "code": 100, "error_subcode": 33,
+                "message": "Invalid after cursor",
+            }}).encode()
+            from urllib.error import HTTPError
+            from io import BytesIO
+            from email.message import Message
+            raise HTTPError(request.full_url, 400, "Bad Request", Message(), BytesIO(body))
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "cursor_invalid")
+        self.assertEqual(ctx.exception.scope, "account")
+        self.assertEqual(ctx.exception.http_status, 400)
+        self.assertFalse(ctx.exception.retryable)
+        self.assertEqual(ctx.exception.safe_message,
+                         "Meta explicitly rejected the supplied cursor")
+        self.assertEqual(len(calls), 1)
+
+    def test_generic_code_100_remains_http_error(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+        from email.message import Message
+        def sender(request, *, timeout):
+            body = json.dumps({"error": {
+                "code": 100, "message": "Invalid parameter: requested fields",
+            }}).encode()
+            raise HTTPError(request.full_url, 400, "Bad Request", Message(), BytesIO(body))
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "http_error")
+        self.assertFalse(ctx.exception.retryable)
+
     def test_default_graph_gate_blocks_before_sender(self):
         calls = []
         client = GraphHTTPClient(sender=lambda *_a, **_k: calls.append(1))

@@ -37,6 +37,26 @@ class N8nTickTests(unittest.TestCase):
         self.assertEqual(result["action"], "MANUAL_REVIEW")
 
     @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
+    @patch.object(adapter, "run_manual_pilot", side_effect=RuntimeError("synthetic failure"))
+    @patch.object(adapter, "load_three_api_environment", return_value={"synthetic": True})
+    def test_live_exception_never_claims_that_meta_was_not_called(self, *_):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        output = StringIO()
+        args = ["--source", str(self.kw["source"]),
+                "--workspace", str(self.kw["workspace"]),
+                "--credentials-dir", str(self.kw["credentials_dir"]),
+                "--state-file", str(self.kw["state_file"]),
+                "--live", "--confirm-owner-approval"]
+        with redirect_stdout(output):
+            code = adapter.main(args)
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(result["action"], "MANUAL_REVIEW")
+        self.assertIsNone(result["live_meta_called"])
+        self.assertEqual(result["live_meta_call_status"], "unknown_after_live_error")
+
+    @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
     @patch.object(adapter, "run_manual_pilot", return_value={
         "status": "page_committed", "committed_pages": 1, "account_failures": 0,
         "attempted_steps": 1, "verified_success_at": "2026-10-22T01:00:00+00:00"})

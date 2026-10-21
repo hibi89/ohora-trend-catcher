@@ -190,6 +190,47 @@ class ManualPilotTests(unittest.TestCase):
             read_pilot_failures(self.workspace, day="2026-10-21")
         self.assertFalse(self.workspace.exists())
 
+    def test_confirmed_cursor_error_is_persisted_as_resume_required_without_retry(self):
+        from email.message import Message
+        from io import BytesIO
+        from urllib.error import HTTPError
+        from datetime import datetime, timezone, timedelta
+        from three_api_contract_executor import ContractExecutionError
+
+        environment = {"P6_META_GRAPH_VERSION": "v26.0"}
+        lanes = {}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            environment[f"P6_META_TOKEN_{lane}"] = f"synthetic-token-{lane}"
+            environment[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}", f"P6_META_IG_ID_{lane}")
+            def sender(request, timeout):
+                body = b'{"error":{"code":100,"error_subcode":33,"message":"Invalid after cursor"}}'
+                raise HTTPError(request.full_url, 400, "Bad Request", Message(), BytesIO(body))
+            lanes[lane] = MetaTransport(
+                client=GraphHTTPClient(sender=sender, approved=True),
+                credentials=ref, caller_ig_id=caller,
+                token=environment[f"P6_META_TOKEN_{lane}"],
+            )
+
+        with patch("three_api_manual_pilot._transports",
+                   return_value=ThreeLaneMetaTransport(lanes)):
+            with self.assertRaises(ContractExecutionError):
+                run_manual_pilot(
+                    self.csv, self.workspace, live=True,
+                    confirm_owner_approval=True, environment=environment,
+                    max_pages=1,
+                )
+
+        day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+        diagnostic = read_pilot_failures(self.workspace, day=day)
+        self.assertFalse(diagnostic["live_meta_called"])
+        self.assertEqual(diagnostic["db_writes"], 0)
+        self.assertEqual(len(diagnostic["blocked_jobs"]), 1)
+        failure = diagnostic["blocked_jobs"][0]
+        self.assertEqual(failure["failure_category"], "cursor_invalid")
+        self.assertEqual(failure["recovery_status"], "resume_required")
+        self.assertFalse(failure["automatic_retry_allowed"])
+
     def test_status_missing_stores_never_creates_anything(self):
         with self.assertRaisesRegex(PilotConfigurationError, "directory"):
             read_pilot_status(self.workspace, day="2026-10-21")
