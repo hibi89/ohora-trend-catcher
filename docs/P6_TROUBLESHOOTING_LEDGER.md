@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-049 — 2026-10-22 · 전체 오프라인 회귀 및 예약 수집 재확인
+- **검증:** 저장소 루트 import를 보장하는 `$py -m tests.run_offline` 실행에서 987 tests, 986 PASS, 1 SKIP, 0 FAIL, exit 0. Graph error redaction/transport/manual-pilot/n8n cursor error regressions 포함 targeted 155/155 PASS; 수정 파일 py_compile PASS. 이전 직접 파일 경로 실행은 `src`가 sys.path에 없어 `test_collection_schedule` import error를 냈으며, `python -m unittest tests.test_collection_schedule` 15/15 및 올바른 모듈 방식 full suite로 해소했다.
+- **예약 진행:** 03:08 KST read-only: P6 total 176 receipts / 704 observations / 520 unique posts; daily A 73 done / 2 leased / 219 pending; B/C each 0 done / 294 pending. n8n PID 20464 remains alive. A lane `halted=0`; B/C `halted=1`, reason `live_pending_usage` despite expired ready_at; no manual reset because fresh usage evidence is not available. The read-only status check did not call Meta or write DB.
+- **실패 바인딩:** A account ordinals 32 and 61 have HTTP 400 `failed_no_retry`, no Capture/response evidence; `automatic_retry_allowed=false`; neither request was resent. Exact code/subcode is unavailable in this diagnostic, so neither is attributed to auth, permission, field, target, or cursor.
+- **완료도/제약:** The schedule is collecting A pages, not all 294 accounts. B/C remain held. No live cursor invalidation observed. Strict invalid-cursor detection and `resume_required` persistence are implemented, but the separate new-page fetch/overlap/replacement-cursor recovery runner is not production-wired. Never claim real cursor recovery or full live collection success from these offline tests.
+
 ### P6-048 — 2026-10-22 · 명시적 커서 오류 런타임 분류 및 재개 요구 기록
 - **근본 원인:** GraphHTTPClient는 토큰 노출 방지를 위해 비성공 응답에서 `code`/`error_subcode`만 남기고 Meta `message`를 버렸다. 따라서 일반 HTTP400과 명시적 cursor invalid 응답은 모두 `http_error`가 되어 운영 진단에 `resume_required`가 나타나지 않았다.
 - **최소 수정:** 원문 메시지를 저장하지 않고, HTTP400 + Graph code 100 + 명시적 `invalid/expired/stale cursor` 문구가 모두 일치할 때만 정규화된 boolean `cursor_invalid` marker를 추가한다. `MetaTransport`는 이 marker를 typed `cursor_invalid` failure로 바꾼다. 기존 journal에 category/outcome이 영속화되며 읽기 전용 `--failures` 결과에서 `failed_no_retry` intent에만 `recovery_status=resume_required`를 파생한다. 다른 요청/인증/권한 오류는 기존 분류 `operator_review`로 남는다.
@@ -168,6 +174,7 @@
 | P6-045 | 자동 수집 처리량 | 검증 후에도 n8n tick이 1페이지만 처리해 진행이 지연됨 | 페이지당 quota/cooldown gate를 유지하며 tick 상한 3으로 상향; 76/76 offline PASS, 실제 스케줄 tick 증거 확인 |
 | P6-046 | 커서 무효화 재앵커 | 복구 회귀가 새 커서로 재개할 연결 흐름을 직접 고정하지 않음 | 정상 커서, `resume_required`, 최신 ID 겹침, replacement cursor 및 3-page 제한 회귀 추가; recovery 16 tests |
 | P6-048 | 커서 오류 런타임 분류 | HTTP 비성공 응답 메시지 제거로 invalid-cursor와 일반 400이 같은 진단으로 남음 | 원문 미보존 명시 문구 분류, durable `cursor_invalid`, read-only `resume_required`; 155 offline PASS; live recovery 미구현 |
+| P6-049 | 전체 오프라인 회귀 및 현재 진행 | 직접 파일 실행에서 저장소 루트 `src`를 import하지 못해 하나의 test module 오류 | `python -m tests.run_offline`: 987 run / 986 PASS / 1 SKIP / 0 FAIL, exit 0; A73/176 receipts; B/C usage hold 유지 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
