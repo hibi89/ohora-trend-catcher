@@ -1,0 +1,104 @@
+"""Offline smoke tests for manual single-page P6 runner.
+
+All Graph responses come from an in-memory sender. Test authorization does
+NOT grant permission for real Meta HTTP. No production database is opened.
+"""
+import csv
+from pathlib import Path
+import sqlite3
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "raw_v2"))
+sys.path.insert(0, str(ROOT / "tests"))
+
+from three_api_credentials import CredentialReference
+from three_api_graph_http import GraphHTTPClient
+from three_api_live_lane_router import ThreeLaneMetaTransport
+from three_api_manual_pilot import PilotConfigurationError, run_manual_pilot
+from three_api_transport import MetaTransport
+from test_three_api_serial_bootstrap import MockResponse
+
+
+class ManualPilotTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.csv = self.root / "account_list.csv"
+        with self.csv.open("w", newline="", encoding="utf-8") as fp:
+            writer = csv.writer(fp)
+            writer.writerow(("account_key", "username", "country"))
+            for country, count in (("KR", 100), ("US", 101), ("JP", 93)):
+                for i in range(1, count + 1):
+                    ordinal = ({"KR": 0, "US": 100, "JP": 201}[country] + i)
+                    writer.writerow((
+                        f"{country}_{i:03d}", f"nail_{ordinal}", country,
+                    ))
+        self.workspace = self.root / "private-pilot"
+
+    def test_default_only_checks_official_roster_without_creating_db(self):
+        with patch.dict("os.environ", {}, clear=True):
+            result = run_manual_pilot(self.csv, self.workspace)
+        self.assertEqual(result["official_accounts"], 294)
+        self.assertEqual(result["post_limit"], 4)
+        self.assertFalse(result["live_meta_called"])
+        self.assertFalse(self.workspace.exists())
+
+    def test_separate_live_approval_required_before_any_write(self):
+        with self.assertRaisesRegex(PilotConfigurationError, "approval"):
+            run_manual_pilot(self.csv, self.workspace, live=True)
+        self.assertFalse(self.workspace.exists())
+
+    def test_absent_credentials_rejected_without_creating_databases(self):
+        with self.assertRaisesRegex(PilotConfigurationError, "credentials"):
+            run_manual_pilot(
+                self.csv, self.workspace, live=True,
+                confirm_owner_approval=True, environment={},
+            )
+        self.assertFalse(self.workspace.exists())
+
+    def test_one_synthetic_graph_response_persists_in_real_raw_v2_schema(self):
+        calls = []
+        lanes = {}
+        environment = {"P6_META_GRAPH_VERSION": "v26.0"}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            environment[f"P6_META_TOKEN_{lane}"] = f"synthetic-token-{lane}"
+            environment[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}", f"P6_META_IG_ID_{lane}")
+            def fake_sender(req, timeout, *, lane=lane):
+                calls.append(lane)
+                return MockResponse()
+            client = GraphHTTPClient(sender=fake_sender, approved=True)
+            lanes[lane] = MetaTransport(
+                client=client, credentials=ref, caller_ig_id=caller,
+                token=environment[f"P6_META_TOKEN_{lane}"],
+            )
+        offline_transport = ThreeLaneMetaTransport(lanes)
+        with patch("three_api_manual_pilot._transports", return_value=offline_transport):
+            result = run_manual_pilot(
+                self.csv, self.workspace, live=True,
+                confirm_owner_approval=True, environment=environment,
+            )
+        self.assertEqual(result["status"], "page_committed")
+        self.assertEqual(result["new_http_attempt_limit"], 1)
+        self.assertEqual(calls, ["A"])
+        raw_db = sqlite3.connect(self.workspace / "p6_pilot_raw.sqlite")
+        self.addCleanup(raw_db.close)
+        self.assertEqual(raw_db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 294)
+        self.assertEqual(raw_db.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 1)
+        self.assertEqual(raw_db.execute("SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
+        self.assertNotIn("synthetic-token", str(result))
+
+    def test_invalid_roster_fails_before_env_read(self):
+        self.csv.write_text("account_key,username,country\nKR_001,nail_1,KR\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            run_manual_pilot(self.csv, self.workspace)
+        self.assertFalse(self.workspace.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
