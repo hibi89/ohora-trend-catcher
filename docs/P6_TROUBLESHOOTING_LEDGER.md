@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-066 — 2026-10-22 · C lane 4회 연속 예약 수집
+- **실제 수집:** scheduled ticks at 06:45, 06:50, 06:55, and 07:00 each committed 3 C pages; no account failures. C remained unhalted; latest usage=5%, maximum across 12 responses=5%.
+- **현재 상태:** sanitized read-only status 261 receipts / 1044 observations / 849 unique; A=146 done / 4 leased / 144 pending; B=0/294 held; C=12/282 done/pending. New P6 pages were committed by n8n; the status check itself is read-only.
+- **제약:** B remains held without fresh safe usage evidence; A's four bound failed requests remain no-retry. No hold bypass, manual tick, or request replay. Cursor re-anchor remains offline-only. Full 294×3 plan incomplete; prior RAW/source and legacy 49 rows unchanged.
+- **검증/Git:** no code change since P6-063. Official offline suite 988 discovered / exit 0 / 1 skipped; tick+handoff 12/12, cursor/re-anchor 26/26. Branch `codex/p6-readiness-hardening-20261019`; prior pushed SHA `0d92e8837f6b9a77c3f73ff775324d2e7ed5a45f`; commit/push this status refresh.
+
 ### P6-065 — 2026-10-22 · C lane 3회 연속 예약 수집
 - **실제 수집:** 06:45, 06:50, 06:55 KST ticks each committed 3 C pages, no account failures. C stayed unhalted with safe usage evidence; latest 4%, maximum over 9 C responses 4%.
 - **현재 상태:** sanitized read-only status 258 receipts / 1032 observations / 838 unique; A=146 done / 4 leased / 144 pending; B=0/294 held; C=9/285 done/pending. New writes were from the scheduled P6 collector, not the monitoring commands.
@@ -308,6 +314,7 @@
 | P6-063 | C lane 증거확인 재개·실제 tick 진척 | safe prior usage 66%, cooldown elapsed; only C gate released | scheduled tick committed 3 pages; new safe usage 0%; total 252 receipts; B/A guards preserved |
 | P6-064 | C lane 연속 예약 수집 진척 | 06:45 and 06:50 ticks each committed 3 pages; usage max 2% | total 255 receipts / 1020 observations / 831 unique; C=6 done, B held |
 | P6-065 | C lane 3회 연속 예약 수집 | 06:45/06:50/06:55 ticks committed 9 C pages; usage max 4% | total 258 receipts / 1032 observations / 838 unique; C=9 done, B held |
+| P6-066 | C lane 4회 연속 예약 수집 | 06:45–07:00 ticks committed 12 C pages; usage max 5% | total 261 receipts / 1044 observations / 849 unique; C=12 done, B held |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
