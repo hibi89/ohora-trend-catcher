@@ -113,7 +113,7 @@ def _read_envelope(response, status):
             err = body.get("error")
             if isinstance(err, dict):
                 err = {k: err[k] for k in ("code", "error_subcode")
-                       if type(err.get(k)) is int and 0 <= err[k] <= 1000000}
+                       if type(err.get(k)) is int and 0 <= err[k] <= 1000000000}
             else:
                 err = {}
             body = {"error": err}
