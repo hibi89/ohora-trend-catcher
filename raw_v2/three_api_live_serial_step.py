@@ -125,7 +125,7 @@ class LiveSerialStep:
             return {"status": "serial_busy"}
 
 
-def run_bounded_serial_steps(runner, accounts, *, max_steps, **step_kwargs):
+def run_bounded_serial_steps(runner, accounts, *, max_steps, clock=None, **step_kwargs):
     """Opt-in bounded driver; no scheduler, sleeps, retries, or implicit approval.
 
     Stops on a busy lock, quota/no-ready-work, or the first exception.
@@ -139,9 +139,23 @@ def run_bounded_serial_steps(runner, accounts, *, max_steps, **step_kwargs):
         raise LiveSerialStepError("Bounded step count required (1..882)")
     if step_kwargs.get("approved") is not True:
         raise LiveSerialStepError("Explicit live approval required")
+    # Each page must receive a fresh wall-clock timestamp. Reusing a stale
+    # requested_at across pages can corrupt cooldown and evidence chronology.
+    from datetime import timezone
+    if clock is None:
+        clock = lambda: datetime.now(timezone.utc)
+    if not callable(clock):
+        raise LiveSerialStepError("Callable UTC clock required")
     results = []
+    previous_time = None
     for _ in range(max_steps):
-        result = runner.step(accounts, **step_kwargs)
+        current_time = clock()
+        if (not isinstance(current_time, datetime)
+                or current_time.utcoffset() is None
+                or (previous_time is not None and current_time < previous_time)):
+            raise LiveSerialStepError("Monotonic timezone-aware clock required")
+        previous_time = current_time
+        result = runner.step(accounts, **{**step_kwargs, "requested_at": current_time})
         status = result.get("status")
         if status not in ("page_committed", "recovered", "no_ready_work",
                           "serial_busy"):
