@@ -1,4 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+
+### P6-72 — 2026-10-22 · 교차 채팅 인수인계 / 독립 emergency 50과 P6 운영 경계 명시
+- **자료 근거:** 사용자 제공 Windows 로그(긴급 V8~V10)와 P6-071의 2026-10-22 08:36 KST 읽기 전용 P6/n8n 스냅샷. 최신 50계정 수집 50/50, 관측 200, 실패 0은 실제 Meta 응답 로그로 검증. 긴급 역사 수집기는 사용률 85%에서 `quota_85_pause` 후 09:38:30 KST 대기까지 관측. 재개 성공/최종 완료는 미검증.
+- **P6 분리:** 318 receipts / 1260 observations / 1041 unique, A 146+4 failed bound / B 0 of 294 held / C 69 done; 08:35 n8n 예약 tick 성공. 이 수치와 긴급 저장소를 합치지 않는다. P6 4개 A 400은 no-retry, B safe usage hold 미해결. Cursor re-anchor는 오프라인-only.
+- **설계 판단/위험:** emergency 수집기와 P6 C lane은 서로 다른 coordinator/데이터 저장소를 가지지만 물리 Meta rate bucket 독립성은 입증되지 않음. 동시 운영 중 quota 중복 점유 위험이 있으므로 새 live dispatch 또는 gate reset/중복 tick을 허가하지 않는다. 긴급 수집기의 85%/쿨타임 정책을 동결 P6 85%/65분 정책 변경 승인으로 읽지 않는다.
+- **범위:** 문서 인수인계만 수행. Meta 0회, 로컬 운영 DB/RAW/Capture 0회 변경, main 병합 없음, 동결 설계 변경 없음. GitHub 직접 확인·수정한 파일만 기록하며 로컬 Windows 상태는 사용자 로그 관측치로 분리한다. 상세: [CHAT_HANDOFF_2026-10-22_P6_AND_EMERGENCY50.md](CHAT_HANDOFF_2026-10-22_P6_AND_EMERGENCY50.md).
+
 > Index: [P6-071 n8n verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · 08:35 trigger success; C=69 pages. A/B blockers and duplicate workflow records remain.
 > Index: [P6-070 overnight progress](docs/P6_TROUBLESHOOTING_LEDGER.md) · Read-only P6 snapshot: C=60 done; B held, A four failed_no_retry. Full collection incomplete.
 > Index: [P6-069 cursor recovery verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · [planner](raw_v2/three_api_paging_recovery.py) · Offline only; no live re-anchor.
