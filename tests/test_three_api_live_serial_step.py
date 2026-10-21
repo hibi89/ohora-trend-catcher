@@ -50,6 +50,40 @@ class LiveSerialStepGateTests(unittest.TestCase):
         runner.bindings.commit_captured_page.return_value = {"terminal": False}
         return runner
 
+    def test_terminal_http_400_binding_is_not_resent_or_recovered(self):
+        """Expired B failure is preserved; other eligible lane may progress."""
+        from unittest.mock import Mock, patch
+        runner = self._fake_one_page_runner()
+        failed = {"id": 451, "lane": "B", "account_ordinal": 151,
+                  "page": 1, "lease_id": "offline"}
+        runner.coordinator.lease_for_recovery.side_effect = (
+            lambda lane, now=None: failed if lane == "B" else None)
+        runner.bindings.lookup.return_value = {"request_id": "req-" + "b" * 64}
+        runner.executor.capture.get_capture_for_request.side_effect = (
+            lambda request_id: None if request_id == "req-" + "b" * 64 else Mock())
+        runner.executor.capture.get_intent_outcome.return_value = "failed_no_retry"
+        runner.coordinator.dispatch_lane_order.return_value = ()
+        with patch("three_api_live_serial_step.serial_tick_lock"):
+            result = runner.step(valid_official_roster(), **self.kwargs)
+        self.assertEqual(result["status"], "no_ready_work")
+        runner.bindings.dispatch_once.assert_not_called()
+        runner.bindings.commit_captured_page.assert_not_called()
+        runner.coordinator.db.execute.assert_not_called()
+        runner.executor.capture.get_intent_outcome.assert_called_once_with(
+            "req-" + "b" * 64)
+
+    def test_unknown_bound_request_still_blocks_without_resend(self):
+        from unittest.mock import patch
+        runner = self._fake_one_page_runner()
+        runner.coordinator.lease_for_recovery.side_effect = (
+            lambda lane, now=None: {"id": 451, "lane": "B"} if lane == "B" else None)
+        runner.executor.capture.get_capture_for_request.return_value = None
+        runner.executor.capture.get_intent_outcome.return_value = "unknown"
+        with patch("three_api_live_serial_step.serial_tick_lock"):
+            with self.assertRaisesRegex(LiveSerialStepError, "no resend"):
+                runner.step(valid_official_roster(), **self.kwargs)
+        runner.bindings.dispatch_once.assert_not_called()
+
     def test_committed_capture_but_failed_page_evidence_keeps_lane_halted(self):
         """A 30% response cannot reopen quota if RAW/cursor commit failed."""
         from unittest.mock import Mock, patch
