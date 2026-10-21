@@ -62,6 +62,82 @@ class LiveSerialStepGateTests(unittest.TestCase):
                 if call.args[0].lstrip().upper().startswith(
                     ("INSERT ", "UPDATE ", "DELETE ", "REPLACE "))]
 
+    def _simulate_missing_account(self, message, *, category="http_error"):
+        """The transport is a mock: no actual Meta HTTP or RAW writes."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from three_api_contract_executor import ContractExecutionError
+        runner = self._fake_one_page_runner()
+        request = Mock(request_id="req-" + "a" * 64)
+        runner.executor.capture.get_intent_outcome.return_value = "failed_no_retry"
+        runner.executor.capture.get_failure.return_value = SimpleNamespace(
+            category=category, scope="account", http_status=400,
+            outcome="failed", safe_message=message)
+        runner.executor.capture.get_response_evidence.return_value = None
+        runner.bindings.dispatch_once.side_effect = ContractExecutionError(
+            "Transport stopped; review persisted failure")
+        with patch("three_api_live_serial_step.serial_tick_lock"), patch(
+                "three_api_live_serial_step.prepare_job_request",
+                return_value=request):
+            if category == "http_error" and message.startswith(
+                    "Target account unavailable code=110 subcode=2207013"):
+                result = runner.step(valid_official_roster(), **self.kwargs)
+            else:
+                with self.assertRaises(ContractExecutionError):
+                    runner.step(valid_official_roster(), **self.kwargs)
+                result = None
+        return runner, result
+
+    def test_known_missing_account_with_usage_continues_without_retry(self):
+        runner, result = self._simulate_missing_account(
+            "Target account unavailable code=110 subcode=2207013 usage_pct=20")
+        self.assertEqual(result["status"], "account_failed")
+        self.assertEqual(result["account_ordinal"], 1)
+        runner.bindings.dispatch_once.assert_called_once()
+        runner.bindings.commit_captured_page.assert_not_called()
+        writes = self._write_calls(runner.coordinator.db)
+        self.assertEqual(len(writes), 2)
+        self.assertIn("halted=1", writes[0].args[0])
+        self.assertIn("halted=0", writes[-1].args[0])
+
+    def test_known_missing_account_without_usage_keeps_lane_halted(self):
+        runner, result = self._simulate_missing_account(
+            "Target account unavailable code=110 subcode=2207013")
+        self.assertEqual(result["status"], "account_failed")
+        runner.bindings.dispatch_once.assert_called_once()
+        runner.bindings.commit_captured_page.assert_not_called()
+        writes = self._write_calls(runner.coordinator.db)
+        self.assertEqual(len(writes), 1)
+        self.assertIn("halted=1", writes[0].args[0])
+
+    def test_unknown_account_400_never_reopens_lane(self):
+        runner, result = self._simulate_missing_account(
+            "HTTP rejected (code=110)")
+        self.assertIsNone(result)
+        self.assertEqual(len(self._write_calls(runner.coordinator.db)), 1)
+        runner.bindings.dispatch_once.assert_called_once()
+
+    def test_missing_account_usage_at_threshold_preserves_quota_hold(self):
+        runner, result = self._simulate_missing_account(
+            "Target account unavailable code=110 subcode=2207013 usage_pct=85")
+        self.assertEqual(result["status"], "account_failed")
+        self.assertEqual(len(self._write_calls(runner.coordinator.db)), 1)
+        runner.coordinator.observe_usage.assert_called_once()
+
+    def test_bounded_driver_counts_skipped_account_without_resend(self):
+        from unittest.mock import patch
+        from three_api_live_serial_step import run_bounded_serial_steps
+        runner = self._fake_one_page_runner()
+        with patch.object(LiveSerialStep, "step", side_effect=[
+                {"status": "account_failed"}, {"status": "page_committed"},
+                {"status": "no_ready_work"}]) as step:
+            report = run_bounded_serial_steps(
+                runner, [], max_steps=10, approved=True)
+        self.assertEqual(step.call_count, 3)
+        self.assertEqual(report["account_failures"], 1)
+        self.assertEqual(report["committed_pages"], 1)
+        self.assertEqual(report["attempted_steps"], 3)
+
     def test_terminal_http_400_binding_is_not_resent_or_recovered(self):
         """Expired B failure is preserved; other eligible lane may progress."""
         from unittest.mock import Mock, patch
