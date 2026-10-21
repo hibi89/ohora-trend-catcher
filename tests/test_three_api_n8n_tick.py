@@ -77,6 +77,7 @@ class N8nTickTests(unittest.TestCase):
         command = next(n["parameters"]["command"] for n in workflow["nodes"]
                        if n["type"] == "n8n-nodes-base.executeCommand")
         self.assertRegex(command, re.compile(r"p6_n8n_tick\.ps1", re.I))
+        self.assertTrue(command.isascii())
         self.assertNotRegex(command, re.compile(r"EA[A-Za-z0-9]{35,}"))
 
 

@@ -3,8 +3,14 @@ $python = Join-Path $env:LOCALAPPDATA 'OHORA_PYTHON_RUNTIME\python.exe'
 if (-not (Test-Path -LiteralPath $python)) {
     $python = 'C:\Users\haein\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
 }
-$repo = 'C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher'
-$roster = 'C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\2차 프로젝트 데이터\account_list.csv'
+$repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$archive = Split-Path -Parent $repo
+$rosterCandidates = @(Get-ChildItem -LiteralPath $archive -Directory | ForEach-Object {
+    $candidate = Join-Path $_.FullName 'account_list.csv'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $candidate }
+})
+if ($rosterCandidates.Count -ne 1) { throw 'Official roster was not uniquely located.' }
+$roster = $rosterCandidates[0]
 $pilot = Join-Path $env:LOCALAPPDATA 'OHORA_P6_PILOT'
 $credentials = 'C:\Users\haein\OneDrive\Desktop\ohora_env_a_b_c'
 $state = Join-Path $env:LOCALAPPDATA 'OHORA_P6_PILOT\scheduler_state.json'

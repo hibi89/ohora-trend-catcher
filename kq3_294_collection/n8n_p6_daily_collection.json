@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:\\Users\\haein\\OneDrive\\Desktop\\2차 프로젝트 아카이브\\ohora-trend-catcher\\raw_v2\\p6_n8n_tick.ps1\""
+        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$script=Get-ChildItem -Path (Join-Path $env:USERPROFILE 'OneDrive\\Desktop\\*\\ohora-trend-catcher\\raw_v2\\p6_n8n_tick.ps1') -File | Select-Object -First 1; if(-not $script){exit 2}; & $script.FullName\""
       },
       "id": "p6-bounded-runner",
       "name": "P6 read gates and run at most one page",
