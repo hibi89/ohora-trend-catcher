@@ -1,5 +1,12 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-070 overnight progress](docs/P6_TROUBLESHOOTING_LEDGER.md) · Read-only P6 snapshot: C=60 done; B held, A four failed_no_retry. Full collection incomplete.
 > Index: [P6-069 cursor recovery verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · [planner](raw_v2/three_api_paging_recovery.py) · Offline only; no live re-anchor.
+
+### P6-070 — 2026-10-22 · 야간 예약 수집의 최신 읽기 전용 진척 확인
+- **읽기 전용 관측:** 08:25 KST `three_api_manual_pilot.py --status` returned `db_writes=0`, `live_meta_called=false`, 309 durable receipts / 1236 observations / 1017 unique posts. A=146 done / 4 leased / 144 pending; B=0/0/294; C=60/0/234. Relative to P6-068 07:31 snapshot, C advanced by 30 pages.
+- **실패·쿼터 경계:** read-only `--failures` lists four A account HTTP400 `failed_no_retry`, no Capture or response evidence, automatic retry false. Failure causes remain unconfirmed. B remains pending/held without safe usage proof; this check did not reset holds or dispatch a request.
+- **운영/완료 상태:** n8n/Node processes remain present and C progress is consistent with the existing schedule, but no new Meta request was issued by this assistant. Full 294×3 collection remains incomplete. Cursor recovery stays offline-only; real recovery requires separate approval. No RAW/Capture/operational DB mutation, quota or cooldown bypass, manual tick, or retry.
+- **다음 안전 조치:** allow the pre-existing bounded schedule to continue only under its current gates; refresh read-only status later. Do not manually dispatch beside it. No live call is permitted by the latest user response. Code/handoff push SHA before this record: `960d1fd44714f6af9ceed251f82ef7f7fd42f910`.
 
 ### P6-069 — 2026-10-22 · 사용자 추가 커서 무효화 복구 요구 오프라인 인수 검증
 - **요구/결정:** 커서 오류에서 무한 재시도·임의 커서를 금지하고 `resume_required`로 중단한다. 별도 승인 라운드에서 최신 페이지부터 최대 3페이지 재탐색, 기존 게시물 ID overlap이 있을 때만 응답 커서로 이어간다. overlap이 없으면 `coverage_gap`; 삭제를 확정하지 않는다. 기존 A/B/C 순서, 4개/page, 3-page round, 85%·cooldown·no-retry, Capture/RAW 불변성은 유지.
@@ -340,6 +347,7 @@
 | P6-067 | C lane 7회 연속 예약 수집 | 06:45–07:15 ticks committed 21 C pages; usage max 13% | total 270 receipts / 1080 observations / 877 unique; C=21 done, B held |
 | P6-068 | C lane 10회 연속 예약 수집 | 06:45–07:30 ticks committed 30 C pages; usage max 20% | total 279 receipts / 1116 observations / 910 unique; C=30 done, B held |
 | P6-069 | 커서 무효화 재연결 인수검증 | 신규 요구가 기존 planner/runtime 구현과 오프라인 사례로 충족되는지 확인 | 60 targeted + 4 handoff PASS; full suite 987 PASS / 1 SKIP / 0 FAIL; live recovery 미실행 |
+| P6-070 | 야간 예약 수집 진척 | read-only snapshot confirms C +30 pages since 07:31; B held and four A failures remain no-retry | 309 receipts / 1236 observations / 1017 unique; no Meta call or DB write by status check |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
