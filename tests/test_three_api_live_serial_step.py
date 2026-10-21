@@ -289,6 +289,63 @@ class LiveSerialStepGateTests(unittest.TestCase):
             finally:
                 coordinator.db.close()
 
+    def test_missing_bound_capture_fails_closed_before_http(self):
+        """A reserved request with no capture must never be sent again."""
+        from unittest.mock import Mock, patch
+        runner = object.__new__(LiveSerialStep)
+        runner.coordinator = Mock()
+        runner.coordinator.path = "isolated-test.sqlite"
+        runner.coordinator.lease_for_recovery.side_effect = [
+            {"id": 1, "account_ordinal": 1, "lane": "A"}]
+        runner.bindings = Mock()
+        runner.bindings.lookup.return_value = {
+            "request_id": "req-" + "e" * 64}
+        runner.evidence = Mock()
+        runner.executor = Mock()
+        runner.executor.capture.get_capture_for_request.return_value = None
+        runner.executor.transport._lanes = {
+            lane: Mock(_caller_ig_id=caller)
+            for lane, caller in self.kwargs["caller_ids"].items()
+        }
+        with patch("three_api_live_serial_step.serial_tick_lock") as lock:
+            lock.return_value.__enter__.return_value = None
+            with self.assertRaisesRegex(LiveSerialStepError,
+                                        "Bound request has no capture"):
+                runner.step([{} for _ in range(294)], **self.kwargs)
+        runner.bindings.dispatch_once.assert_not_called()
+        runner.coordinator.lease_for_dispatch.assert_not_called()
+        runner.bindings.commit_captured_page.assert_not_called()
+
+    def test_recovery_precedes_fresh_dispatch(self):
+        """Durable capture reconciliation always has serial priority."""
+        from unittest.mock import Mock, patch
+        runner = object.__new__(LiveSerialStep)
+        runner.coordinator = Mock()
+        runner.coordinator.path = "isolated-test.sqlite"
+        job = {"id": 1, "account_ordinal": 1, "lane": "A"}
+        runner.coordinator.lease_for_recovery.side_effect = [job]
+        runner.bindings = Mock()
+        runner.bindings.lookup.return_value = {
+            "request_id": "req-" + "f" * 64}
+        runner.bindings.commit_captured_page.return_value = {"terminal": True}
+        runner.evidence = Mock()
+        runner.executor = Mock()
+        capture = Mock()
+        capture.request = Mock()
+        runner.executor.capture.get_capture_for_request.return_value = capture
+        runner.executor.transport._lanes = {
+            lane: Mock(_caller_ig_id=caller)
+            for lane, caller in self.kwargs["caller_ids"].items()
+        }
+        with patch("three_api_live_serial_step.serial_tick_lock") as lock:
+            lock.return_value.__enter__.return_value = None
+            result = runner.step([{} for _ in range(294)], **self.kwargs)
+        self.assertEqual(result["status"], "recovered")
+        self.assertEqual(result["lane"], "A")
+        runner.bindings.dispatch_once.assert_not_called()
+        runner.coordinator.lease_for_dispatch.assert_not_called()
+        runner.bindings.commit_captured_page.assert_called_once()
+
     def test_blocked_lane_recovery_does_not_dispatch(self):
         """A quota-halted lane must never cause a fresh HTTP dispatch."""
         from unittest.mock import Mock, patch
