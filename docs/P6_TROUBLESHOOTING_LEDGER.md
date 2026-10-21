@@ -8,6 +8,14 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+## P6-030 · 2026-10-21 · 실 Meta 파일럿 12건 보존 및 A 레인 편중 해소
+
+- **실운영 관측 — 사용자 직접 실행·보고:** 공식 계정 CSV 294행 preflight 및 분리된 API A/B/C 자격증명 검증 성공. 명시 승인된 단일 페이지 1회, 이어서 2페이지 수동 실행에서 모두 `page_committed`. pilot SQLite 읽기 전용 결과 `posts=12`, `post_observations=12`, `account_observations=3`. 동일 날짜 coordinator에서 `jobs`: A done=3, B done=0, C done=0. 원본 SQLite/응답은 사용자 PC에 있으며 GitHub에서 직접 감사한 데이터가 아님.
+- **원인:** 기존 `LiveSerialStep.step`가 각 단위 호출에 A→B→C 고정 순회하여 A의 신규 페이지1 작업이 남는 동안 B에 기회가 없었음. 동결 배정에서 B는 151~294 계정의 page1, C는 page2 선행 커서가 확보된 계정에만 dispatch 가능. 세 토큰의 등록 자체는 세 API의 실사용 증거가 아님.
+- **수정 (`eae4ce77f92c21540f43f8953e6674a6ffa72914`):** coordinator에 읽기 전용 `dispatch_lane_order(now)` 추가. 기존 quota/lease/immutable binding/cursor proof를 모두 존중하는 `dispatch_ready_diagnostics`로 후보를 제한하고, `dispatch_diagnostics`의 레인별 완료 페이지 수 오름차순으로 선택. 동률은 A/B/C 순서, 작업 자체의 lane·계정·페이지 재배정 없음. 별도 스케줄러, HTTP 자동 재시도 없음.
+- **오프라인 회귀:** 기존 저장소의 mock API 송신 두 호출/별도 프로세스 재개 시 예상 레인을 A→B로 변경. C는 A page1 유효 cursor가 있을 때만 후보, B가 quota로 차단되면 C/A 선택, 882 원래 jobs와 page evidence 유지 시험 추가. **CI (`eae4ce77`):** 3 API, C 계약, 동결, RAW v2 성공; Linux Runtime 성공, Windows 일부 통과/나머지 진행 중으로 최종 전체 성공은 별도 확인 필요.
+- **범위/미검증:** 사용자의 실제 RAW 12건과 로컬 credential은 GitHub에 업로드하지 않음. 코드 변경은 독립 개발 브랜치에만 반영. 사용자가 `git pull --ff-only` 하기 전까지 로컬 실행기는 구버전임. B/C 실 Meta 호출, 294계정 전수·365일 백필, 운영 자동화는 아직 미검증이며 호출 시 사용자 수동 승인·감사 필요. 실험 실패/unknown 전송은 재시도하지 말 것.
+
 ## P6-029 · 2026-10-21 · 첫 실수집 파일럿 연결 및 Business Discovery ID 오판
 
 - **문제:** 직렬 수집기가 오프라인 staging evidence만 수용해 원본 Capture/RAW가 실제 커서와 연결되지 않았음. 별개로 Business Discovery 응답의 조회 대상 `business_discovery.id`를 요청 URL의 API 호출자 IG ID와 동일해야 한다고 검사해 정상 Meta 응답을 실패로 오판할 수 있었음.
