@@ -126,8 +126,19 @@ class MetaTransport:
         # Classify the immutable failed request only; quota remains held because
         # error responses do not carry verified usage evidence in this contract.
         if status == 400 and code == 110 and subcode == 2207013:
+            # Error responses can contain trustworthy per-lane usage headers.
+            # Persist only the conservative integer percentage, never raw
+            # headers/body. Missing/malformed usage remains a held lane.
+            from math import ceil
+            from three_api_usage import parse_usage
+            observed_usage = parse_usage(result.get("headers"))
+            usage_suffix = (
+                f" usage_pct={ceil(observed_usage)}"
+                if observed_usage is not None else ""
+            )
             _fail(request.request_id, "http_error", "account",
-                  "Target account unavailable" + diagnostic, status=status)
+                  "Target account unavailable code=110 subcode=2207013"
+                  + usage_suffix, status=status)
         if not 200 <= status < 300 or "error" in result["body"]:
             _fail(request.request_id, "http_error", "account", "HTTP rejected" + diagnostic, status=status)
         # Keep the successfully received body available for P1's durable
