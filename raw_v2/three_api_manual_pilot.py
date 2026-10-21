@@ -121,8 +121,9 @@ def run_manual_pilot(source, workspace, *, live=False,
     capture_path = root / day.isoformat() / "capture.sqlite"
 
     # Explicit port checks are done before any source is touched.
-    if len({raw_path, control, capture_path}) != 3:
-        raise PilotConfigurationError("Independent P6 databases required")
+    if (len({raw_path, control, capture_path}) != 3
+            or any(path.is_symlink() for path in (raw_path, control, capture_path))):
+        raise PilotConfigurationError("Independent non-symlink P6 databases required")
 
     with ExitStack() as stack:
         raw_db = connect(raw_path, accounts, digest)
