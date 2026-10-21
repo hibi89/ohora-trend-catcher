@@ -16,6 +16,15 @@ class LiveSerialStepGateTests(unittest.TestCase):
             caller_ids={"A": "1", "B": "2", "C": "3"}, approved=True,
         )
 
+    def test_quota_release_requires_completed_page(self):
+        """Static regression: partial RAW/cursor failure must not clear lane."""
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "raw_v2"
+                  / "three_api_live_serial_step.py").read_text(encoding="utf-8")
+        self.assertIn("page_committed = False", source)
+        self.assertIn("page_committed = True", source)
+        self.assertIn("if (page_committed and type(usage) is int", source)
+
     def test_no_approval_does_not_touch_coordinator(self):
         with self.assertRaisesRegex(LiveSerialStepError, "Explicit live approval"):
             self.runner.step([], **{**self.kwargs, "approved": False})
