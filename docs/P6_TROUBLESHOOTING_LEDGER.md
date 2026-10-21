@@ -8,14 +8,15 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
-## P6-031 · 2026-10-21 · Terminal-bound recovery SQL / Mock fixture CI regression
+### P6-031 — 2026-10-21 · Terminal-bound recovery SQL / Mock fixture CI regression
 
 - **Evidence:** `5d55a1f8` RAW v2 Actions [#39544886165](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39544886165) returned 3 failures and 3 errors, mainly six tests in `test_three_api_live_serial_step.py`. The new mandatory read `SELECT job_id,request_id FROM job_request_bindings` made `Mock.fetchall()` return non-iterable Mock and increased recorded `db.execute` calls.
 - **Cause:** Incomplete mock DB contract and assertions that counted read-only SELECT as a database mutation. `hasattr(Mock, 'fetchall')` is always true for ordinary Mock objects. This was a regression of test fidelity, not evidence of a Meta transport or live SQLite corruption.
 - **Repair (this branch, SHA to be verified):** Keep a mandatory real SQLite terminal-binding read and remove the ineffective `hasattr` fallback; explicitly model an empty iterable SELECT result in mocked tests; assert SQL mutations separately from reads. Add a temporary real-SQLite test with synthetic failed job 451 and a separate B-lane bound job, preserving 451 binding and stale lease, preventing request dispatch, and keeping the 85% quota hold.
 - **Rejected:** Dropping the binding scan, ignoring scan exceptions, deleting/resetting failed job 451, or retriggering failed HTTP. These bypass the immutable no-resend invariant.
 - **Data safety:** Offline code/test only; the real user's pilot DB, 12 posts, API credentials, quota holds and request 451 are not accessed. Real Meta HTTP 0 calls. Frozen design, scheduler and main remain unchanged.
-- **Verification:** Pending CI on the new exact SHA. Roll back via normal feature-branch revert of this repair only, after preserving the terminal exclusion safety invariant.
+- **Post-repair regression evidence:** `d5e51b0` [RAW v2 #39545731858](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39545731858): 915 tests run, 2 FAIL, 0 ERROR; all failures in `test_current_handoff_links_survive_chat_restart` for `HANDOFF.md` and `STATUS.md` because new first-line P6-031 summary omitted mandatory `AGENTS.md` in first 2,000 characters. No terminal-scan/451 recovery test failure reported. Fixed both top-level links, plus ledger index/details consistency, without changing collector behavior.
+- **Verification:** Follow-up exact-SHA CI pending; earlier `d5e51b0` is **FAIL**, not PASS. Roll back via normal feature-branch revert of this repair only, after preserving the terminal exclusion safety invariant.
 
 ## P6-030 · 2026-10-21 · 실 Meta 파일럿 12건 보존 및 A 레인 편중 해소
 
@@ -65,6 +66,7 @@
 
 | P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
 | P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
+| P6-031 | CI SQL Mock·인수인계 | terminal 바인딩 SELECT Mock 반환과 상단 AGENTS 링크 누락 | 코드/테스트 수정 후 RAW 915 중 문서 가드 2건 FAIL; 상단 링크 복구 및 전체 SHA CI 재확인 |
 | P6-028 | CI 사전검증·인수인계 | 294계정 검증 도입 뒤 구형 무효 fixture와 문서 링크 누락으로 Linux/Windows 9건 실패 | fail-closed 검사 순서·모의 명단·인수인계 링크 복구, CI 재검증 대기 |
 
 ## 사건별 상세
