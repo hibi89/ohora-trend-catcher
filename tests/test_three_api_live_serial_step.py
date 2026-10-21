@@ -129,6 +129,66 @@ class LiveSerialStepGateTests(unittest.TestCase):
                 finally:
                     coordinator.db.close()
 
+    def test_future_ready_at_blocks_new_dispatch_but_not_bound_recovery(self):
+        """Cooldown clock gates HTTP only, even without a halted flag."""
+        import tempfile
+        from pathlib import Path
+        from datetime import timedelta
+        from three_api_coordinator import Coordinator, stamp
+        from three_api_job_binding import JobRequestBindingStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(Path(directory) / "future-cooldown.sqlite")
+            try:
+                coordinator.seed()
+                JobRequestBindingStore(coordinator)
+                now = self.kwargs["requested_at"]
+                first = coordinator.db.execute(
+                    "SELECT id FROM jobs WHERE lane='A' AND page=1 "
+                    "ORDER BY account_ordinal LIMIT 1"
+                ).fetchone()
+                coordinator.db.execute(
+                    "INSERT INTO job_request_bindings "
+                    "(job_id,request_id,request_digest,reserved_at) "
+                    "VALUES (?,?,?,?)",
+                    (first["id"], "req-" + "c" * 64, "offline-digest",
+                     stamp(now)),
+                )
+                coordinator.db.execute(
+                    "UPDATE lanes SET halted=0,ready_at=? WHERE lane='A'",
+                    (stamp(now + timedelta(minutes=65)),),
+                )
+                self.assertIsNone(coordinator.lease_for_dispatch("A", now=now))
+                diagnostics = coordinator.recovery_ready_diagnostics(now=now)
+                row = next(x for x in diagnostics["lanes"] if x["lane"] == "A")
+                self.assertEqual(row["recoverable_now"], 1)
+                recovered = coordinator.lease_for_recovery("A", now=now)
+                self.assertEqual(recovered["id"], first["id"])
+            finally:
+                coordinator.db.close()
+
+    def test_unbound_quota_halt_never_claims_recovery(self):
+        """An empty binding store cannot manufacture capture recovery."""
+        import tempfile
+        from pathlib import Path
+        from three_api_coordinator import Coordinator
+        from three_api_job_binding import JobRequestBindingStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(Path(directory) / "no-binding.sqlite")
+            try:
+                coordinator.seed()
+                JobRequestBindingStore(coordinator)
+                now = self.kwargs["requested_at"]
+                coordinator.observe_usage("A", None, now=now)
+                report = coordinator.recovery_ready_diagnostics(now=now)
+                row = next(x for x in report["lanes"] if x["lane"] == "A")
+                self.assertEqual(row["recoverable_now"], 0)
+                self.assertIsNone(coordinator.lease_for_recovery("A", now=now))
+                self.assertIsNone(coordinator.lease_for_dispatch("A", now=now))
+            finally:
+                coordinator.db.close()
+
     def test_blocked_lane_recovery_does_not_dispatch(self):
         """A quota-halted lane must never cause a fresh HTTP dispatch."""
         from unittest.mock import Mock, patch
