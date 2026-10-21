@@ -122,6 +122,12 @@ class MetaTransport:
             _fail(request.request_id, "auth", "global", "Authentication rejected", status=status)
         if status == 403 or code in (10, 200):
             _fail(request.request_id, "permission", "account", "Permission rejected" + diagnostic, status=status)
+        # Meta code 110 / subcode 2207013 denotes an unavailable target user.
+        # Classify the immutable failed request only; quota remains held because
+        # error responses do not carry verified usage evidence in this contract.
+        if status == 400 and code == 110 and subcode == 2207013:
+            _fail(request.request_id, "http_error", "account",
+                  "Target account unavailable" + diagnostic, status=status)
         if not 200 <= status < 300 or "error" in result["body"]:
             _fail(request.request_id, "http_error", "account", "HTTP rejected" + diagnostic, status=status)
         # Keep the successfully received body available for P1's durable
