@@ -47,6 +47,12 @@ class MetaNormalizerTests(unittest.TestCase):
         self.assertNotIn("SECRET", str(result))
         self.assertEqual(result["paging"]["cursors"]["after"], "edge1")
 
+    def test_after_only_cursor_is_preserved_without_inventing_next_url(self):
+        result = normalize_meta_page({"data": [{"id": "p1"}],
+                                      "paging": {"cursors": {"after": "opaque1"}}})
+        self.assertEqual(result["paging"], {"cursors": {"after": "opaque1"}})
+        self.assertNotIn("next", result["paging"])
+
     def test_meta_error_fails_closed(self):
         with self.assertRaises(ValueError):
             normalize_meta_page({"error": {"message": "quota"}})

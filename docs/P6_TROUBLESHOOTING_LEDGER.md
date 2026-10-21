@@ -8,6 +8,24 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+### P6-035 — 2026-10-21 · after-only cursor 종료 오판 및 무손실 재앵커 계획
+
+- **증상·원인:** `three_api_paging.validate_page_edge` returned `after` only when `paging.next` existed, and marked any no-next response terminal. `three_api_meta_normalizer.normalize_meta_page` retained cursor data only when `next` existed. Thus a full 4-item Business Discovery page with `paging.cursors.after` but no `paging.next` lost the cursor and was marked terminal. A full page with no cursor had also been treated as terminal despite ambiguity.
+- **수정:** `after` without `next` is now `cursor_candidate`; `paging.next` is never persisted raw; short (<4) page without cursor is `terminal_verified`; full page without usable cursor is `pagination_ambiguous`; an empty page with a cursor fails closed. `raw_v2/three_api_paging_recovery.py` adds (a) read-only classification of existing terminal+after evidence with Capture/RAW/digest chain checks and cursor redaction to SHA-256, and (b) separate recovery-round re-anchoring from newest to oldest with a hard 3-page bound. It compares prior media IDs, preserves duplicate observations but dedupes the analysis list, uses a new returned cursor only after an existing-ID overlap, and marks `coverage_gap` when no overlap/continuation proof is available. It never confirms deletion, retries an existing request, writes a DB, or sends HTTP. Exact cursor error category must be provided by caller; generic HTTP 400 stays operator review.
+- **49-row status:** Read-only local inspection of `%LOCALAPPDATA%\OHORA_P6_PILOT\p6_pilot_raw.sqlite` found 97 RAW receipts/contract receipts/request logs/query observations. It has no `response_evidence` or `page_evidence` table; saved receipt payload is normalized data without original paging. Therefore the 49 actual Capture/RAW/request/cursor links and their digest agreement cannot be established from the accessible pilot DB. No actual repair was applied. A synthetic 49-row terminal+after plan was produced with zero mutations and zero network requests; all 49 were marked `cursor_candidate_review_required` in simulation only.
+- **Additional user requirement:** after a separately approved new round, latest→older exploration is limited to three pages. A matched old ID plus valid new cursor gives `resume_ready`; missing/deleted boundary post can be bridged by a neighboring known ID; no overlap by the cap remains `coverage_gap`. Quota 85%/cooldown, frozen roster/lane allocation, page limit 4, and no failed-request retry remain unchanged. This is an offline planner, not a production recovery runner.
+- **Tests:** `tests/test_three_api_paging.py`, `tests/test_three_api_meta_normalizer.py`, `tests/test_three_api_paging_recovery.py`. Latest targeted run: 29 paging/recovery + 11 normalizer = **40 PASS**. Full `tests/run_offline.py` discovered 958 tests (before one final page-cap case) and is in progress at time of this entry; update exact final outcome before handoff. No Meta call or operating DB write.
+- **Unresolved:** Actual original 49 safe response bodies, Capture hashes, RAW receipt links, and coordinator terminal rows need their correct local store(s) to be available for a read-only audit. Until then their recoverability and exact count are unverified. A new Meta recovery round requires explicit user approval.
+- **Rollback:** Revert only the paging interpretation/planner/tests/docs on this feature branch. No operational artifact needs rollback; never patch existing terminal rows by inference or change immutable Capture/RAW evidence.
+
+### P6-036 — 2026-10-21 · page-limit 회귀 fixture가 terminal 근거를 잘못 구성
+
+- **실패 증거:** `test_anchor_on_third_page_does_not_dispatch_a_fourth_page` 최초 실행에서 expected `page_limit_reached`, actual `terminal_verified`로 1건 실패.
+- **확정 원인:** 테스트의 세 번째 응답에 게시물 3개와 cursor 없는 paging을 넣었다. 이 응답은 규칙상 4개 미만·후속 표시 없음이므로 `terminal_verified`가 맞으며, 코드 결함이 아니었다.
+- **수정:** fixture를 4개 게시물+유효 after cursor로 바꿔 세 페이지째에도 후속 후보가 있는 경계를 구성. 이제 검증 대상이 정확히 “세 번째 page 뒤 page4 dispatch 금지”다.
+- **변경/검증:** `tests/test_three_api_paging_recovery.py`만 수정. Fixture 수정 후 최신 paging/recovery targeted 29/29 PASS, combined with normalizer 40/40 PASS. Meta/운영 DB/RAW/Capture 영향 없음.
+- **롤백:** 해당 synthetic fixture만 되돌려도 운영 데이터 영향 없음. 코드의 full-page ambiguous/short-terminal 판정은 유지한다.
+
 ### B/C 인증 설정 비교 (오프라인) — 2026-10-21
 
 - **정적 호출 방식:** P6 three_api_manual_pilot.py는 P6_META_TOKEN_B/C 및 P6_META_IG_ID_B/C를 현재 프로세스 환경에서 읽고, 페이지당 단일 Graph GET을 Bearer 헤더로 보낸다. RAW collector.py는 --env 파일에서 META_ACCESS_TOKEN·META_IG_USER_ID·선택 META_GRAPH_VERSION을 읽고, URL-encoded batch POST 본문으로 요청한다. 양쪽 Graph 버전 기본값은 v26.0; account/media 요청 필드는 완전히 같지 않다.
@@ -113,6 +131,9 @@
 
 | P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
 | P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
+| P6-036 | 회귀 fixture | page3의 짧은 응답을 후속 커서가 있는 page-limit 상태로 잘못 만들었음 | fixture를 4개+after로 수정, paging/recovery 29/29 PASS |
+| P6-037 | 문서 인수인계 가드 | 신규 사건 상세는 추가했으나 장부 색인표에서 P6-035 누락 | 색인 보완, 후속 guard 4/4 PASS; 전체 재실행 미수행 |
+| P6-035 | 페이징·복구 | after-only cursor가 정상 종료 처리에서 소실 | cursor candidate 보존·49건 read-only 계획·3-page ID 재앵커 |
 | P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
 | P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
 | P6-032 | Windows 임시 파일 핸들 | 읽기 전용 SQLite context manager의 미닫힘으로 WinError 32 | 연결 명시 종료, 새 SHA CI 검증 대기 |
@@ -398,3 +419,11 @@
 - **Regression:** `ee3ed6c` and `414e189` add isolated SQLite quota/lease tests. The blocked lane must refuse new dispatch while a pre-bound page remains recoverable; a different lane can continue. The test does not make a real Meta request.
 - **Verification:** GitHub commits confirmed; full CI on latest documentation HEAD remains unverified. Do not claim production readiness or new-post collection success.
 - **Policy:** Frozen 3 callers, limit=4, 2 daily rounds, 65-minute minimum cooldown and immutable RAW unchanged; no operational DB, scheduler, main merge or Meta call.
+
+### P6-037 — 2026-10-21 · 신규 페이징 사건의 장부 색인 누락
+
+- **실패 증거:** 전체 offline 실행 954 tests, 1 failure / 1 skip. 실패는 test_incident_index_matches_unique_detailed_records: 상세 사건 set에는 P6-035가 있으나 index table에는 없었다.
+- **확정 원인:** P6-035/036 상세 내용을 작성했지만 중앙 P6 incident index 표에 두 사건을 추가하지 않았다. 코드·페이징 기능 실패가 아니다.
+- **수정:** index 표에 P6-035/036을 등록했고 별도 P6-037을 추가해 이 절차 회귀도 기록했다.
+- **후속 검증:** 수정 후 test_p6_troubleshooting_handoff_guard.py 4/4 PASS, paging/recovery 29/29 PASS, normalizer 11/11 PASS. 전체 954개 실행은 수정 후 반복하지 않았다. 이전 전체 결과 952 PASS / 1 FAIL / 1 SKIP이며 전체 재실행은 미검증이다.
+- **안전·롤백:** 문서 색인만 수정. Meta·운영 DB/RAW/Capture/quota 상태 변경 없음. 문서 수정은 필요한 경우 표 행만 되돌릴 수 있으며 상세 사건 기록을 삭제하지 않는다.

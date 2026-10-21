@@ -101,9 +101,13 @@ def normalize_meta_page(payload, *, requested_cursor=None, allow_partial_childre
     validate_page_edge({"data": cleaned, "paging": paging},
                        requested_cursor=requested_cursor)
     normalized = {"data": cleaned}
-    if paging.get("next"):
-        normalized["paging"] = {
-            "next": "offline-next-page",
-            "cursors": {"after": cursors["after"]},
-        }
+    if paging.get("next") or cursors.get("after"):
+        normalized_paging = {}
+        if paging.get("next"):
+            # Preserve the fact that a next edge existed without retaining the
+            # URL, which may contain credentials or other sensitive query data.
+            normalized_paging["next"] = "offline-next-page"
+        if cursors.get("after"):
+            normalized_paging["cursors"] = {"after": cursors["after"]}
+        normalized["paging"] = normalized_paging
     return normalized

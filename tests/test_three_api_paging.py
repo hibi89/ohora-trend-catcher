@@ -23,19 +23,31 @@ class PagingTests(unittest.TestCase):
         self.assertTrue(result["terminal"])
         self.assertIsNone(result["next_cursor"])
 
-    def test_full_page_without_paging_is_terminal_but_ambiguous_for_collection(self):
+    def test_full_page_without_paging_is_ambiguous(self):
         result = mod.validate_page_edge({"data": [{"id": str(i)} for i in range(4)]})
-        self.assertTrue(result["terminal"])
+        self.assertFalse(result["terminal"])
         self.assertIsNone(result["next_cursor"])
+        self.assertEqual(result["pagination_status"], "pagination_ambiguous")
         self.assertEqual(result["records"], 4)
 
-    def test_after_cursor_without_next_is_not_resumable(self):
+    def test_after_cursor_without_next_is_preserved_as_candidate(self):
         result = mod.validate_page_edge({
             "data": [{"id": str(i)} for i in range(4)],
             "paging": {"cursors": {"after": "abc123"}},
         })
+        self.assertFalse(result["terminal"])
+        self.assertEqual(result["next_cursor"], "abc123")
+        self.assertEqual(result["pagination_status"], "cursor_candidate")
+
+    def test_short_page_without_cursor_is_terminal_verified(self):
+        result = mod.validate_page_edge({"data": [{"id": str(i)} for i in range(3)]})
         self.assertTrue(result["terminal"])
-        self.assertIsNone(result["next_cursor"])
+        self.assertEqual(result["pagination_status"], "terminal_verified")
+
+    def test_empty_page_with_after_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "Empty page"):
+            mod.validate_page_edge({"data": [], "paging": {"cursors": {"after": "new_cursor"}}},
+                                   requested_cursor="old_cursor")
 
     def test_full_page_next_without_after_fails_closed(self):
         with self.assertRaises(ValueError):
@@ -91,13 +103,12 @@ class PagingTests(unittest.TestCase):
                 mod.validate_page_edge({"data": []},
                                        prior_cursors=(invalid,))
 
-    def test_empty_terminal_page_does_not_reuse_stale_after_cursor(self):
-        result=mod.validate_page_edge({
+    def test_empty_page_with_stale_after_is_rejected(self):
+        with self.assertRaises(ValueError):
+            mod.validate_page_edge({
             "data": [],
             "paging": {"cursors": {"after": "stale_cursor"}}},
             requested_cursor="current_cursor")
-        self.assertTrue(result["terminal"])
-        self.assertIsNone(result["next_cursor"])
 
     def test_invalid_response_fails(self):
         with self.assertRaises(ValueError):
