@@ -53,10 +53,6 @@ class LiveSerialStep:
             raise LiveSerialStepError("A/B/C caller identities required")
         if isinstance(getattr(self, "evidence", None), PageEvidenceStore):
             raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
-        # Constructor is deliberately staging-only. A manually injected or
-        # monkey-patched evidence object must not bypass this runtime boundary.
-        # There is no reviewed production evidence port yet.
-        raise LiveSerialStepError("Production evidence port is not verified")
         try:
             validate_official_roster(accounts)
         except RosterPreflightError as exc:
