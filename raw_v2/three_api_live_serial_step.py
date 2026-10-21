@@ -123,3 +123,36 @@ class LiveSerialStep:
                 return {"status": "no_ready_work"}
         except SerialTickBusy:
             return {"status": "serial_busy"}
+
+
+def run_bounded_serial_steps(runner, accounts, *, max_steps, **step_kwargs):
+    """Opt-in bounded driver; no scheduler, sleeps, retries, or implicit approval.
+
+    Stops on a busy lock, quota/no-ready-work, or the first exception.
+    Each iteration calls the original fail-closed one-page step, preserving
+    its durable reservation and serial lock. No HTTP is possible without
+    the original explicit approval and supplied transport.
+    """
+    if not isinstance(runner, LiveSerialStep):
+        raise LiveSerialStepError("Original live serial runner required")
+    if type(max_steps) is not int or not 1 <= max_steps <= 294 * 3:
+        raise LiveSerialStepError("Bounded step count required (1..882)")
+    if step_kwargs.get("approved") is not True:
+        raise LiveSerialStepError("Explicit live approval required")
+    results = []
+    for _ in range(max_steps):
+        result = runner.step(accounts, **step_kwargs)
+        status = result.get("status")
+        if status not in ("page_committed", "recovered", "no_ready_work",
+                          "serial_busy"):
+            raise LiveSerialStepError("Unknown serial step outcome")
+        results.append(result)
+        if status in ("no_ready_work", "serial_busy"):
+            break
+    return {"attempted_steps": len(results),
+            "committed_pages": sum(r["status"] == "page_committed"
+                                   for r in results),
+            "recovered_pages": sum(r["status"] == "recovered"
+                                   for r in results),
+            "last_status": results[-1]["status"],
+            "results": results}
