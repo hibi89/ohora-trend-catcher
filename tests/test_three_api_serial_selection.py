@@ -323,5 +323,36 @@ class SerialFixtureSelectionTests(unittest.TestCase):
         self.assertEqual(self.transport.calls, 0)
 
 
+    def test_diagnostics_are_read_only_and_explain_lane_blocks(self):
+        before = self.counts()
+        self.assertIsNone(self.coord.db.execute(
+            """SELECT name FROM sqlite_master WHERE type='table'
+               AND name='offline_contract_serial_turn'""").fetchone())
+        self.coord.observe_usage("A", 85, now=OBSERVED_AT)
+        report = self.bridge.fixture_tick_diagnostics(now=OBSERVED_AT)
+        self.assertEqual(report["mode"], "OFFLINE_FIXTURE_READ_ONLY")
+        self.assertIsNone(report["last_successful_lane"])
+        self.assertEqual([x["lane"] for x in report["lanes"]], ["A", "B", "C"])
+        a, b, c = report["lanes"]
+        self.assertTrue(a["halted"])
+        self.assertEqual(a["block_reason"], "usage_limit")
+        self.assertEqual(a["dispatchable_now"], 0)
+        self.assertEqual(b["dispatchable_now"], 144)
+        self.assertEqual(c["dispatchable_now"], 0)
+        self.assertEqual(self.counts(), before)
+        self.assertIsNone(self.coord.db.execute(
+            """SELECT name FROM sqlite_master WHERE type='table'
+               AND name='offline_contract_serial_turn'""").fetchone())
+
+    def test_diagnostics_follow_durable_serial_turn_and_recovery(self):
+        self.assertEqual(self.tick(
+            {("A", 1, 1): self.fixture("A", 1)})["selected_lane"], "A")
+        snapshot = self.bridge.fixture_tick_diagnostics(now=OBSERVED_AT)
+        self.assertEqual(snapshot["last_successful_lane"], "A")
+        self.assertGreaterEqual(snapshot["lanes"][0]["dispatchable_now"], 1)
+        self.assertFalse(snapshot["lanes"][0]["halted"])
+        self.assertEqual(self.counts(), (1, 1, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
