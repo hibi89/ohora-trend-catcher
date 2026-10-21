@@ -404,5 +404,33 @@ class LiveSerialStepGateTests(unittest.TestCase):
         step.assert_called_once()
 
 
+    def test_bounded_driver_refreshes_clock_for_each_page(self):
+        from unittest.mock import patch
+        from datetime import timedelta
+        from three_api_live_serial_step import run_bounded_serial_steps
+        start = self.kwargs["requested_at"]
+        stamps = iter([start, start + timedelta(seconds=2)])
+        with patch.object(LiveSerialStep, "step",
+                          return_value={"status": "page_committed"}) as step:
+            run_bounded_serial_steps(self.runner, [], max_steps=2,
+                                     clock=lambda: next(stamps), approved=True)
+        self.assertEqual(step.call_args_list[0].kwargs["requested_at"], start)
+        self.assertEqual(step.call_args_list[1].kwargs["requested_at"],
+                         start + timedelta(seconds=2))
+
+    def test_bounded_driver_rejects_clock_rollback_before_second_call(self):
+        from unittest.mock import patch
+        from datetime import timedelta
+        from three_api_live_serial_step import run_bounded_serial_steps
+        start = self.kwargs["requested_at"]
+        stamps = iter([start, start - timedelta(seconds=1)])
+        with patch.object(LiveSerialStep, "step",
+                          return_value={"status": "page_committed"}) as step:
+            with self.assertRaisesRegex(LiveSerialStepError, "Monotonic"):
+                run_bounded_serial_steps(self.runner, [], max_steps=2,
+                                         clock=lambda: next(stamps), approved=True)
+        step.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
