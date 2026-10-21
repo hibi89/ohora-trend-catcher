@@ -247,9 +247,11 @@ class OfflineSerialContractBridge:
                     # Only authenticated safe response evidence can release
                     # the preflight hold; an uncertain/missing response keeps
                     # the >=65 min operator-only cooldown in durable SQLite.
+                    record = capture.get_capture_for_request(request.request_id)
                     saved = capture.get_response_evidence(request.request_id)
-                    usage = None if saved is None else saved.get("safe_usage", {}).get(
-                        "max_usage_percent")
+                    usage = (saved.get("safe_usage", {}).get("max_usage_percent")
+                             if record is not None and saved is not None
+                             and saved.get("classification") == "safe" else None)
                     if type(usage) is not int or not 0 <= usage <= 100:
                         usage = None
                     if usage is not None and usage < 85:
