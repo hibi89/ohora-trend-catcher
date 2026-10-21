@@ -4,6 +4,12 @@ from datetime import datetime, timezone
 
 from three_api_live_serial_step import LiveSerialStep, LiveSerialStepError
 
+def valid_official_roster():
+    """Synthetic, structurally valid 294-account fixture; no actual accounts."""
+    return [{"ordinal": n, "key": f"KR_{n:03}", "username": f"nail_{n}"}
+            for n in range(1, 295)]
+
+
 
 class LiveSerialStepGateTests(unittest.TestCase):
     def setUp(self):
@@ -341,7 +347,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
             lock.return_value.__enter__.return_value = None
             with self.assertRaisesRegex(LiveSerialStepError,
                                         "Bound request has no capture"):
-                runner.step([{} for _ in range(294)], **self.kwargs)
+                runner.step(valid_official_roster(), **self.kwargs)
         runner.bindings.dispatch_once.assert_not_called()
         runner.coordinator.lease_for_dispatch.assert_not_called()
         runner.bindings.commit_captured_page.assert_not_called()
@@ -369,7 +375,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
         }
         with patch("three_api_live_serial_step.serial_tick_lock") as lock:
             lock.return_value.__enter__.return_value = None
-            result = runner.step([{} for _ in range(294)], **self.kwargs)
+            result = runner.step(valid_official_roster(), **self.kwargs)
         self.assertEqual(result["status"], "recovered")
         self.assertEqual(result["lane"], "A")
         runner.bindings.dispatch_once.assert_not_called()
@@ -393,7 +399,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
         }
         with patch("three_api_live_serial_step.serial_tick_lock") as lock:
             lock.return_value.__enter__.return_value = None
-            result = runner.step([{} for _ in range(294)], **self.kwargs)
+            result = runner.step(valid_official_roster(), **self.kwargs)
         self.assertEqual(result["status"], "no_ready_work")
         runner.bindings.dispatch_once.assert_not_called()
         self.assertEqual(runner.coordinator.lease_for_recovery.call_count, 3)
