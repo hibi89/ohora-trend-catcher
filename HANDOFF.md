@@ -1,3 +1,5 @@
+> **2026-10-21 · P6 Evidence/RAW audit 인수인계:** `raw_v2/three_api_evidence_audit.py`에 `audit_page_evidence` + `audit_raw_receipt_links` (읽기 전용, offline, non-authorizing) 추가. `tests/test_three_api_evidence_audit.py` 합성 SQLite·mock 테스트, Runtime CI 컴파일·테스트 트리거 등록. `STATUS.md` 및 P6 ledger 확인. 최신 HEAD `5cfb7072`, CI 미확정. 운영 Evidence 포트·365일 backfill 여전히 미연결; frozen 3 API/limit=4/2 rounds·85%/65분, 실 Meta/운영 DB/main/scheduler 변경 금지.
+
 > **P6 필수 인수인계 링크:** [AGENTS.md](AGENTS.md) · [트러블슈팅 장부](docs/P6_TROUBLESHOOTING_LEDGER.md) · [동결 설계](docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md). 채팅방 전환 시 최신 SHA·CI·미해결 사항을 우선 점검한다.
 
 > **2026-10-21 · P6 fail-closed lane release fix.** `37cd84a` gates release of live_pending_usage on successful durable page commit; `6054481` records rationale and `bca875e` adds static regression. STATUS `77d6243`. CI latest HEAD unverified. Offline evidence staging still forbids live dispatch; 3 caller lanes, limit=4, 2 daily rounds frozen. No Meta/production DB/main/scheduler changes. Next implement and verify production-safe evidence port, durable Capture/RAW cursor and history backfill before seeking separate live approval.
