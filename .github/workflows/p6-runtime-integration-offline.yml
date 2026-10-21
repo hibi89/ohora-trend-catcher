@@ -31,6 +31,7 @@ on:
       - 'raw_v2/three_api_serial_lock.py'
       - 'raw_v2/three_api_serial_contract_bridge.py'
       - 'tests/test_three_api_serial_contract_bridge.py'
+      - 'tests/test_three_api_serial_selection.py'
       - 'tests/test_three_api_serial_lock.py'
       - 'tests/test_three_api_serial_catchup.py'
       - 'raw_v2/three_api_daily_projection.py'
@@ -83,6 +84,7 @@ on:
       - 'raw_v2/three_api_serial_lock.py'
       - 'raw_v2/three_api_serial_contract_bridge.py'
       - 'tests/test_three_api_serial_contract_bridge.py'
+      - 'tests/test_three_api_serial_selection.py'
       - 'tests/test_three_api_serial_lock.py'
       - 'tests/test_three_api_serial_catchup.py'
       - 'raw_v2/three_api_daily_projection.py'
@@ -136,6 +138,7 @@ jobs:
             raw_v2/three_api_serial_lock.py \
             raw_v2/three_api_serial_contract_bridge.py \
             tests/test_three_api_serial_contract_bridge.py \
+            tests/test_three_api_serial_selection.py \
             tests/test_three_api_serial_lock.py \
             tests/test_three_api_serial_catchup.py \
             raw_v2/three_api_epochs.py \
