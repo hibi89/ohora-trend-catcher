@@ -5,8 +5,9 @@ repository's additive RAW v2 schema. It never contacts Meta unless BOTH
 --live and --confirm-owner-approval are supplied by the operator. Source
 CSV and any existing operating collection.sqlite remain untouched.
 
-Only ONE page (limit=4) is attempted per invocation. No scheduler, hidden
-retry or automatic looping. Three caller credentials must be in process
+By default only ONE page (limit=4) is attempted per invocation. An explicit
+--max-pages bound permits serial multi-page dispatch, never hidden retries.
+No scheduler or background looping. Three caller credentials must be in process
 environment, never in command arguments, files or Git. Do not use this
 entrypoint until the repository owner separately authorizes a Meta pilot.
 """
@@ -30,6 +31,7 @@ from three_api_live_lane_router import ThreeLaneMetaTransport
 from three_api_raw_writer import ContractRawWriter
 from three_api_roster_preflight import validate_official_roster
 from three_api_serial_bootstrap import build_verified_serial_runner
+from three_api_live_serial_step import run_bounded_serial_steps
 from three_api_transport import MetaTransport
 
 LANES = ("A", "B", "C")
@@ -86,12 +88,15 @@ def _transports(values):
 
 
 def run_manual_pilot(source, workspace, *, live=False,
-                     confirm_owner_approval=False, environment=None):
+                     confirm_owner_approval=False, environment=None,
+                     max_pages=1):
     """Read-only preflight, or one explicitly authorized page in a NEW store.
 
     Never opens a preexisting operational DB. A private work directory holds
     isolated coordinator and Capture databases and a dedicated RAW v2 DB.
     """
+    if type(max_pages) is not int or not 1 <= max_pages <= 294:
+        raise PilotConfigurationError("Manual page bound must be 1..294")
     accounts, digest = _validated_roster(source)
     if live is not True:
         return {
@@ -99,6 +104,7 @@ def run_manual_pilot(source, workspace, *, live=False,
             "official_accounts": len(accounts),
             "api_lanes": len(LANES),
             "post_limit": 4,
+            "max_pages": max_pages,
             "live_meta_called": False,
         }
     if confirm_owner_approval is not True:
@@ -138,20 +144,21 @@ def run_manual_pilot(source, workspace, *, live=False,
         runner = build_verified_serial_runner(
             coordinator, capture, raw, _transports(values),
         )
-        result = runner.step(
-            accounts, run_id="p6-" + day.strftime("%Y%m%d"),
+        result = run_bounded_serial_steps(
+            runner, accounts, max_steps=max_pages,
+            run_id="p6-" + day.strftime("%Y%m%d"),
             roster_digest=digest, day_kst=day,
-            requested_at=datetime.now(timezone.utc),
             api_version=version,
             caller_ids={lane: values[lane][1] for lane in LANES},
             approved=True,
         )
     return {
-        "mode": "EXPLICIT_SINGLE_PAGE_ATTEMPT",
-        "status": result["status"],
-        "lane": result.get("lane"),
-        "account_ordinal": result.get("account_ordinal"),
-        "new_http_attempt_limit": 1,
+        "mode": "EXPLICIT_BOUNDED_SERIAL_ATTEMPT",
+        "status": result["last_status"],
+        "committed_pages": result["committed_pages"],
+        "recovered_pages": result["recovered_pages"],
+        "attempted_steps": result["attempted_steps"],
+        "new_http_attempt_limit": max_pages,
     }
 
 
@@ -161,6 +168,8 @@ def main(argv=None):
                         help="Official 294-account account_list.csv (read-only)")
     parser.add_argument("--workspace", type=Path, required=True,
                         help="Dedicated isolated P6 pilot directory")
+    parser.add_argument("--max-pages", type=int, default=1,
+                        help="Explicit serial page cap, 1..294 (default 1)")
     parser.add_argument("--live", action="store_true",
                         help="Enable at most one Meta page; requires separate owner approval")
     parser.add_argument("--confirm-owner-approval", action="store_true",
@@ -171,6 +180,7 @@ def main(argv=None):
             options.source, options.workspace,
             live=options.live,
             confirm_owner_approval=options.confirm_owner_approval,
+            max_pages=options.max_pages,
         )
     except (ValueError, TypeError, RuntimeError, sqlite3.Error):
         parser.exit(2, "P6 pilot stopped safely; check local input/configuration.\n")
