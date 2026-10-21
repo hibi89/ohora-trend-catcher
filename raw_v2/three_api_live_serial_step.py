@@ -42,6 +42,11 @@ class LiveSerialStep:
              requested_at, api_version, caller_ids, approved=False):
         if approved is not True:
             raise LiveSerialStepError("Explicit live approval required")
+        # The injected PageEvidenceStore declares itself offline staging only.
+        # Do not reach coordinator leasing or HTTP until a reviewed production
+        # evidence adapter replaces it. Keep constructor tests and fixture work.
+        if isinstance(getattr(self, "evidence", None), PageEvidenceStore):
+            raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
         if not isinstance(requested_at, datetime) or requested_at.utcoffset() is None:
             raise LiveSerialStepError("Timezone-aware request time required")
         if not isinstance(accounts, (list, tuple)) or len(accounts) != 294:
