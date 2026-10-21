@@ -328,3 +328,36 @@ class OfflineSerialContractBridge:
                 return {"status": "no_ready_work", "selected_lane": None}
         except SerialTickBusy:
             return {"status": "serial_busy", "selected_lane": None}
+
+    def fixture_tick_diagnostics(self, *, now):
+        """Read-only A/B/C eligibility snapshot; never leases or dispatches."""
+        from three_api_coordinator import LANES
+        if not isinstance(now, datetime) or now.utcoffset() is None:
+            raise SerialContractBridgeError("Timezone-aware time required")
+        dispatch = self.coordinator.dispatch_ready_diagnostics(now=now)
+        recovery = self.coordinator.recovery_ready_diagnostics(now=now)
+        db = self.coordinator.db
+        table = db.execute(
+            """SELECT 1 FROM sqlite_master WHERE type='table'
+               AND name='offline_contract_serial_turn'"""
+        ).fetchone()
+        row = (db.execute(
+            "SELECT last_lane FROM offline_contract_serial_turn WHERE singleton=1"
+        ).fetchone() if table is not None else None)
+        first = {lane["lane"]: lane for lane in dispatch["lanes"]}
+        second = {lane["lane"]: lane for lane in recovery["lanes"]}
+        gates = {row["lane"]: dict(row) for row in db.execute(
+            "SELECT lane,halted,reason,ready_at FROM lanes ORDER BY lane")}
+        return {
+            "mode": "OFFLINE_FIXTURE_READ_ONLY",
+            "last_successful_lane": None if row is None else row["last_lane"],
+            "lanes": [
+                {"lane": lane,
+                 "halted": bool(gates[lane]["halted"]),
+                 "block_reason": gates[lane]["reason"],
+                 "ready_at": gates[lane]["ready_at"],
+                 "dispatchable_now": first[lane]["dispatchable_now"],
+                 "recoverable_now": second[lane]["recoverable_now"]}
+                for lane in LANES
+            ],
+        }
