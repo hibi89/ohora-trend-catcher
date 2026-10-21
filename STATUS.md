@@ -1,3 +1,5 @@
+> **P6 필수 인수인계 링크:** [AGENTS.md](AGENTS.md) · [트러블슈팅 장부](docs/P6_TROUBLESHOOTING_LEDGER.md) · [동결 설계](docs/P6_FINAL_COLLECTION_DESIGN_2026-10-20.md). 채팅방 전환 시 최신 SHA·CI·미해결 사항을 우선 점검한다.
+
 > **2026-10-21 · P6 fail-closed lane release fix.** `37cd84a` changes LiveSerialStep to release live_pending_usage only after commit_captured_page returns successfully; `6054481` documents the invariant, `bca875e` adds a static guard test. No live Meta calls, production DB changes, main merge or scheduler. Runtime evidence remains offline staging only and blocks live. Latest CI not yet verified.
 
 > **2026-10-21 · P6 roster preflight implementation.** Official 294-account identity/ordinal duplicate validation added and connected before any live transport; 3 API lanes, limit=4, 2 rounds unchanged. Commits `3f44975`, `105a2a3`, `12eacf0`, `52c4342`, `168f9ff`, `33ff24f`. Latest complete CI not yet verified; Frozen Guard and C Contract succeeded for `168f9ff`, Three API and Runtime pending. Production evidence adapter still absent, live Meta and operational DB untouched. Feature-based workflow replaces old N-unit reporting.
