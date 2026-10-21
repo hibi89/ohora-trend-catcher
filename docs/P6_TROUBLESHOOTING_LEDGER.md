@@ -8,6 +8,15 @@
 >
 > **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
 
+## P6-034 — 2026-10-21 KST · 최초 자동 수집 성공 시각 기준 일일 최신화 시간 결정 (OFFLINE)
+
+- **사용자 명시 결정:** 오늘 2026-10-21 자정 전 최신 데이터 수집 성공을 최우선으로 시도하되, 완료되지 않으면 실제 시스템 완성 후 처음 성공한 시각부터 일일 운영을 시작한다. 잠정 시작 시각은 00:10 KST이며, 첫 실제 n8n 자동수집의 검증된 RAW 저장/영수증 성공 시각 KST HH:MM으로 매일 시작 시각을 교체한다. **00:10이 최초 시도를 지연시켜서는 안 된다.**
+- **기존 동결 정책 유지:** 294계정, A/B/C 3레인, limit=4, 2라운드/계정 3페이지(일일 최대 12건), 수집 원본과 커서 선행 증거, 85% 제한과 최소 65분 쿨다운/검증된 리셋, 불확실 HTTP 무재전송. 5분 tick은 중복 882개 작업 재생성이 아니라 기존 epoch의 미완료 상태 확인이다. 2회 quota window가 부족하면 세 번째 이상 가용 창에서도 같은 미완료 일일 작업을 계속한다.
+- **구현:** `src/collection_schedule.py`의 안전한 read-only 결정 함수와 CLI, `tests/test_collection_schedule.py`의 날짜/자정/anniversary/쿼터/중복/실행 차단 15개 오프라인 검사, `docs/P6_DAILY_START_POLICY_20261021.md` 및 별도 Linux/Windows CI workflow를 작성해 독립 `feature/p6-kst-daily-start-policy-20261021` 브랜치에 반영.
+- **대안 검토:** 매일 고정 00:10만 시작하면 오늘 24시 전 승인된 수집 시도를 늦추고 첫 성공 기념 시각 요구와 충돌한다. 매 5분마다 새로운 일일 작업을 만드는 방식은 294계정 중복 조회/쿼터 소모로 기각. 선택은 첫 승인된 성공 시각 기준 단일 KST 일일 epoch + 주기적 재개 판단이다.
+- **검증 범위:** 컨테이너의 동등한 순수 정책/15개 테스트 15/15 PASS(실 Meta 0회). 새 GitHub 브랜치의 정확한 SHA와 CI Linux/Windows 성공은 **별도 확인 전까지 미검증**. 학원 n8n `src/pipeline.py --live`는 계속 CONFIG_REQUIRED이고 실제 첫 성공 관측·저장, 5분 Schedule Trigger 배포 및 영속 DB 연결은 미구현/미활성. 운영 DB, CSV, 토큰, 기존 RAW, main은 미변경.
+- **검증/복구:** 집에서 안전하게 실제 live runner 검증 후 first_verified_success_at에 첫 n8n 성공 영수증 시각을 제공해야 한다. 장애 시 이 기능 브랜치만 revert; 역사적 레거시 기록/RAW/쿼터 상태는 덮어쓰지 않는다.
+
 ## P6-030 · 2026-10-21 · 실 Meta 파일럿 12건 보존 및 A 레인 편중 해소
 
 - **실운영 관측 — 사용자 직접 실행·보고:** 공식 계정 CSV 294행 preflight 및 분리된 API A/B/C 자격증명 검증 성공. 명시 승인된 단일 페이지 1회, 이어서 2페이지 수동 실행에서 모두 `page_committed`. pilot SQLite 읽기 전용 결과 `posts=12`, `post_observations=12`, `account_observations=3`. 동일 날짜 coordinator에서 `jobs`: A done=3, B done=0, C done=0. 원본 SQLite/응답은 사용자 PC에 있으며 GitHub에서 직접 감사한 데이터가 아님.
