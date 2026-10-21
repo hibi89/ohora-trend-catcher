@@ -129,6 +129,9 @@ class LiveSerialStep:
                                 (stamp(now), lane))
                         elif type(usage) is int and usage >= 85:
                             self.coordinator.observe_usage(lane, usage, now=now)
+                        # A successful response is insufficient to reopen the
+                        # lane until the RAW receipt and cursor are committed.
+                        # Unknown outcomes remain held for manual review.
                     return {"status": "page_committed", "lane": lane,
                             "account_ordinal": job["account_ordinal"],
                             "terminal": result["terminal"]}
