@@ -37,6 +37,7 @@ _ORCHESTRATOR_MODULES = frozenset({
     "test_three_api_serial_catchup",
     "test_three_api_serial_lock",
     "test_three_api_serial_contract_bridge",
+    "test_three_api_serial_selection",
 })
 _MODULE_GROUPS = {
     "test_three_api_operator_report": "report",
