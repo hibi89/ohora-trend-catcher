@@ -35,6 +35,18 @@ class RosterPreflightTests(unittest.TestCase):
         with self.assertRaises(RosterPreflightError):
             validate_official_roster(rows)
 
+    def test_boolean_ordinal_rejected(self):
+        rows = roster()
+        rows[0]["ordinal"] = True
+        with self.assertRaises(RosterPreflightError):
+            validate_official_roster(rows)
+
+    def test_blank_key_rejected(self):
+        rows = roster()
+        rows[0]["key"] = "   "
+        with self.assertRaises(RosterPreflightError):
+            validate_official_roster(rows)
+
     def test_missing_identity(self):
         rows = roster()
         rows[0]["username"] = ""
