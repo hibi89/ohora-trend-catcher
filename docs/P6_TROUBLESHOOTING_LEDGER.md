@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-064 — 2026-10-22 · C lane 2회 연속 예약 수집
+- **실제 수집:** P6-063의 C-only verified reset 뒤 n8n 예약 tick 06:45와 06:50 각각 3페이지를 Capture→RAW/evidence 경로로 commit, account failures 0. C lane remained unhalted after safe usage evidence; latest usage=2%, maximum across 6 responses=2%.
+- **현재 상태:** read-only `--status`: 255 durable receipts / 1020 observations / 831 unique; A=146 done / 4 leased / 144 pending; B=0/294; C=6 done / 288 pending. B remains held with no current-day safe usage; A's four bound `failed_no_retry` remain untouched. No manual tick or Meta request by the monitor.
+- **범위:** this is real partial current-day collection, not full 294×3 coverage. Per tick page cap=3 and page size=4 unchanged; no retries, no quota/cooldown bypass, no cursor recovery call. Cursor re-anchor stays offline-only; legacy 49 and existing RAW source data unchanged.
+- **테스트/깃:** code unchanged since P6-063. Prior official offline suite 988 discovered / exit 0 / 1 skipped; focused tick+handoff 12/12, cursor/re-anchor 26/26. Branch `codex/p6-readiness-hardening-20261019`, prior pushed SHA `9d962fb3c2735b03647aea22319b44100eb6e9e3`; this status refresh needs commit/push.
+
 ### P6-063 — 2026-10-22 · 증거 확인 후 C lane 수동 재개와 실제 수집 진척
 - **재개 근거:** 06:42 KST read-only audit across isolated P6 dates found exactly one historical C-bound request: job done, intent captured, Capture present, HTTP 200 safe response with 66% maximum usage. No later C request existed; current day's C had no bindings, `live_pending_usage` hold, elapsed `ready_at`, and 146 dispatch candidates. No n8n execution was active. These conditions satisfy the existing manual cooldown-reset design; no quota/cooldown bypass.
 - **변경:** in a transaction-time recheck, cleared only current-day isolated coordinator lane C's `halted/reason` fields. Preserved `ready_at`, jobs, bindings, prior Capture/RAW evidence, and all other lanes. B stayed held; A's four bound failed requests stayed untouched. No manual tick or direct Meta call was made by the reset command.
@@ -294,6 +300,7 @@
 | P6-061 | no_ready_work 원인·telemetry 수정 | A=0 eligible, B/C held; step attempt no longer conflated with Meta request | n8n status no_ready_work, 0 committed, 0 account failures; 8/8 adapter tests; no HTTP/DB mutation |
 | P6-062 | ENV 구조 검증·권한 미검증 구분 | A/B/C files structurally valid, unique, v26.0 | offline loader PASS; token validity/permissions not checked; no Meta request |
 | P6-063 | C lane 증거확인 재개·실제 tick 진척 | safe prior usage 66%, cooldown elapsed; only C gate released | scheduled tick committed 3 pages; new safe usage 0%; total 252 receipts; B/A guards preserved |
+| P6-064 | C lane 연속 예약 수집 진척 | 06:45 and 06:50 ticks each committed 3 pages; usage max 2% | total 255 receipts / 1020 observations / 831 unique; C=6 done, B held |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
