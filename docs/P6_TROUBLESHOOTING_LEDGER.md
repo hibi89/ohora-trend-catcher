@@ -1,9 +1,9 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
 ### P6-044 — 2026-10-22 · n8n KST scheduler와 P6 단일 tick 연결 준비
-- **변경:** `src/collection_schedule.py`를 현재 작업 브랜치에 반영하고, `raw_v2/three_api_n8n_tick.py`가 일정 판단·읽기 전용 coordinator quota/hold 확인·명시적 live gate 뒤 기존 `run_manual_pilot`을 호출하도록 연결했다. PowerShell launcher와 비활성 5분 n8n workflow export를 추가했다.
+- **변경:** `src/collection_schedule.py`를 현재 작업 브랜치에 반영하고, `raw_v2/three_api_n8n_tick.py`가 일정 판단·읽기 전용 coordinator quota/hold 확인·명시적 live gate 뒤 기존 `run_manual_pilot`을 호출하도록 연결했다. PowerShell launcher와 비활성 5분 n8n workflow export를 추가했다. n8n CLI 테스트 실행을 위해 schedule trigger와 함께 `Execute Workflow Trigger`도 둔다.
 - **안전:** 각 tick은 기본 1페이지, 상한 3페이지다. Unknown Capture intent는 `manual_review`; B/C hold/cooldown은 날짜가 바뀌어도 이어진다. 토큰은 파일에서 프로세스 메모리로만 로드되고 출력/상태파일에는 기록되지 않는다. 시작 기준시각은 커밋된 Capture→RAW 성공 결과의 검증된 응답시각만 원자적으로 저장한다. cursor recovery는 자동 스케줄 대상이 아니며 별도 승인과 3페이지 상한을 유지한다.
-- **검증:** schedule, n8n adapter, manual pilot, paging, recovery, credential diagnostic, handoff guard **75/75 PASS**; Python compile PASS. Mock 테스트뿐이며 실 Meta 호출·n8n import/execution·실제 294계정 진행은 아직 검증되지 않았다.
+- **검증:** schedule, n8n adapter, manual pilot, paging, recovery, credential diagnostic, handoff guard **76/76 PASS**; Python compile PASS. n8n 2.44.5 localhost runtime starts and the inactive workflow import succeeds. The first CLI execution failed before node execution because the CLI requires an Execute Workflow Trigger; the export now includes it. No Meta HTTP was issued in that failed attempt. A duplicate inactive draft exists in the isolated n8n database from re-import; cleanup remains pending. Live collection/verified durable RAW is still unconfirmed.
 - **다음 단계:** 로컬 격리 n8n에 비활성 workflow를 import하고 1페이지 한정 실행 후 Capture/RAW durable evidence 및 사용량을 확인한다. 이 증거와 quota gate가 정상일 때만 스케줄을 활성화한다. 토큰 유효성은 실 API 성공 전까지 미확인.
 
 > 최초 작성: 2026-10-21 · 범위: OHORA Trend Catcher p6의 확인 가능한 Git 이력, `STATUS.md`/`HANDOFF.md` 기록, 해당 대화에서 확인된 CI 로그 및 사용자 보고.

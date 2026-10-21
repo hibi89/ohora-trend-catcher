@@ -2,6 +2,7 @@
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -61,6 +62,19 @@ class N8nTickTests(unittest.TestCase):
     def test_three_page_hard_cap(self):
         with self.assertRaises(ValueError):
             adapter.tick(**{**self.kw, "max_pages": 4})
+
+    def test_n8n_export_is_inactive_and_bounded(self):
+        workflow = json.loads((Path(__file__).parents[1] /
+                               "kq3_294_collection" /
+                               "n8n_p6_daily_collection.json").read_text(encoding="utf-8"))
+        self.assertFalse(workflow["active"])
+        types = {node["type"] for node in workflow["nodes"]}
+        self.assertIn("n8n-nodes-base.scheduleTrigger", types)
+        self.assertIn("n8n-nodes-base.executeWorkflowTrigger", types)
+        command = next(n["parameters"]["command"] for n in workflow["nodes"]
+                       if n["type"] == "n8n-nodes-base.executeCommand")
+        self.assertRegex(command, re.compile(r"p6_n8n_tick\.ps1", re.I))
+        self.assertNotRegex(command, re.compile(r"EA[A-Za-z0-9]{35,}"))
 
 
 if __name__ == "__main__":

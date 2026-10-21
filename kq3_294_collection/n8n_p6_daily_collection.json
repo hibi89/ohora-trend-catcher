@@ -2,6 +2,14 @@
   "name": "OHORA P6 bounded daily collection",
   "nodes": [
     {
+      "parameters": {},
+      "id": "p6-manual-run-trigger",
+      "name": "Manual n8n execution",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 480]
+    },
+    {
       "parameters": {
         "rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}
       },
@@ -24,6 +32,9 @@
   ],
   "connections": {
     "Every 5 minutes (KST gate inside P6)": {
+      "main": [[{"node": "P6 read gates and run at most one page", "type": "main", "index": 0}]]
+    },
+    "Manual n8n execution": {
       "main": [[{"node": "P6 read gates and run at most one page", "type": "main", "index": 0}]]
     }
   },
