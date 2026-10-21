@@ -237,8 +237,12 @@ class RealFixtureCaptureBridgeTests(TestCase):
         self.assertEqual(no_send.calls, 0)
 
     def test_invalid_response_keeps_safe_evidence_and_never_resends(self):
-        self.transport.response = make_response(
-            self.request, account_id="17840000000000999")
+        response = make_response(self.request, account_id="17840000000000999")
+        payload = dict(response.payload)
+        discovered = dict(payload["business_discovery"])
+        discovered["username"] = "wrong-target-username"
+        payload["business_discovery"] = discovered
+        self.transport.response = replace(response, payload=payload)
         with self.assertRaises(ContractExecutionError):
             self.dispatch()
         self.assertIsNotNone(
