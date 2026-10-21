@@ -82,11 +82,15 @@ class Coordinator:
             self.db.execute("ROLLBACK")
             raise
 
-    def lease(self, lane, now=None, *, skip_bound=False, only_bound=False):
+    def lease(self, lane, now=None, *, skip_bound=False, only_bound=False, exclude_job_ids=()):
         if lane not in LANES:
             raise ValueError("Unknown lane")
         if skip_bound and only_bound:
             raise ValueError("Conflicting binding filters")
+        if (not isinstance(exclude_job_ids, (tuple, list, frozenset))
+                or any(type(x) is not int or x <= 0 for x in exclude_job_ids)):
+            raise ValueError("Invalid excluded job IDs")
+        exclude_job_ids = tuple(sorted(set(exclude_job_ids)))
         now = now or utcnow()
         current = stamp(now)
         expires = stamp(now + timedelta(minutes=LEASE_MINUTES))
@@ -131,6 +135,7 @@ class Coordinator:
                     SELECT 1 FROM job_request_bindings binding
                     WHERE binding.job_id=jobs.id
                 )"""
+            exclusion_filter = (" AND jobs.id NOT IN (" + ",".join("?" for _ in exclude_job_ids) + ")" if exclude_job_ids else "")
             job = self.db.execute(
                 """SELECT * FROM jobs WHERE lane=?
                    AND (state='pending' OR (state='leased' AND leased_until<=?))
@@ -139,10 +144,10 @@ class Coordinator:
                        WHERE earlier.account_ordinal=jobs.account_ordinal
                        AND earlier.page<jobs.page AND earlier.state!='done'
                    )
-                   """ + proof_filter + binding_filter + """
+                   """ + proof_filter + binding_filter + exclusion_filter + """
                    ORDER BY CASE phase WHEN 'front' THEN 0 ELSE 1 END,
                             page,account_ordinal LIMIT 1""",
-                (lane,current),
+                (lane,current,*exclude_job_ids),
             ).fetchone()
             if job is None:
                 self.db.execute("COMMIT")
@@ -166,19 +171,19 @@ class Coordinator:
         """
         return self.lease(lane, now=now, skip_bound=True)
 
-    def lease_for_recovery(self, lane, now=None):
+    def lease_for_recovery(self, lane, now=None, *, exclude_job_ids=()):
         """Lease bound work only, for capture-only reconciliation.
 
         Never consumes fresh unbound jobs and never authorizes HTTP.
         """
-        return self.lease_bound_for_recovery(lane, now=now)
+        return self.lease_bound_for_recovery(lane, now=now, exclude_job_ids=exclude_job_ids)
 
-    def lease_bound_for_recovery(self, lane, now=None):
+    def lease_bound_for_recovery(self, lane, now=None, *, exclude_job_ids=()):
         """Lease only already-bound work for capture-only recovery.
 
         This method never authorizes HTTP, and skips unbound work entirely.
         """
-        return self.lease(lane, now=now, only_bound=True)
+        return self.lease(lane, now=now, only_bound=True, exclude_job_ids=exclude_job_ids)
 
     def complete(self, job_id, lease_id):
         """Bare completion is forbidden if page evidence is enabled."""
