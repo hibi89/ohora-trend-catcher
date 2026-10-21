@@ -82,6 +82,53 @@ class LiveSerialStepGateTests(unittest.TestCase):
             finally:
                 coordinator.db.close()
 
+    def test_quota_recovery_matrix_offline(self):
+        """Persisted gates cannot turn capture recovery into a fresh dispatch."""
+        import tempfile
+        from pathlib import Path
+        from datetime import timedelta
+        from three_api_coordinator import Coordinator
+        from three_api_job_binding import JobRequestBindingStore
+
+        for usage in (None, 85, 100):
+            with self.subTest(usage=usage), tempfile.TemporaryDirectory() as directory:
+                coordinator = Coordinator(Path(directory) / "quota-matrix.sqlite")
+                try:
+                    coordinator.seed()
+                    JobRequestBindingStore(coordinator)
+                    now = self.kwargs["requested_at"]
+                    first = coordinator.db.execute(
+                        "SELECT id FROM jobs WHERE lane='A' AND page=1 "
+                        "ORDER BY account_ordinal LIMIT 1"
+                    ).fetchone()
+                    coordinator.db.execute(
+                        "INSERT INTO job_request_bindings "
+                        "(job_id,request_id,request_digest,reserved_at) "
+                        "VALUES (?,?,?,?)",
+                        (first["id"], "req-" + "b" * 64,
+                         "offline-digest", now.isoformat()),
+                    )
+                    self.assertTrue(coordinator.observe_usage("A", usage, now=now))
+                    self.assertIsNone(coordinator.lease_for_dispatch("A", now=now))
+                    before = coordinator.recovery_ready_diagnostics(now=now)
+                    row = next(x for x in before["lanes"] if x["lane"] == "A")
+                    self.assertEqual(row["recoverable_now"], 1)
+                    lease = coordinator.lease_for_recovery("A", now=now)
+                    self.assertEqual(lease["id"], first["id"])
+                    # Active lease is not eligible for another worker.
+                    self.assertIsNone(coordinator.lease_for_recovery("A", now=now))
+                    active = coordinator.recovery_ready_diagnostics(now=now)
+                    row = next(x for x in active["lanes"] if x["lane"] == "A")
+                    self.assertEqual(row["recoverable_now"], 0)
+                    # A stale lease can be reconciled, never newly dispatched.
+                    later = now + timedelta(minutes=16)
+                    recovered = coordinator.lease_for_recovery("A", now=later)
+                    self.assertEqual(recovered["id"], first["id"])
+                    self.assertNotEqual(recovered["lease_id"], lease["lease_id"])
+                    self.assertIsNone(coordinator.lease_for_dispatch("A", now=later))
+                finally:
+                    coordinator.db.close()
+
     def test_blocked_lane_recovery_does_not_dispatch(self):
         """A quota-halted lane must never cause a fresh HTTP dispatch."""
         from unittest.mock import Mock, patch
