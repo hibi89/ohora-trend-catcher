@@ -18,7 +18,11 @@ sys.path.insert(0, str(ROOT / "tests"))
 from three_api_credentials import CredentialReference
 from three_api_graph_http import GraphHTTPClient
 from three_api_live_lane_router import ThreeLaneMetaTransport
-from three_api_manual_pilot import PilotConfigurationError, run_manual_pilot, read_pilot_status, read_pilot_failures, main
+from three_api_coordinator import Coordinator
+from three_api_manual_pilot import (
+    PilotConfigurationError, run_manual_pilot, read_pilot_status,
+    read_pilot_failures, main, _inherit_latest_lane_gates,
+)
 from three_api_transport import MetaTransport
 from test_three_api_serial_bootstrap import MockResponse
 
@@ -252,6 +256,51 @@ class ManualPilotTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as context:
             main(["--workspace", str(self.workspace), "--status", "--live"])
         self.assertEqual(context.exception.code, 2)
+
+    def test_new_daily_coordinator_inherits_prior_holds_and_future_cooldown(self):
+        from datetime import datetime, timezone
+
+        prior_day = "2026-10-21"
+        today = "2026-10-22"
+        now = datetime(2026, 10, 22, 15, 25, tzinfo=timezone.utc)
+        prior_dir = self.workspace / prior_day
+        prior_dir.mkdir(parents=True)
+        prior = Coordinator(prior_dir / "coordinator.sqlite")
+        prior.seed()
+        prior.db.execute(
+            "UPDATE lanes SET halted=1,reason='live_pending_usage',ready_at=? "
+            "WHERE lane IN ('B','C')",
+            (datetime(2026, 10, 21, 14, 0, tzinfo=timezone.utc).isoformat(),),
+        )
+        prior.db.execute(
+            "UPDATE lanes SET ready_at=? WHERE lane='A'",
+            (datetime(2026, 10, 22, 15, 30, tzinfo=timezone.utc).isoformat(),),
+        )
+        prior_mtime = prior.path.stat().st_mtime_ns
+        prior.db.close()
+
+        today_dir = self.workspace / today
+        today_dir.mkdir(parents=True)
+        current = Coordinator(today_dir / "coordinator.sqlite")
+        self.addCleanup(current.db.close)
+        inherited = _inherit_latest_lane_gates(
+            current, self.workspace, today, now=now,
+        )
+        current.seed()
+
+        rows = {
+            row["lane"]: row for row in current.db.execute(
+                "SELECT lane,halted,reason,ready_at FROM lanes")
+        }
+        self.assertEqual(inherited, ["A", "B", "C"])
+        for lane in ("B", "C"):
+            self.assertEqual(rows[lane]["halted"], 1)
+            self.assertEqual(rows[lane]["reason"], "live_pending_usage")
+        self.assertEqual(rows["A"]["halted"], 0)
+        self.assertGreater(
+            datetime.fromisoformat(rows["A"]["ready_at"]), now,
+        )
+        self.assertEqual(prior.path.stat().st_mtime_ns, prior_mtime)
 
     def test_invalid_roster_fails_before_env_read(self):
         self.csv.write_text("account_key,username,country\nKR_001,nail_1,KR\n", encoding="utf-8")

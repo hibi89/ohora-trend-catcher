@@ -88,6 +88,84 @@ def _transports(values):
     })
 
 
+def _inherit_latest_lane_gates(coordinator, workspace, day_kst, *, now):
+    """Carry the newest prior-day cooldown/quota holds into a fresh daily DB.
+
+    Daily job epochs are separate, but a KST date change is not evidence that
+    Meta quota recovered. This copies only lane safety state from the latest
+    earlier coordinator, read-only; it never changes the source coordinator.
+    A malformed or inaccessible latest state fails closed before dispatch.
+    """
+    if not isinstance(now, datetime) or now.utcoffset() is None:
+        raise PilotConfigurationError("Timezone-aware lane-gate time required")
+    root = Path(workspace).expanduser().resolve()
+    prior = None
+    for candidate in sorted(root.iterdir(), key=lambda item: item.name, reverse=True):
+        if not re.fullmatch(r"20[0-9]{2}-[01][0-9]-[0-3][0-9]", candidate.name):
+            continue
+        try:
+            candidate_day = datetime.strptime(candidate.name, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if candidate_day >= datetime.strptime(day_kst, "%Y-%m-%d").date():
+            continue
+        if candidate.is_symlink():
+            raise PilotConfigurationError("Prior P6 coordinator path is unsafe")
+        path = candidate / "coordinator.sqlite"
+        if path.is_file():
+            if path.is_symlink():
+                raise PilotConfigurationError("Prior P6 coordinator path is unsafe")
+            prior = path
+            break
+    if prior is None:
+        return []
+
+    try:
+        with closing(sqlite3.connect(prior.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+            rows = db.execute(
+                "SELECT lane,halted,reason,ready_at FROM lanes ORDER BY lane"
+            ).fetchall()
+        if len(rows) != 3 or {row[0] for row in rows} != set(LANES):
+            raise ValueError("Incomplete prior lane state")
+        states = {}
+        for lane, halted, reason, ready_at in rows:
+            if (type(halted) is not int or halted not in (0, 1)
+                    or (reason is not None and not isinstance(reason, str))
+                    or (halted and not reason) or not isinstance(ready_at, str)):
+                raise ValueError("Invalid prior lane state")
+            ready = datetime.fromisoformat(ready_at.replace("Z", "+00:00"))
+            if ready.utcoffset() is None:
+                raise ValueError("Prior lane cooldown is not timezone-aware")
+            states[lane] = (bool(halted), reason, ready)
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        raise PilotConfigurationError("Prior P6 lane safety state unavailable") from None
+
+    inherited = []
+    db = coordinator.db
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        for lane, (halted, reason, ready) in states.items():
+            current = db.execute(
+                "SELECT ready_at FROM lanes WHERE lane=?", (lane,)
+            ).fetchone()
+            if current is None:
+                raise ValueError("Current lane state unavailable")
+            current_ready = datetime.fromisoformat(
+                current[0].replace("Z", "+00:00"))
+            if halted or ready > now:
+                inherited.append(lane)
+                new_ready = max(current_ready, ready).astimezone(timezone.utc).isoformat()
+                db.execute(
+                    "UPDATE lanes SET halted=?,reason=?,ready_at=? WHERE lane=?",
+                    (int(halted), reason if halted else None, new_ready, lane),
+                )
+        db.execute("COMMIT")
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    return sorted(inherited)
+
+
 def run_manual_pilot(source, workspace, *, live=False,
                      confirm_owner_approval=False, environment=None,
                      max_pages=1):
@@ -139,6 +217,13 @@ def run_manual_pilot(source, workspace, *, live=False,
         raw = ContractRawWriter(raw_db)
         coordinator = Coordinator(control)
         stack.callback(coordinator.db.close)
+        has_daily_jobs = coordinator.db.execute(
+            "SELECT 1 FROM jobs LIMIT 1"
+        ).fetchone() is not None
+        if not has_daily_jobs:
+            _inherit_latest_lane_gates(
+                coordinator, root, day.isoformat(), now=datetime.now(timezone.utc),
+            )
         coordinator.seed()
         capture = CaptureJournal(str(capture_path))
         stack.callback(capture.close)
