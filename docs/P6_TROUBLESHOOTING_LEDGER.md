@@ -1,5 +1,13 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-054 — 2026-10-22 · 예약 진행과 A 계정 오류 증가
+- **관측:** 활성 격리 n8n P6 tick at 04:10 KST `success` 종료; P6 결과는 2 page commits 후 새 A account HTTP400 1건. Read-only P6 status 04:10:42: 213 durable receipts / 852 observations / 668 unique posts; A 110 done / 4 leased / 180 pending; B/C 각각 0 done / 294 pending. Latest A sanitized usage 28% at 04:10.
+- **오류/원인:** A의 계정 범위 HTTP400 `failed_no_retry` 총 4건, 모두 Capture/response evidence 없음, automatic retry 불가. 보존된 근거로 token, caller ID, Meta permission, request field, Batch API, cursor 중 원인을 선택할 수 없다. 같은 타깃 재요청 없음.
+- **lane gate:** A unhalted, latest usage below 85%. B/C remain `live_pending_usage` with no lane-safe-usage evidence; elapsed cooldown alone does not clear them. No manual hold reset.
+- **자동화:** 격리 n8n DB의 P6 workflow active; 04:10 execution success verified. Wrapper success와 page-level 결과(2 success/1 failure)는 구분. 중복 수동 tick 금지.
+- **검증:** failure/status/quota diagnostics read-only, `db_writes=0`, `live_meta_called=false`; sensitive values suppressed. Prior offline cursor recovery/HTTP/P6 suite 58/58 PASS; handoff guard 4/4 PASS. Full 294-account page plan incomplete; no live cursor invalidation/re-anchor.
+- **다음:** leave active schedule running; check latest execution and P6 status after bounded intervals. Never resend 4 A failures, bypass 85%/cooldown, or resume B/C without fresh lane-specific quota evidence.
+
 ### P6-053 — 2026-10-22 · 예약 A HTTP400 실패 추가 및 no-retry 유지
 - **관측:** 활성 격리 n8n P6 실행 03:50 KST `success` 종료. P6 tick은 페이지 2건을 저장한 뒤 새 A 계정 범위 HTTP400을 묶었다. 03:50:26 read-only status: 202 receipts / 808 observations / 624 unique posts; A 99 done / 3 leased / 192 pending; B/C 각 0 done / 294 pending. Latest A sanitized usage 20% at 03:50.
 - **실패 안전 상태:** read-only `--failures` 집계상 A HTTP400 `failed_no_retry` 총 3건이며 셋 모두 Capture 없음, response evidence 없음, `automatic_retry_allowed=false`. 새 실패도 재전송하지 않았다. 응답 근거가 없으므로 token/caller/permission/field/cursor 원인을 판정할 수 없다. A lane은 현재 unhalted; B/C는 `live_pending_usage` 및 safe usage 증거 부재로 held 상태.
@@ -207,6 +215,7 @@
 | P6-051 | n8n DB·예약 실행 검증 | 표준 n8n 프로필 조회로 P6 활성 상태를 잘못 판단 | 격리 runtime DB에서 P6 active + 03:25 success; 03:26 A85 / 188 receipts; A usage 21%, B/C 증거 없음 |
 | P6-052 | 예약 진척·B 실패 근거 | 격리 n8n active는 확인했으나 B HTTP400의 원인 증거와 현재 상태 갱신 필요 | 03:35 n8n success, A91/194 receipts, usage 18%; B 과거 48 P6 pages + 4 HTTP400 generic sanitized errors; API 방식 차이만 확인, root cause 미확정 |
 | P6-053 | 예약 A HTTP400 | A 예약 tick에서 새 계정 단위 HTTP400 발생 | 03:50: 2 page commits + 1 no-capture/no-response failure; A99/202 receipts, 3 failures all `failed_no_retry`, latest usage 20%; no retry |
+| P6-054 | 예약 A lane 진척·오류 | A 예약 tick에서 네 번째 계정 단위 HTTP400 발생 | 04:10: 2 page commits + 1 new no-evidence failure; A110/213 receipts, 4 failures no-retry, usage 28%; B/C usage holds 유지 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
