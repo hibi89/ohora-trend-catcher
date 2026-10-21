@@ -1,5 +1,12 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-059 — 2026-10-22 · 예약 실행 정체 재확인
+- **관측:** 05:59 KST read-only inspection found the latest execution for the active isolated P6 workflow was still 05:55 `success`; there was no later execution. P6 remained at 146 captures; A=146 done / 4 leased / 144 pending, B/C each 0 done / 294 pending. This establishes no new progress after the prior snapshot, not successful data collection.
+- **자동화 상태:** the workflow record is active, but the local `n8n` process check returned no process. The scheduler's continued operation is unverified. No process was started or changed.
+- **재개 가드/안전:** read-only B guarded preflight again refused with `safety conditions not met`. No hold reset, Meta request, manual tick, or DB write. B/C lack fresh lane-safe usage evidence. Do not bypass the 85% cap, cooldown, no-retry, or lane evidence gates.
+- **한계/다음:** full collection remains incomplete; cursor re-anchor remains offline-only. Restore/check n8n only through its normal operator path, then confirm new receipts using read-only status. Do not issue a competing tick. Existing RAW/Capture and legacy 49 rows remain unchanged.
+- **Git:** recorded on `codex/p6-readiness-hardening-20261019`; previous pushed SHA `83d4bff5b81e2bab3f3f9a8f2ab9146e59c3c6be`. Push and origin SHA check are required after this entry.
+
 ### P6-058 — 2026-10-22 · n8n 진척 정체와 B/C 사용량 증거 보류
 - **실행 근거:** 격리 n8n DB의 `OHORA P6 bounded daily collection`은 active이며 최신 05:50 KST 실행 status는 `success`. 다만 wrapper success가 새 페이지 저장을 뜻하지는 않는다. 05:50 P6 read-only status는 249 receipts / 996 observations / 812 unique posts; A 146 done / 4 leased / 144 pending; B/C 각각 0 done / 294 pending이다. 최근 대조 status에서 page count 변화 없음.
 - **쿼터/보류:** 현재 날짜 `capture.sqlite`의 sanitized evidence에는 A 146건, B/C 0건 usage observations. A 최신 usage 35% (05:10 KST). B/C는 `live_pending_usage`로 held, 두 lane의 cooldown은 elapsed이나 fresh lane-safe usage evidence가 없다. elapsed cooldown만으로 해제하지 않았다.
@@ -251,6 +258,7 @@
 | P6-055 | A lane 예약 진척 | A 수집 도중 추가로 진행된 최신 안전 상태를 기록할 필요 | 04:30 n8n success, A122 / 225 receipts / 900 observations / 716 unique; usage 32%, 4 failed_no_retry, B/C holds unchanged |
 | P6-056 | A lane 예약 진척 | 최신 04:50 예약 tick·쿼터 상태 갱신 | n8n success, A134 / 237 receipts / 948 observations / 764 unique; usage 35%, 4 failed_no_retry; B/C holds unchanged |
 | P6-058 | n8n 진척 정체·B/C quota gate | 05:50 예약 실행은 success이나 신규 페이지 없음; B/C fresh usage evidence 부재 | 249 receipts / 996 observations / 812 unique; A146, B/C0; guarded B preflight refused; no reset/live request |
+| P6-059 | 예약 실행 정체 재확인 | 05:55 이후 새 실행·수집 진척 없음, n8n 프로세스 미확인 | 146 captures; B resume gate refused; no mutation/request; scheduler continuation unverified |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
