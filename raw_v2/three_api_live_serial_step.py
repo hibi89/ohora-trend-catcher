@@ -43,11 +43,6 @@ class LiveSerialStep:
              requested_at, api_version, caller_ids, approved=False):
         if approved is not True:
             raise LiveSerialStepError("Explicit live approval required")
-        # The injected PageEvidenceStore declares itself offline staging only.
-        # Do not reach coordinator leasing or HTTP until a reviewed production
-        # evidence adapter replaces it. Keep constructor tests and fixture work.
-        if isinstance(getattr(self, "evidence", None), PageEvidenceStore):
-            raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
         if not isinstance(requested_at, datetime) or requested_at.utcoffset() is None:
             raise LiveSerialStepError("Timezone-aware request time required")
         if not isinstance(accounts, (list, tuple)) or len(accounts) != 294:
@@ -58,6 +53,11 @@ class LiveSerialStep:
             raise LiveSerialStepError(str(exc)) from None
         if not isinstance(caller_ids, dict) or set(caller_ids) != set(LANES):
             raise LiveSerialStepError("A/B/C caller identities required")
+        # The injected PageEvidenceStore declares itself offline staging only.
+        # Do not reach coordinator leasing or HTTP until a reviewed production
+        # evidence adapter replaces it. Keep constructor tests and fixture work.
+        if isinstance(getattr(self, "evidence", None), PageEvidenceStore):
+            raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
         if any(caller_ids[lane] != self.executor.transport._lanes[lane]._caller_ig_id
                for lane in LANES):
             raise LiveSerialStepError("Caller identities do not match transport")
