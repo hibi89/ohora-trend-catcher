@@ -5,12 +5,13 @@ executor, original coordinator, binding store and page evidence store.
 No CLI, scheduler, automatic retry or operating DB connection is created.
 """
 from datetime import datetime, timedelta
+import re
 
 from three_api_coordinator import LANES, COOLDOWN_MINUTES, stamp
 from three_api_job_binding import JobRequestBindingStore
 from three_api_live_lane_router import ThreeLaneMetaTransport
 from three_api_serial_lock import serial_tick_lock, SerialTickBusy
-from three_api_contract_executor import ThreeApiContractExecutor
+from three_api_contract_executor import ThreeApiContractExecutor, ContractExecutionError
 from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter
 from three_api_evidence import PageEvidenceStore
@@ -141,13 +142,45 @@ class LiveSerialStep:
                     if changed != 1:
                         raise LiveSerialStepError("Lane quota gate unavailable")
                     page_committed = False
+                    account_failed = False
+                    account_error_usage = None
                     try:
-                        self.bindings.dispatch_once(
-                            job, request, self.evidence, self.executor, now=now)
-                        result = self.bindings.commit_captured_page(
-                            job, request, self.evidence, self.executor.capture,
-                            self.executor.raw, now=now)
-                        page_committed = True
+                        try:
+                            self.bindings.dispatch_once(
+                                job, request, self.evidence, self.executor, now=now)
+                        except ContractExecutionError:
+                            # Only Meta's exact missing-user code/subcode may be
+                            # treated as a terminal account failure. This is a
+                            # durable, already-bound failed intent, NOT a retry.
+                            binding = self.bindings.lookup(job["id"])
+                            failure = self.executor.capture.get_failure(request.request_id)
+                            if (binding is None
+                                    or binding["request_id"] != request.request_id
+                                    or self.executor.capture.get_intent_outcome(
+                                        request.request_id) != "failed_no_retry"
+                                    or failure is None
+                                    or failure.category != "http_error"
+                                    or failure.scope != "account"
+                                    or failure.http_status != 400
+                                    or failure.outcome != "failed"):
+                                raise
+                            match = re.fullmatch(
+                                r"Target account unavailable code=110 subcode=2207013"
+                                r"(?: usage_pct=(\\d{1,3}))?",
+                                failure.safe_message,
+                            )
+                            if match is None:
+                                raise
+                            if match.group(1) is not None:
+                                account_error_usage = int(match.group(1))
+                                if not 0 <= account_error_usage <= 100:
+                                    raise
+                            account_failed = True
+                        if not account_failed:
+                            result = self.bindings.commit_captured_page(
+                                job, request, self.evidence, self.executor.capture,
+                                self.executor.raw, now=now)
+                            page_committed = True
                     finally:
                         saved = self.executor.capture.get_response_evidence(request.request_id)
                         usage = (saved.get("safe_usage", {}).get("max_usage_percent")
@@ -159,11 +192,24 @@ class LiveSerialStep:
                                 "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
                                 "WHERE lane=? AND reason='live_pending_usage'",
                                 (stamp(now), lane))
+                        elif (account_failed and type(account_error_usage) is int
+                              and account_error_usage < 85):
+                            # Evidence came from the strict Meta usage-header
+                            # parser, not the account's HTTP 400 status alone.
+                            self.coordinator.db.execute(
+                                "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
+                                "WHERE lane=? AND reason='live_pending_usage'",
+                                (stamp(now), lane))
+                        elif account_failed and type(account_error_usage) is int and account_error_usage >= 85:
+                            self.coordinator.observe_usage(lane, account_error_usage, now=now)
                         elif type(usage) is int and usage >= 85:
                             self.coordinator.observe_usage(lane, usage, now=now)
-                        # A successful response is insufficient to reopen the
-                        # lane until the RAW receipt and cursor are committed.
-                        # Unknown outcomes remain held for manual review.
+                        # Missing quota evidence, unknown outcomes and failures
+                        # other than this exact account error remain held.
+                    if account_failed:
+                        return {"status": "account_failed", "lane": lane,
+                                "account_ordinal": job["account_ordinal"],
+                                "terminal": True}
                     return {"status": "page_committed", "lane": lane,
                             "account_ordinal": job["account_ordinal"],
                             "terminal": result["terminal"]}
@@ -204,8 +250,8 @@ def run_bounded_serial_steps(runner, accounts, *, max_steps, clock=None, **step_
         previous_time = current_time
         result = runner.step(accounts, **{**step_kwargs, "requested_at": current_time})
         status = result.get("status")
-        if status not in ("page_committed", "recovered", "no_ready_work",
-                          "serial_busy"):
+        if status not in ("page_committed", "account_failed", "recovered",
+                          "no_ready_work", "serial_busy"):
             raise LiveSerialStepError("Unknown serial step outcome")
         results.append(result)
         if status in ("no_ready_work", "serial_busy"):
@@ -215,6 +261,8 @@ def run_bounded_serial_steps(runner, accounts, *, max_steps, clock=None, **step_
                                    for r in results),
             "recovered_pages": sum(r["status"] == "recovered"
                                    for r in results),
+            "account_failures": sum(r["status"] == "account_failed"
+                                    for r in results),
             "last_status": results[-1]["status"],
             "results": results}
 
