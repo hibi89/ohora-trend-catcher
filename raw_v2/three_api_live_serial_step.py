@@ -79,6 +79,13 @@ class LiveSerialStep:
                         record = (self.executor.capture.get_capture_for_request(saved["request_id"])
                                   if saved else None)
                         if record is None:
+                            # A known failed HTTP response is terminal for THIS
+                            # immutable request. Do not resend, recover, or erase it.
+                            # Continue checking other lanes; never unhalt quota.
+                            outcome = (self.executor.capture.get_intent_outcome(saved["request_id"])
+                                       if saved else None)
+                            if outcome == "failed_no_retry":
+                                continue
                             raise LiveSerialStepError("Bound request has no capture; no resend")
                         result = self.bindings.commit_captured_page(
                             job, record.request, self.evidence,
