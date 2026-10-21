@@ -38,6 +38,28 @@ class LiveSerialStepGateTests(unittest.TestCase):
             self.runner.step([{} for _ in range(294)], **{
                 **self.kwargs, "caller_ids": {"A": "1"}})
 
+    def test_blocked_lane_recovery_does_not_dispatch(self):
+        """A quota-halted lane must never cause a fresh HTTP dispatch."""
+        from unittest.mock import Mock, patch
+        runner = object.__new__(LiveSerialStep)
+        runner.coordinator = Mock()
+        runner.coordinator.path = "isolated-test.sqlite"
+        runner.coordinator.lease_for_recovery.return_value = None
+        runner.coordinator.lease_for_dispatch.return_value = None
+        runner.bindings = Mock()
+        runner.evidence = Mock()
+        runner.executor = Mock()
+        runner.executor.transport._lanes = {
+            lane: Mock(_caller_ig_id=caller)
+            for lane, caller in self.kwargs["caller_ids"].items()
+        }
+        with patch("three_api_live_serial_step.serial_tick_lock") as lock:
+            lock.return_value.__enter__.return_value = None
+            result = runner.step([{} for _ in range(294)], **self.kwargs)
+        self.assertEqual(result["status"], "no_ready_work")
+        runner.bindings.dispatch_once.assert_not_called()
+        self.assertEqual(runner.coordinator.lease_for_recovery.call_count, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
