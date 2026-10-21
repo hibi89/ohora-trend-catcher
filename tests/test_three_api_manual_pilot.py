@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from three_api_credentials import CredentialReference
 from three_api_graph_http import GraphHTTPClient
 from three_api_live_lane_router import ThreeLaneMetaTransport
-from three_api_manual_pilot import PilotConfigurationError, run_manual_pilot
+from three_api_manual_pilot import PilotConfigurationError, run_manual_pilot, read_pilot_status, main
 from three_api_transport import MetaTransport
 from test_three_api_serial_bootstrap import MockResponse
 
@@ -179,6 +179,74 @@ class ManualPilotTests(unittest.TestCase):
         self.addCleanup(db.close)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 2)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 2)
+
+    def test_status_missing_stores_never_creates_anything(self):
+        with self.assertRaisesRegex(PilotConfigurationError, "directory"):
+            read_pilot_status(self.workspace, day="2026-10-21")
+        self.assertFalse(self.workspace.exists())
+
+    def test_status_is_read_only_and_reports_lanes_without_meta(self):
+        import io
+        from contextlib import redirect_stdout
+        calls = []
+        environment = {"P6_META_GRAPH_VERSION": "v26.0"}
+        lanes = {}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            environment[f"P6_META_TOKEN_{lane}"] = f"synthetic-token-{lane}"
+            environment[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}", f"P6_META_IG_ID_{lane}")
+            def sender(req, timeout, *, lane=lane):
+                calls.append(lane)
+                response = MockResponse()
+                target = f"nail_{calls.count(lane) if lane == 'A' else 150 + calls.count(lane)}"
+                response.payload["business_discovery"]["username"] = target
+                response.payload["business_discovery"]["media"]["data"][0]["id"] = str(1234567890 + len(calls))
+                response.payload["business_discovery"]["media"]["data"][0]["username"] = target
+                return response
+            lanes[lane] = MetaTransport(
+                client=GraphHTTPClient(sender=sender, approved=True),
+                credentials=ref, caller_ig_id=caller,
+                token=environment[f"P6_META_TOKEN_{lane}"],
+            )
+        with patch("three_api_manual_pilot._transports",
+                   return_value=ThreeLaneMetaTransport(lanes)):
+            run_manual_pilot(self.csv, self.workspace, live=True,
+                             confirm_owner_approval=True,
+                             environment=environment, max_pages=2)
+        self.assertEqual(calls, ["A", "B"])
+        from datetime import datetime, timezone, timedelta
+        day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+        control = self.workspace / day / "coordinator.sqlite"
+        raw = self.workspace / "p6_pilot_raw.sqlite"
+        before = (control.stat().st_mtime_ns, raw.stat().st_mtime_ns)
+        with patch("three_api_manual_pilot._transports",
+                   side_effect=AssertionError("Status must never contact Meta")):
+            status = read_pilot_status(self.workspace, day=day)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main([
+                    "--workspace", str(self.workspace), "--status",
+                    "--day", day]), 0)
+        self.assertEqual(status["mode"], "READ_ONLY_PILOT_STATUS")
+        self.assertEqual(status["post_observations"], 2)
+        self.assertEqual(status["durable_receipts"], 2)
+        self.assertEqual(status["lanes"]["A"]["done"], 1)
+        self.assertEqual(status["lanes"]["B"]["done"], 1)
+        self.assertEqual(status["lanes"]["C"]["done"], 0)
+        self.assertFalse(status["live_meta_called"])
+        self.assertEqual((control.stat().st_mtime_ns, raw.stat().st_mtime_ns), before)
+        self.assertIn('"READ_ONLY_PILOT_STATUS"', output.getvalue())
+        self.assertEqual(calls, ["A", "B"])
+
+    def test_status_rejects_live_flags_and_invalid_date(self):
+        with self.assertRaisesRegex(PilotConfigurationError, "directory"):
+            read_pilot_status(self.workspace, day="2026-10-21")
+        self.workspace.mkdir()
+        with self.assertRaisesRegex(PilotConfigurationError, "date"):
+            read_pilot_status(self.workspace, day="bad-date")
+        with self.assertRaises(SystemExit) as context:
+            main(["--workspace", str(self.workspace), "--status", "--live"])
+        self.assertEqual(context.exception.code, 2)
 
     def test_invalid_roster_fails_before_env_read(self):
         self.csv.write_text("account_key,username,country\nKR_001,nail_1,KR\n", encoding="utf-8")
