@@ -72,8 +72,18 @@ class LiveSerialStep:
         try:
             with serial_tick_lock(self.coordinator.path):
                 now = requested_at
+                # Read-only scan of immutable bindings: terminal failed requests
+                # must not be re-leased or starve other recoverable captures.
+                excluded = []
+                rows = self.coordinator.db.execute(
+                    "SELECT job_id,request_id FROM job_request_bindings"
+                ).fetchall()
+                for binding in rows:
+                    if self.executor.capture.get_intent_outcome(binding["request_id"]) == "failed_no_retry":
+                        excluded.append(binding["job_id"])
                 for lane in LANES:
-                    job = self.coordinator.lease_for_recovery(lane, now=now)
+                    job = self.coordinator.lease_for_recovery(
+                        lane, now=now, exclude_job_ids=excluded)
                     if job is not None:
                         saved = self.bindings.lookup(job["id"])
                         record = (self.executor.capture.get_capture_for_request(saved["request_id"])
