@@ -109,7 +109,8 @@ class LiveSerialStep:
                         usage = (saved.get("safe_usage", {}).get("max_usage_percent")
                                  if saved and saved.get("classification") == "safe" else None)
                         if (type(usage) is int and 0 <= usage < 85
-                                and self.bindings.lookup(job["id"]) is not None):
+                                and self.bindings.lookup(job["id"]) is not None
+                                and self.executor.capture.get_capture_for_request(request.request_id) is not None):
                             self.coordinator.db.execute(
                                 "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
                                 "WHERE lane=? AND reason='live_pending_usage'",
