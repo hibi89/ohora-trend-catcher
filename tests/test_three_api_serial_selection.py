@@ -281,5 +281,47 @@ class SerialFixtureSelectionTests(unittest.TestCase):
             "recoverable_now"], 0)
 
 
+    def test_schema_invalid_safe_usage_does_not_clear_inflight_hold(self):
+        request, response = self.fixture("A", 1, usage=20)
+        payload = dict(response.payload)
+        root = dict(payload["business_discovery"])
+        root["id"] = "17840000000000999"  # wrong synthetic target identity
+        payload["business_discovery"] = root
+        with self.assertRaises(ContractExecutionError):
+            self.tick({("A", 1, 1): (
+                request, replace(response, payload=payload))})
+        self.assertIsNotNone(
+            self.capture.get_response_evidence(request.request_id))
+        self.assertIsNone(
+            self.capture.get_capture_for_request(request.request_id))
+        self.assertEqual(self.lane("A")["reason"], "missing_usage")
+        self.assertEqual(self.lane("A")["halted"], 1)
+        self.assertEqual(self.counts(), (0, 0, 1))
+        self.assertEqual(self.transport.calls, 1)
+
+    def test_capture_only_recovery_does_not_require_original_fixture_dictionary(self):
+        with mock.patch.object(
+                self.evidence, "commit_page",
+                side_effect=OSError("synthetic checkpoint interruption")):
+            with self.assertRaises(OSError):
+                self.tick({("A", 1, 1): self.fixture("A", 1)})
+        self.assertEqual(self.transport.calls, 1)
+        result = self.tick({}, now=OBSERVED_AT + timedelta(minutes=16))
+        self.assertEqual(result["status"], "page_committed")
+        self.assertTrue(result["recovery_only"])
+        self.assertEqual(self.transport.calls, 1)
+        self.assertEqual(self.counts(), (1, 1, 1))
+
+    def test_blocked_lanes_never_lease_or_send_even_after_65_minutes(self):
+        for lane in ("A", "B", "C"):
+            self.coord.observe_usage(lane, 85, now=OBSERVED_AT)
+        result = self.tick({("A", 1, 1): self.fixture("A", 1)},
+                           now=OBSERVED_AT + timedelta(minutes=65))
+        self.assertEqual(result, {
+            "status": "no_ready_work", "selected_lane": None})
+        self.assertEqual(self.counts(), (0, 0, 0))
+        self.assertEqual(self.transport.calls, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
