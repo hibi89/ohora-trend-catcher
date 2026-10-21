@@ -175,3 +175,22 @@ def run_bounded_serial_steps(runner, accounts, *, max_steps, clock=None, **step_
                                    for r in results),
             "last_status": results[-1]["status"],
             "results": results}
+
+
+def offline_live_readiness_report(runner):
+    """Read-only diagnostic; never touches HTTP, tokens, coordinator or DB.
+
+    Distinguishes working offline fixture machinery from permission to run
+    the experimental live adapter. Never confers live authorization.
+    """
+    if not isinstance(runner, LiveSerialStep):
+        raise LiveSerialStepError("Original live serial runner required")
+    evidence = getattr(runner, "evidence", None)
+    blockers = []
+    if isinstance(evidence, PageEvidenceStore):
+        blockers.append("offline_staging_evidence_port")
+    else:
+        blockers.append("production_evidence_port_not_verified")
+    blockers.append("live_runtime_and_raw_integration_not_accepted")
+    return {"live_ready": False, "meta_calls": 0, "db_writes": 0,
+            "blockers": blockers}
