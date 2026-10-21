@@ -135,6 +135,7 @@
 | P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
 | P6-036 | 회귀 fixture | page3의 짧은 응답을 후속 커서가 있는 page-limit 상태로 잘못 만들었음 | fixture를 4개+after로 수정, paging/recovery 29/29 PASS |
 | P6-037 | 문서 인수인계 가드 | 신규 사건 상세는 추가했으나 장부 색인표에서 P6-035 누락 | 색인 보완, 후속 guard 4/4 PASS; 전체 재실행 미수행 |
+| P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
 | P6-035 | 페이징·복구 | after-only cursor가 정상 종료 처리에서 소실 | cursor candidate 보존·49건 read-only 계획·3-page ID 재앵커 |
 | P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
 | P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
@@ -430,3 +431,11 @@
 - **수정 commit:** `7632788`.
 - **후속 검증:** 수정 후 test_p6_troubleshooting_handoff_guard.py 4/4 PASS, paging/recovery 29/29 PASS, normalizer 11/11 PASS. 전체 954개 실행은 수정 후 반복하지 않았다. 이전 전체 결과 952 PASS / 1 FAIL / 1 SKIP이며 전체 재실행은 미검증이다.
 - **안전·롤백:** 문서 색인만 수정. Meta·운영 DB/RAW/Capture/quota 상태 변경 없음. 문서 수정은 필요한 경우 표 행만 되돌릴 수 있으며 상세 사건 기록을 삭제하지 않는다.
+
+### P6-038 — 2026-10-21 · 전체 오프라인 재검증 및 cross-store 증거 경계
+
+- **재검증:** `tests/run_offline.py` selected 955, exit code 0. 직접 실행한 `test_three_api_paging.py` 16/16, `test_three_api_paging_recovery.py` 13/13, `test_three_api_meta_normalizer.py` 11/11: **40/40 PASS**.
+- **기존 증거 읽기 상태:** 앞선 read-only cross-store join에서 페이지/응답/Capture/RAW receipt 97개 연결과 저장 digest 필드 equality가 확인되었고 lane 집계는 A=49, B=48이었다. 이 확인은 cryptographic body/Capture digest 재계산을 포함하지 않았고, 기존 문서가 지칭한 49개 대상과도 일치 여부가 확인되지 않았다. 따라서 연결·무결성 전체 검증 또는 복구 가능 판정으로 취급하지 않는다.
+- **미실시:** 기존 coordinator/Capture/RAW DB는 수정하지 않았고, 별도 복구 라운드나 Meta 호출도 실행하지 않았다. 기존 failed-no-retry 요청을 재전송하지 않았으며 3페이지·85%·쿨다운 정책을 바꾸지 않았다.
+- **Git:** 이 기록은 기존 작업 브랜치에서만 관리한다. 인증파일·토큰·계정 ID, 사용자 RAW는 포함하지 않는다. main 병합은 하지 않는다.
+- **다음:** 연결된 세 DB의 읽기 전용 digest 재검증과 원래 49건 대상 식별은 여전히 선행 조건이다. 실제 재탐색/수집은 별도 승인된 recovery round와 quota gate 아래에서만 수행한다.
