@@ -290,7 +290,7 @@ class SerialFixtureSelectionTests(unittest.TestCase):
         request, response = self.fixture("A", 1, usage=20)
         payload = dict(response.payload)
         root = dict(payload["business_discovery"])
-        root["id"] = "17840000000000999"  # wrong synthetic target identity
+        root["username"] = "wrong-target-username"  # invalid target username
         payload["business_discovery"] = root
         with self.assertRaises(ContractExecutionError):
             self.tick({("A", 1, 1): (
