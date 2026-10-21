@@ -107,14 +107,23 @@ class MetaTransport:
         status = result["status"]
         error = result["body"].get("error")
         code = error.get("code") if isinstance(error, dict) else None
+        subcode = error.get("error_subcode") if isinstance(error, dict) else None
+        # GraphHTTPClient already strips all free-form Meta text and tokens.
+        # Retain only bounded integer diagnostics for *future* failures.
+        safe_codes = []
+        if type(code) is int and 0 <= code <= 1000000:
+            safe_codes.append(f"code={code}")
+        if type(subcode) is int and 0 <= subcode <= 1000000:
+            safe_codes.append(f"subcode={subcode}")
+        diagnostic = " (" + ", ".join(safe_codes) + ")" if safe_codes else ""
         if code in (4, 17, 32, 613) or status == 429:
-            _fail(request.request_id, "rate_limit", "global", "Meta rate limit", status=status)
+            _fail(request.request_id, "rate_limit", "global", "Meta rate limit" + diagnostic, status=status)
         if status == 401:
             _fail(request.request_id, "auth", "global", "Authentication rejected", status=status)
         if status == 403 or code in (10, 200):
-            _fail(request.request_id, "permission", "account", "Permission rejected", status=status)
+            _fail(request.request_id, "permission", "account", "Permission rejected" + diagnostic, status=status)
         if not 200 <= status < 300 or "error" in result["body"]:
-            _fail(request.request_id, "http_error", "account", "HTTP rejected", status=status)
+            _fail(request.request_id, "http_error", "account", "HTTP rejected" + diagnostic, status=status)
         # Keep the successfully received body available for P1's durable
         # response-evidence journal, even at >=85% usage or malformed paging.
         # The following request is blocked; a received response is not lost.
