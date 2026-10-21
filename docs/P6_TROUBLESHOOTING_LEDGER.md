@@ -35,6 +35,7 @@
 | P6-021 | CI·인수인계 | 최신 오프라인 Runtime 실패: STATUS/HANDOFF 상단 AGENTS 링크 누락, Windows 8분 watchdog | 문서 링크 복구; Windows orchestrator 실행시간 별도 추적 |
 | P6-022 | Windows CI | 294계정 roster 5개 테스트 480초 초과 | 2/2/1 샤딩, SHA 5dfae40 Runtime 12/12 PASS |
 | P6-023 | 직렬·영속 통합 | fixture-only 직렬 전송 후 Capture/RAW·cursor 확정에 별도 잠금 경계가 없었음 | captured-only page commit을 동일 OS gate에 연결; 8개 격리 SQLite 통합 회귀, CI 판정 대기 |
+| P6-024 | 단일 진입점 설계 | fixture 송신과 페이지·커서 확정을 서로 다른 OS 잠금 구간에서 처리 | 단일 잠금 run_fixture_page_once, 최초 송신/기존 바인딩 replay 분기 및 A/B/C 합성 회귀; 신규 CI 판정 대기 |
 
 ## 사건별 상세
 
@@ -228,6 +229,16 @@
 - **검증 상태:** 코드 커밋 `918dd35df1dd12895a99eb0ad17e38c5ec202521`, 테스트 최종 변경 `e01ae625086b62dff5c9e62bd3bdd46085dc42ef`; **이 단계에서는 신규 HEAD 전체 CI 결과 미확정**. 이전 녹색 `58971b3`의 [Runtime 12/12](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39514325379)는 새 코드 통과 근거가 아니다. 새 SHA의 Linux/Windows Runtime 및 Three API·C Contract·Frozen Guard 결과를 확인해야 한다.
 - **보존 위험·잔여 차단:** fixture 전용이며 운영 자격증명·Meta Graph·운영 SQLite/CSV/RAW·scheduler·main에 접근/변경하지 않는다. 실제 live-transport serial gate·한도 독립성·운영 파일/백업·365일 History 연결은 **미구현/미검증**. Capture 없는 예약은 재송신하지 않고 operator review에 남는다. 응답 수신과 RAW 확정은 여전히 별도 DB이며 중간 실패가 가능하나, durable capture 기반 replay로 복구한다.
 - **롤백·재발 방지:** feature branch에서 신규 commit path/테스트만 revert, 기존 원본/운영 DB를 덮거나 재설정하지 않는다. 신규 직렬 컴포넌트는 transport send·capture 영속화·RAW receipt·page/cursor 확정을 나누어 회귀, 재시작 후 `transport.calls=0` 확인을 필수로 한다.
+
+### P6-024 — fixture-only 단일 직렬 진입점에서 binding→Capture/RAW→커서 원자적 직렬화 (2026-10-21 KST)
+
+- **관찰·원인 분리:** P6-020/023의 `dispatch_fixture_once`와 `commit_captured_fixture_page`는 각각 OS 직렬 잠금을 보유했지만 **수신과 커서 확정 사이에는 잠금 해제 구간**이 존재했다. 바인딩으로 이중 HTTP는 차단했으나, 전체 작업을 한 차례의 serial gate 안에서 실행하는 사전 합격 조건은 충족하지 않았다. **실제 데이터 손상·경합 장애는 관측되지 않았고, 아키텍처 연결 보강이다.**
+- **채택한 최소 변경:** `raw_v2/three_api_serial_contract_bridge.py`에 `OfflineSerialContractBridge.run_fixture_page_once(job, request, evidence, now=...)` 추가(`98416ee`). 정확한 `OfflineFixtureTransport`, `CaptureJournal`, `ContractRawWriter`, 동일 coordinator에 연결된 `PageEvidenceStore`, timezone-aware now, lane/phase/lease를 검사한다. **단일 OS gate 안에서** 요청 binding을 조회해 최초라면 `dispatch_once`가 영속 예약→fixture 1회 송신→Capture/RAW를 수행하고, 예약이 이미 있으면 **전송 단계를 건너뛴다**. 마지막에 기존 `commit_captured_page`로 RAW 영수증 및 선행 cursor를 검증하고 page evidence를 커밋한다. 중단됐으나 Capture가 없는 예약은 재송신하지 않고 실패 차단한다. 기존 분리 API는 레거시 호환을 위해 그대로 둔다.
+- **대안·제약:** 기존 두 메서드를 중첩 호출하면 nonreentrant OS lock에서 실패하므로 단일 gate 안의 원자적 *진입* 메서드로 구성. 여러 SQLite DB의 commit 자체를 하나의 트랜잭션으로 합칠 수는 없으며, 차단 후 영속 Capture 기반 재개를 유지한다. job 선택/로스터·쿼터 판단은 호출자 역할로 남고, 이 메서드는 **API 레인 회전 스케줄러가 아니다**.
+- **합성 검증 추가:** `tests/test_three_api_serial_contract_bridge.py` `629e758` 7개 사례: 최초 fixture 한 번만 송신, 기존 capture replay no-send, RAW/커서 commit 중단 후 복구, Capture 없는 기예약 상태 송신 0, OS gate 경합 거절, 실제 cursor commit까지 lock 유지, 다른 coordinator evidence/가짜 transport 거절. `cf25395` 2개 사례: 고정 A(계정1 page1)→C(page2) 연속 커서와 고정 B(계정151 page1) 신규 작업을 각각 단일 진입점으로 확인. 합계 **9개 테스트 작성**; 실행 성공은 별도 CI 확인.
+- **검증 근거·진행:** 코드 `98416ee0d613f26aa71f767f94d04b419216afe5`, 테스트 `629e75846f997440b8bca1cf030264330072ca01` / `cf25395e90da0ef9ef71dcfbf7b5321733e41e4b`. **기록 시점 최신 전체 CI PASS 미확정**, 변경 SHA와 최종 문서 HEAD가 다르므로 새 Runtime Linux·Windows와 Three API/C Contract/Frozen Guard가 정확한 최종 SHA를 완료할 때만 PASS로 변경. 이전 `b2272de` 성공을 새 코드 성공으로 대용하지 않는다.
+- **안전 경계·잔여 작업:** 단일 tick 처리 자체가 fixture-only이고 `MetaTransport` 및 인증 credential을 받지 않는다. 실 Meta 3 API 호출/독립 쿼터 검증, 294계정 실시간 스케줄 자동선택, 운영 DB/CSV, 365일 History, 배포, `main` 병합은 **미구현·미승인**. 테스트 작성은 운영 데이터 검증이 아니다.
+- **롤백/회귀 방지:** feature 브랜치의 `98416ee`/추가 회귀만 git revert; 운영 원본/토큰/수집 이력은 건드리지 않는다. 후속 개발자는 작업 성공과 중간 중단·중복 발송 0·실패 차단을 별도 검증하고, 85% usage 차단·최소 65분 규칙을 새 runner에서 우회하지 않는다.
 
 ## 새 사건을 추가할 때의 고정 서식
 
