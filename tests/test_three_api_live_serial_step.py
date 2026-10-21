@@ -189,6 +189,47 @@ class LiveSerialStepGateTests(unittest.TestCase):
             finally:
                 coordinator.db.close()
 
+    def test_quota_halt_survives_coordinator_reopen(self):
+        """Crash/restart must not silently release a blocked HTTP lane."""
+        import tempfile
+        from pathlib import Path
+        from three_api_coordinator import Coordinator
+        from three_api_job_binding import JobRequestBindingStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "restart-quota.sqlite"
+            now = self.kwargs["requested_at"]
+            first = Coordinator(path)
+            try:
+                first.seed()
+                JobRequestBindingStore(first)
+                job_id = first.db.execute(
+                    "SELECT id FROM jobs WHERE lane='A' AND page=1 "
+                    "ORDER BY account_ordinal LIMIT 1"
+                ).fetchone()["id"]
+                first.db.execute(
+                    "INSERT INTO job_request_bindings "
+                    "(job_id,request_id,request_digest,reserved_at) "
+                    "VALUES (?,?,?,?)",
+                    (job_id, "req-" + "d" * 64, "offline-digest",
+                     now.isoformat()),
+                )
+                first.observe_usage("A", 85, now=now)
+            finally:
+                first.db.close()
+            second = Coordinator(path)
+            try:
+                self.assertIsNone(second.lease_for_dispatch("A", now=now))
+                self.assertEqual(
+                    second.lease_for_recovery("A", now=now)["id"], job_id)
+                state = second.db.execute(
+                    "SELECT halted,reason FROM lanes WHERE lane='A'"
+                ).fetchone()
+                self.assertEqual((state["halted"], state["reason"]),
+                                 (1, "usage_limit"))
+            finally:
+                second.db.close()
+
     def test_blocked_lane_recovery_does_not_dispatch(self):
         """A quota-halted lane must never cause a fresh HTTP dispatch."""
         from unittest.mock import Mock, patch
