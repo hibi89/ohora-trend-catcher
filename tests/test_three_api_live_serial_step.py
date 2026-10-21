@@ -69,6 +69,11 @@ class LiveSerialStepGateTests(unittest.TestCase):
                     (first["id"], "req-" + "a" * 64, "offline-digest",
                      now.isoformat()),
                 )
+                report = coordinator.recovery_ready_diagnostics(now=now)
+                a_lane = next(row for row in report["lanes"] if row["lane"] == "A")
+                self.assertEqual(a_lane["eligible_jobs"], 1)
+                self.assertEqual(a_lane["recoverable_now"], 1)
+                self.assertTrue(a_lane["lane_ready"])
                 recovery = coordinator.lease_for_recovery("A", now=now)
                 self.assertIsNotNone(recovery)
                 self.assertEqual(recovery["id"], first["id"])
