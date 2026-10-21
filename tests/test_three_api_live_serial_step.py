@@ -369,5 +369,40 @@ class LiveSerialStepGateTests(unittest.TestCase):
         self.assertEqual(runner.coordinator.lease_for_recovery.call_count, 3)
 
 
+    def test_bounded_driver_rejects_invalid_limits_and_approval(self):
+        from unittest.mock import patch
+        from three_api_live_serial_step import run_bounded_serial_steps
+        with patch.object(LiveSerialStep, "step") as step:
+            for count in (0, 883, True, "5"):
+                with self.subTest(count=count), self.assertRaises(LiveSerialStepError):
+                    run_bounded_serial_steps(self.runner, [], max_steps=count, approved=True)
+            with self.assertRaisesRegex(LiveSerialStepError, "approval"):
+                run_bounded_serial_steps(self.runner, [], max_steps=1, approved=False)
+            step.assert_not_called()
+
+    def test_bounded_driver_caps_calls_and_stops_on_no_work(self):
+        from unittest.mock import patch
+        from three_api_live_serial_step import run_bounded_serial_steps
+        with patch.object(LiveSerialStep, "step", return_value={"status": "page_committed"}) as step:
+            result = run_bounded_serial_steps(self.runner, [], max_steps=3, approved=True)
+        self.assertEqual(step.call_count, 3)
+        self.assertEqual(result["committed_pages"], 3)
+        with patch.object(LiveSerialStep, "step", side_effect=[
+                {"status": "recovered"}, {"status": "no_ready_work"}]) as step:
+            result = run_bounded_serial_steps(self.runner, [], max_steps=5, approved=True)
+        self.assertEqual(step.call_count, 2)
+        self.assertEqual(result["recovered_pages"], 1)
+        self.assertEqual(result["last_status"], "no_ready_work")
+
+    def test_bounded_driver_never_retries_failed_step(self):
+        from unittest.mock import patch
+        from three_api_live_serial_step import run_bounded_serial_steps
+        with patch.object(LiveSerialStep, "step",
+                          side_effect=LiveSerialStepError("capture missing")) as step:
+            with self.assertRaisesRegex(LiveSerialStepError, "capture missing"):
+                run_bounded_serial_steps(self.runner, [], max_steps=10, approved=True)
+        step.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
