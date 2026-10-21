@@ -71,6 +71,9 @@ class N8nTickTests(unittest.TestCase):
         types = {node["type"] for node in workflow["nodes"]}
         self.assertIn("n8n-nodes-base.scheduleTrigger", types)
         self.assertIn("n8n-nodes-base.executeWorkflowTrigger", types)
+        manual = next(n for n in workflow["nodes"]
+                      if n["type"] == "n8n-nodes-base.executeWorkflowTrigger")
+        self.assertEqual(manual["parameters"]["inputSource"], "passthrough")
         command = next(n["parameters"]["command"] for n in workflow["nodes"]
                        if n["type"] == "n8n-nodes-base.executeCommand")
         self.assertRegex(command, re.compile(r"p6_n8n_tick\.ps1", re.I))

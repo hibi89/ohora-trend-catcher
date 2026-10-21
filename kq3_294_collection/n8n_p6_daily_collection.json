@@ -2,7 +2,7 @@
   "name": "OHORA P6 bounded daily collection",
   "nodes": [
     {
-      "parameters": {},
+      "parameters": {"events": "worklfow_call", "inputSource": "passthrough"},
       "id": "p6-manual-run-trigger",
       "name": "Manual n8n execution",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
