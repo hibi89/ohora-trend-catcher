@@ -276,9 +276,14 @@ class SerialFixtureSelectionTests(unittest.TestCase):
         self.assertEqual(self.lane("A")["halted"], 1)
         self.assertEqual(self.lane("A")["reason"], "missing_usage")
         self.assertEqual(self.counts(), (0, 0, 1))
+        # "recoverable_now" counts expired bound job candidates, NOT
+        # confirmed Capture bytes. A timeout must still never be re-sent.
         self.assertEqual(self.coord.recovery_ready_diagnostics(
             now=OBSERVED_AT + timedelta(minutes=16))["lanes"][0][
-            "recoverable_now"], 0)
+            "recoverable_now"], 1)
+        self.assertEqual(self.coord.dispatch_ready_diagnostics(
+            now=OBSERVED_AT + timedelta(minutes=16))["lanes"][0][
+            "dispatchable_now"], 0)
 
 
     def test_schema_invalid_safe_usage_does_not_clear_inflight_hold(self):

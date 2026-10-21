@@ -39,8 +39,22 @@
 | P6-025 | 직렬 작업선택·사용량 | API 레인 선택과 fixture 송신·정확한 사용량 증거/복구 연결 부족 | 오프라인 job lease + A/B/C turn + pre-send durable quota hold + read-only 진단; 17개 합성 회귀, 신규 CI 판정 대기 |
 
 | P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
+| P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
 
 ## 사건별 상세
+
+### P6-027 — P6-026 쿼터 복구 정책 변경 뒤 구형 테스트 기대값 충돌 (2026-10-21)
+
+- **실패 증거:** SHA `10e4b6e8ae517302d3620e3ae4f8006eb39a27dd` [RAW v2 #39526851689](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39526851689)와 [Runtime #39526867524](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39526867524) Linux/Windows에서 아래 4개 주장 중복 실패. RAW 4 FAIL; Runtime Linux 4 FAIL / Windows 일부 실패. 특정 workflow의 pending/cancelled 상태와 구분.
+- **기대/실제 ①:** `test_recovery_ready_diagnostics_are_read_only_and_gate_aware`, `test_recovery_respects_lane_halt_and_verified_cooldown`는 quota 85% 뒤 bound recovery = 0/None 기대했으나 현재 `P6-026` 구현은 1/leased. 정책상 **Capture-only 로컬 복구 허용·신규 HTTP dispatch 금지**가 올바름.
+- **기대/실제 ②:** `test_transport_unknown_outcome_never_clears_durable_usage_hold`는 bound 후보 수 0 기대, 실제 1. 진단값은 **영속 binding과 lease 자격의 수**이지 durable Capture 존재 또는 RAW replay 성공의 증거가 아님. Missing capture는 별도 fail-closed로 남기며 자동 재전송하지 않음.
+- **기대/실제 ③:** `test_quota_halt_on_one_lane_preserves_other_lanes`에서 B 사용량 차단 후 A와 C가 동시에 first-page lease를 받는다고 기대했으나 실제 C=None. 동결 레인 배정상 C는 page2 담당이므로 A/page1 receipt·cursor 없이는 정상적으로 대기해야 함. A lane 신규 dispatch 가능 여부와 C predecessor readiness를 분리 검증.
+- **선택 및 대안:** (A) 정책에 맞춘 네 테스트 정정 **채택**. (B) P6-026 quota recovery 코드를 구형 기대에 맞게 롤백하면 동결 설계의 HTTP 없는 복구와 충돌하므로 **기각**. 설계·API 호출·운영 DB·스케줄러 변경 없음.
+- **수정 범위:** `tests/test_three_api_job_binding.py`, `tests/test_three_api_serial_selection.py`, `tests/test_three_api_live_serial_step.py`. 복구 시 신규 송신 차단과 C 선행 커서 검증을 유지.
+- **검증 계획:** GitHub Actions 최신 HEAD의 RAW v2, Runtime Linux/Windows 12개 shard, Three API, C Contract, Frozen Guard를 각각 판정. **기록 시점 CI 미검증**; 코드 저장을 성공으로 대체하지 않음.
+- **보존·복구:** live Meta 0회, 운영 `collection.sqlite`·CSV·원본 미변경. 실패 시 GitHub 기준 부모 SHA `10e4b6e`에서 이 테스트/문서 변경만 revert. 운영 데이터 롤백 불필요.
+- **재발 방지:** quota halt 이후 dispatch/recovery 기대를 분리하고, 294계정 page2/3 lease 검증 시 upstream page receipt·cursor를 먼저 준비.
+
 
 ### P6-001 — 병렬 AI 작업 후 한도 소진 및 원복 위험 (2026-10-19)
 

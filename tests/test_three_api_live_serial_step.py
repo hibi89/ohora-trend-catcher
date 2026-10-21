@@ -262,7 +262,7 @@ class LiveSerialStepGateTests(unittest.TestCase):
                 coordinator.db.close()
 
     def test_quota_halt_on_one_lane_preserves_other_lanes(self):
-        """85% stop is lane-local and cannot block unrelated caller IDs."""
+        """Offline lane quota state cannot bypass predecessor cursor evidence."""
         import tempfile
         from pathlib import Path
         from three_api_coordinator import Coordinator
@@ -279,8 +279,15 @@ class LiveSerialStepGateTests(unittest.TestCase):
                 a = coordinator.lease_for_dispatch("A", now=now)
                 c = coordinator.lease_for_dispatch("C", now=now)
                 self.assertIsNotNone(a)
-                self.assertIsNotNone(c)
-                self.assertNotEqual(a["lane"], c["lane"])
+                self.assertEqual(a["lane"], "A")
+                # C owns page 2; no page-1 receipt/cursor exists yet.
+                # Its absence is a prerequisite, not a B-quota leak.
+                self.assertIsNone(c)
+                diagnostic = coordinator.dispatch_ready_diagnostics(now=now)
+                c_lane = next(row for row in diagnostic["lanes"]
+                              if row["lane"] == "C")
+                self.assertTrue(c_lane["lane_ready"])
+                self.assertEqual(c_lane["eligible_jobs"], 0)
                 state = coordinator.db.execute(
                     "SELECT halted,reason FROM lanes WHERE lane='B'"
                 ).fetchone()

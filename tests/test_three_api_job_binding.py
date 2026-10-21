@@ -301,7 +301,13 @@ class JobRequestBindingTests(unittest.TestCase):
         blocked = self.coordinator.recovery_ready_diagnostics(now=later)
         a = next(row for row in blocked["lanes"] if row["lane"] == "A")
         self.assertEqual(a["eligible_jobs"], 1)
-        self.assertEqual(a["recoverable_now"], 0)
+        # A bound job can be leased for local, no-HTTP recovery during cooldown.
+        # This candidate count does not prove that its Capture is durable.
+        self.assertEqual(a["recoverable_now"], 1)
+        dispatch = self.coordinator.dispatch_ready_diagnostics(now=later)
+        a_dispatch = next(row for row in dispatch["lanes"]
+                          if row["lane"] == "A")
+        self.assertEqual(a_dispatch["dispatchable_now"], 0)
 
     def test_recovery_only_skips_earlier_unbound_job(self):
         # Account 1 is unbound; reserve account 2 on a separate fresh lease.
@@ -317,14 +323,20 @@ class JobRequestBindingTests(unittest.TestCase):
         self.bindings.reserve(self.job, self.request, self.evidence, now=self.start)
         later = self.start + timedelta(minutes=16)
         self.assertTrue(self.coordinator.observe_usage("A", 85, now=self.start))
-        self.assertIsNone(self.coordinator.lease_for_recovery("A", now=later))
+        self.assertIsNone(self.coordinator.lease_for_dispatch("A", now=later))
+        recovery_under_halt = self.coordinator.lease_for_recovery(
+            "A", now=later)
+        self.assertEqual(recovery_under_halt["id"], self.job["id"])
         self.assertFalse(self.coordinator.reset_after_verified_cooldown(
             "A", now=later))
+        self.assertIsNone(self.coordinator.lease_for_dispatch("A", now=later))
         ready = self.start + timedelta(minutes=65)
         self.assertTrue(self.coordinator.reset_after_verified_cooldown(
             "A", now=ready))
         recovered = self.coordinator.lease_for_recovery("A", now=ready)
         self.assertEqual(recovered["id"], self.job["id"])
+        fresh = self.coordinator.lease_for_dispatch("A", now=ready)
+        self.assertEqual(fresh["account_ordinal"], 2)
 
     def test_recovery_alias_never_consumes_fresh_work(self):
         later = self.start + timedelta(minutes=16)
