@@ -1,10 +1,18 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-063 — 2026-10-22 · 증거 확인 후 C lane 수동 재개와 실제 수집 진척
+- **재개 근거:** 06:42 KST read-only audit across isolated P6 dates found exactly one historical C-bound request: job done, intent captured, Capture present, HTTP 200 safe response with 66% maximum usage. No later C request existed; current day's C had no bindings, `live_pending_usage` hold, elapsed `ready_at`, and 146 dispatch candidates. No n8n execution was active. These conditions satisfy the existing manual cooldown-reset design; no quota/cooldown bypass.
+- **변경:** in a transaction-time recheck, cleared only current-day isolated coordinator lane C's `halted/reason` fields. Preserved `ready_at`, jobs, bindings, prior Capture/RAW evidence, and all other lanes. B stayed held; A's four bound failed requests stayed untouched. No manual tick or direct Meta call was made by the reset command.
+- **실제 예약 수집:** 06:45 n8n execution `success`, runner `page_committed`, 3 pages committed, 0 account failures, confirmed Meta response. C latest safe usage 0%, so C returned to unhalted; 146 candidates became 3 done / 291 pending. Read-only pilot status: 252 receipts / 1008 observations / 822 unique; A=146 done / 4 leased / 144 pending, B=0/294, C=3/291. This proves partial current-day live collection, not full completion.
+- **인증 구분:** all local ENV files passed structural uniqueness/version validation, and C produced three successful live page responses. B's actual token/permissions remain unverified; its four prior bound HTTP400 requests remain no-retry. A's four bound requests also remain no-retry. Cursor re-anchor is still offline-only.
+- **테스트:** official offline suite 988 discovered / exit 0 / 1 skipped; focused tick+handoff 12/12; cursor/re-anchor 26/26. No new code change in this record; only guarded isolated C coordinator reset and documentation. Existing RAW dataset/legacy 49 rows unchanged.
+- **Git:** branch `codex/p6-readiness-hardening-20261019`; previous pushed SHA `d66b3e19756423ec0ecf007538071ae099d00c8e`; this entry requires commit/push.
+
 ### P6-062 — 2026-10-22 · ENV 구조 검증과 API 유효성의 구분
 - **검증:** `python -m raw_v2.three_api_env_loader --directory C:\Users\haein\OneDrive\Desktop\ohora_env_a_b_c` returned `VALID: three unique A/B/C configurations; Graph API v26.0; Meta calls=0; values=redacted`. No secret or identifier was emitted.
 - **해석:** All three local ENV files are structurally complete, have unique lane configurations, and agree on v26.0. This proves neither token activity nor the required Meta permissions. The shell process has no P6 credential variables, but n8n runner loads/maps the three ENV files for each eligible tick; do not interpret shell mismatch as proof of the n8n configuration.
-- **Runtime:** read-only P6 snapshot remains 249 durable receipts / 996 observations / 812 unique; A=146 done / 4 leased / 144 pending; B/C=0 done / 294 pending. Latest known 06:35 tick was `no_ready_work`, 0 committed, `live_meta_called=false`. Dispatch blockers and collection incompleteness remain as P6-061; no Meta call, hold reset, or DB write.
-- **Git:** branch `codex/p6-readiness-hardening-20261019`; prior pushed SHA `fb7c83bbcbd08f90a307f4b2d26ce9388335dc1d`. This handoff refresh requires commit/push.
+- **Runtime:** Historical snapshot (superseded by P6-063) was 249 receipts / 996 observations / 812 unique; A=146 done / 4 leased / 144 pending; B/C=0 done / 294 pending. Latest then-known 06:35 tick was `no_ready_work`, 0 committed, `live_meta_called=false`; no Meta call/reset at that point.
+- **Git:** branch `codex/p6-readiness-hardening-20261019`; P6-062 was committed/pushed as `d66b3e19756423ec0ecf007538071ae099d00c8e`; this state is superseded by P6-063.
 
 ### P6-061 — 2026-10-22 · `no_ready_work` 원인 확인과 tick telemetry 수정
 - **근본 원인:** sanitized latest n8n payload resolves to runner status `no_ready_work`, 0 committed pages, 0 account failures. `LiveSerialStep.step` returns this before request preparation/transport if no dispatchable job exists. Read-only exact dispatch predicates: A is lane-ready but has 0 eligible jobs; B has 144 eligible page1 candidates and C has 146, but both are held and therefore have 0 dispatchable candidates. A's page1 roster has 146 done and 4 leased/bound jobs; all A page2 jobs remain pending on predecessor/evidence.
@@ -285,6 +293,7 @@
 | P6-060 | 예약 tick success·수집 무진척 구분 | 06:00/06:05 실행 success이나 receipt/state 변화 없음 | 146 captures unchanged; B gate refused; no mutation/API; sanitized tick-result diagnosis pending |
 | P6-061 | no_ready_work 원인·telemetry 수정 | A=0 eligible, B/C held; step attempt no longer conflated with Meta request | n8n status no_ready_work, 0 committed, 0 account failures; 8/8 adapter tests; no HTTP/DB mutation |
 | P6-062 | ENV 구조 검증·권한 미검증 구분 | A/B/C files structurally valid, unique, v26.0 | offline loader PASS; token validity/permissions not checked; no Meta request |
+| P6-063 | C lane 증거확인 재개·실제 tick 진척 | safe prior usage 66%, cooldown elapsed; only C gate released | scheduled tick committed 3 pages; new safe usage 0%; total 252 receipts; B/A guards preserved |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
