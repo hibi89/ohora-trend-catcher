@@ -453,5 +453,21 @@ class LiveSerialStepGateTests(unittest.TestCase):
                              **{**self.kwargs, "approved": False})
 
 
+    def test_readiness_report_rejects_offline_evidence_without_side_effects(self):
+        from unittest.mock import Mock
+        from three_api_evidence import PageEvidenceStore
+        from three_api_live_serial_step import offline_live_readiness_report
+        self.runner.evidence = object.__new__(PageEvidenceStore)
+        self.runner.coordinator = Mock()
+        self.runner.executor = Mock()
+        report = offline_live_readiness_report(self.runner)
+        self.assertFalse(report["live_ready"])
+        self.assertEqual(report["meta_calls"], 0)
+        self.assertEqual(report["db_writes"], 0)
+        self.assertIn("offline_staging_evidence_port", report["blockers"])
+        self.runner.coordinator.assert_not_called()
+        self.runner.executor.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
