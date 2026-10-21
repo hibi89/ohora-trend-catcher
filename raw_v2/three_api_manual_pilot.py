@@ -219,7 +219,11 @@ def main(argv=None):
                         help="Official 294-account account_list.csv (read-only)")
     parser.add_argument("--workspace", type=Path, required=True,
                         help="Dedicated isolated P6 pilot directory")
-    parser.add_argument("--status", action="store_true",\n                        help="Read existing pilot SQLite status only; no credentials/Meta")\n    parser.add_argument("--day", type=str, default=None,\n                        help="KST date YYYY-MM-DD for --status (default today)")\n    parser.add_argument("--max-pages", type=int, default=1,
+    parser.add_argument("--status", action="store_true",
+                        help="Read existing pilot SQLite status only; no credentials/Meta")
+    parser.add_argument("--day", type=str, default=None,
+                        help="KST date YYYY-MM-DD for --status (default today)")
+    parser.add_argument("--max-pages", type=int, default=1,
                         help="Explicit serial page cap, 1..294 (default 1)")
     parser.add_argument("--live", action="store_true",
                         help="Enable bounded Meta pages; requires separate owner approval")
