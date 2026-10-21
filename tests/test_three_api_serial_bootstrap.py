@@ -134,6 +134,19 @@ class VerifiedSerialBootstrapTests(unittest.TestCase):
             "SELECT halted FROM lanes WHERE lane='A'"
         ).fetchone()[0])
 
+    def test_readiness_diagnostic_distinguishes_verified_raw_without_authorizing(self):
+        from three_api_live_serial_step import offline_live_readiness_report
+        before = self.coordinator.db.total_changes
+        report = offline_live_readiness_report(self.runner)
+        self.assertFalse(report["live_ready"])
+        self.assertEqual(report["meta_calls"], 0)
+        self.assertEqual(report["db_writes"], 0)
+        self.assertIn("external_meta_pilot_not_authorized_or_verified",
+                      report["blockers"])
+        self.assertNotIn("offline_staging_evidence_port", report["blockers"])
+        self.assertEqual(self.coordinator.db.total_changes, before)
+        self.assertEqual(self.calls, [])
+
     def test_wrong_raw_port_cannot_be_substituted(self):
         db2 = sqlite3.connect(":memory:", isolation_level=None)
         self.addCleanup(db2.close)
