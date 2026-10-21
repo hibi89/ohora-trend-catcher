@@ -26,6 +26,7 @@ from collector import connect, load_accounts
 from three_api_coordinator import Coordinator
 from three_api_capture import CaptureJournal
 from three_api_credentials import make_references, validate_identity_value
+from three_api_env_loader import load_three_api_environment
 from three_api_graph_http import GraphHTTPClient, make_strict_sender
 from three_api_live_lane_router import ThreeLaneMetaTransport
 from three_api_raw_writer import ContractRawWriter
@@ -302,8 +303,18 @@ def main(argv=None):
                         help="Enable bounded Meta pages; requires separate owner approval")
     parser.add_argument("--confirm-owner-approval", action="store_true",
                         help="Explicitly confirm the separate owner authorization")
+    parser.add_argument("--credentials-dir", type=Path,
+                        help="Read .env.api_a/b/c for an explicitly approved live run")
     options = parser.parse_args(argv)
     try:
+        credential_environment = None
+        if options.credentials_dir is not None:
+            if (options.status or options.failures or not options.live
+                    or not options.confirm_owner_approval):
+                raise PilotConfigurationError("Credential files require an explicitly approved live collection mode")
+            credential_environment = load_three_api_environment(
+                options.credentials_dir, base_environment=os.environ,
+            )
         if options.status and options.failures:
             raise PilotConfigurationError("Choose one read-only mode")
         if options.failures:
@@ -321,6 +332,7 @@ def main(argv=None):
                 options.source, options.workspace,
                 live=options.live,
                 confirm_owner_approval=options.confirm_owner_approval,
+                environment=credential_environment,
                 max_pages=options.max_pages,
             )
     except (ValueError, TypeError, RuntimeError, sqlite3.Error):
