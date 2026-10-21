@@ -247,5 +247,39 @@ class SerialFixtureSelectionTests(unittest.TestCase):
             "SELECT last_lane FROM offline_contract_serial_turn").fetchone()[0], "C")
 
 
+    def test_pre_send_pending_usage_is_durable_and_released_by_safe_evidence(self):
+        seen = []
+        original_send = self.transport.send
+
+        def inspect_during_send(request):
+            lane = self.lane("A")
+            seen.append((lane["halted"], lane["reason"], lane["ready_at"]))
+            return original_send(request)
+
+        self.transport.send = inspect_during_send
+        result = self.tick({("A", 1, 1): self.fixture("A", 1, usage=20)})
+        self.assertEqual(result["status"], "page_committed")
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0][:2], (1, "fixture_pending_usage"))
+        self.assertEqual(self.lane("A")["halted"], 0)
+        self.assertIsNone(self.lane("A")["reason"])
+        self.assertEqual(self.transport.calls, 1)
+
+    def test_transport_unknown_outcome_never_clears_durable_usage_hold(self):
+        def fail_unknown(_request):
+            self.assertEqual(self.lane("A")["reason"], "fixture_pending_usage")
+            raise TimeoutError("synthetic offline unknown outcome")
+
+        self.transport.send = fail_unknown
+        with self.assertRaises(ContractExecutionError):
+            self.tick({("A", 1, 1): self.fixture("A", 1)})
+        self.assertEqual(self.lane("A")["halted"], 1)
+        self.assertEqual(self.lane("A")["reason"], "missing_usage")
+        self.assertEqual(self.counts(), (0, 0, 1))
+        self.assertEqual(self.coord.recovery_ready_diagnostics(
+            now=OBSERVED_AT + timedelta(minutes=16))["lanes"][0][
+            "recoverable_now"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
