@@ -14,6 +14,7 @@ from three_api_contract_executor import ThreeApiContractExecutor
 from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter
 from three_api_evidence import PageEvidenceStore
+from three_api_verified_page_evidence import VerifiedRawPageEvidenceStore
 from three_api_live_request_factory import prepare_job_request
 from three_api_roster_preflight import validate_official_roster, RosterPreflightError
 
@@ -34,6 +35,14 @@ class LiveSerialStep:
                 or not isinstance(executor.capture, CaptureJournal)
                 or not isinstance(executor.raw, ContractRawWriter)):
             raise LiveSerialStepError("Explicit three-lane transport and durable ports required")
+        # The only non-staging evidence type must verify against the EXACT
+        # Capture and RAW ports used by this executor, not a different store.
+        if type(evidence) is VerifiedRawPageEvidenceStore and (
+                evidence.capture is not executor.capture
+                or evidence.raw is not executor.raw):
+            raise LiveSerialStepError("Evidence and executor durable ports differ")
+        if type(evidence) not in (PageEvidenceStore, VerifiedRawPageEvidenceStore):
+            raise LiveSerialStepError("Unrecognized evidence port")
         self.coordinator = coordinator
         self.bindings = bindings
         self.evidence = evidence
@@ -51,7 +60,7 @@ class LiveSerialStep:
         # touching an injected transport or coordinator, even with bad rows.
         if not isinstance(caller_ids, dict) or set(caller_ids) != set(LANES):
             raise LiveSerialStepError("A/B/C caller identities required")
-        if isinstance(getattr(self, "evidence", None), PageEvidenceStore):
+        if type(getattr(self, "evidence", None)) is PageEvidenceStore:
             raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
         try:
             validate_official_roster(accounts)
