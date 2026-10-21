@@ -14,13 +14,12 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import os
 from pathlib import Path
 import re
 import sqlite3
-from zoneinfo import ZoneInfo
 
 from collector import connect, load_accounts
 from three_api_coordinator import Coordinator
@@ -115,7 +114,7 @@ def run_manual_pilot(source, workspace, *, live=False,
     if root.is_symlink() or root.name.lower() == "collection.sqlite":
         raise PilotConfigurationError("Dedicated pilot directory required")
     root = root.resolve()
-    day = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    day = datetime.now(timezone(timedelta(hours=9))).date()
     raw_path = root / "p6_pilot_raw.sqlite"
     control = root / day.isoformat() / "coordinator.sqlite"
     capture_path = root / day.isoformat() / "capture.sqlite"
