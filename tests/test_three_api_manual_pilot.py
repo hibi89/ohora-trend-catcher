@@ -84,6 +84,8 @@ class ManualPilotTests(unittest.TestCase):
                 confirm_owner_approval=True, environment=environment,
             )
         self.assertEqual(result["status"], "page_committed")
+        self.assertEqual(result["committed_pages"], 1)
+        self.assertEqual(result["attempted_steps"], 1)
         self.assertEqual(result["new_http_attempt_limit"], 1)
         self.assertEqual(calls, ["A"])
         raw_db = sqlite3.connect(self.workspace / "p6_pilot_raw.sqlite")
@@ -92,6 +94,52 @@ class ManualPilotTests(unittest.TestCase):
         self.assertEqual(raw_db.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 1)
         self.assertEqual(raw_db.execute("SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
         self.assertNotIn("synthetic-token", str(result))
+
+    def test_invalid_page_bounds_rejected_before_any_io(self):
+        for bound in (0, 295, True, "3"):
+            with self.subTest(bound=bound):
+                with self.assertRaises(PilotConfigurationError):
+                    run_manual_pilot(self.csv, self.workspace, max_pages=bound)
+        self.assertFalse(self.workspace.exists())
+
+    def test_two_serial_pages_save_two_accounts_with_one_caller(self):
+        calls = []
+        environment = {"P6_META_GRAPH_VERSION": "v26.0"}
+        lanes = {}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            environment[f"P6_META_TOKEN_{lane}"] = f"synthetic-token-{lane}"
+            environment[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}", f"P6_META_IG_ID_{lane}")
+            def sender(req, timeout, *, lane=lane):
+                calls.append(lane)
+                response = MockResponse()
+                target = f"nail_{len(calls)}"
+                response.payload["business_discovery"]["username"] = target
+                response.payload["business_discovery"]["media"]["data"][0]["id"] = str(1234567890 + len(calls))
+                response.payload["business_discovery"]["media"]["data"][0]["username"] = target
+                return response
+            lanes[lane] = MetaTransport(
+                client=GraphHTTPClient(sender=sender, approved=True),
+                credentials=ref, caller_ig_id=caller,
+                token=environment[f"P6_META_TOKEN_{lane}"],
+            )
+        with patch("three_api_manual_pilot._transports",
+                   return_value=ThreeLaneMetaTransport(lanes)):
+            result = run_manual_pilot(
+                self.csv, self.workspace, live=True,
+                confirm_owner_approval=True, environment=environment,
+                max_pages=2,
+            )
+        self.assertEqual(result["committed_pages"], 2)
+        self.assertEqual(result["attempted_steps"], 2)
+        self.assertEqual(result["new_http_attempt_limit"], 2)
+        self.assertEqual(calls, ["A", "A"])
+        raw_db = sqlite3.connect(self.workspace / "p6_pilot_raw.sqlite")
+        self.addCleanup(raw_db.close)
+        self.assertEqual(raw_db.execute(
+            "SELECT COUNT(*) FROM post_observations").fetchone()[0], 2)
+        self.assertEqual(raw_db.execute(
+            "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 2)
 
     def test_invalid_roster_fails_before_env_read(self):
         self.csv.write_text("account_key,username,country\nKR_001,nail_1,KR\n", encoding="utf-8")
