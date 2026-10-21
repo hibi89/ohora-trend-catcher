@@ -1,5 +1,13 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-058 — 2026-10-22 · n8n 진척 정체와 B/C 사용량 증거 보류
+- **실행 근거:** 격리 n8n DB의 `OHORA P6 bounded daily collection`은 active이며 최신 05:50 KST 실행 status는 `success`. 다만 wrapper success가 새 페이지 저장을 뜻하지는 않는다. 05:50 P6 read-only status는 249 receipts / 996 observations / 812 unique posts; A 146 done / 4 leased / 144 pending; B/C 각각 0 done / 294 pending이다. 최근 대조 status에서 page count 변화 없음.
+- **쿼터/보류:** 현재 날짜 `capture.sqlite`의 sanitized evidence에는 A 146건, B/C 0건 usage observations. A 최신 usage 35% (05:10 KST). B/C는 `live_pending_usage`로 held, 두 lane의 cooldown은 elapsed이나 fresh lane-safe usage evidence가 없다. elapsed cooldown만으로 해제하지 않았다.
+- **실패:** A ordinal 32, 61, 100, 113의 HTTP400은 `failed_no_retry`, Capture 없음, response evidence 없음, auto-retry 불가. 원인은 응답 증거 부재로 계속 미확정이다. Guarded B-resume read-only preflight는 `safety conditions not met`를 반환; reset/API 호출은 없었다.
+- **변경/제약:** 이번 점검은 P6 status, failure, cooldown, n8n execution, safe usage 집계만 read-only 수행했다 (`db_writes=0`, `live_meta_called=false`). 294 계정·A/B/C 순서, limit=4, 3페이지 상한, 85% cap, cooldown/no-retry, RAW/Capture 불변성 유지. Cursor recovery는 오프라인 테스트만 완료; 실제 재앵커/재개 미검증. full collection 미완료.
+- **다음 안전 단계:** B/C의 fresh lane-safe usage evidence와 guarded resume 조건을 검증하기 전에는 hold를 바꾸지 않는다. 다음 예약 실행은 자동 진행 여부만 읽기 전용 모니터링한다. B/C 자동화를 막는 현재 gate를 충족하지 못하면 collection 완료를 주장하지 말고, 기존 실패 요청은 재전송하지 않는다.
+- **Git:** 작업 브랜치 `codex/p6-readiness-hardening-20261019`; 직전 원격 SHA `b0ce679d8cc444b492328d458269c9020aa52107`. 이 기록 후 별도 문서 커밋/push 결과로 갱신.
+
 ### P6-057 — 2026-10-22 · 커서 무효화 시 제한형 재연결 요구 및 오프라인 증거
 - **요구/기존 구현:** 사용자 추가 요구는 무효 커서 재시도 대신 `resume_required`로 중단하고, 별도 승인 라운드에서 최신 페이지부터 기존 게시물 ID와 재연결한 뒤 새 커서로 재개하는 것이다. 기존 [planner](../raw_v2/three_api_paging_recovery.py)는 `cursor_failure_disposition`으로 자동 재시도를 금지하고, `plan_cursor_recovery`는 합성 페이지의 ID overlap만으로 연결 후보를 찾으며 3페이지 초과를 거부한다. 삭제 여부는 단정하지 않는다. 재탐색 관측 ID는 중복 포함 보존하고 분석 ID만 deduplicate한다. 별도 [reanchor ledger](../raw_v2/three_api_reanchor.py)는 기존 proof를 지우지 않는 격리 증거 저장소이며, 현재 production Meta runner에 연결된 것은 아니다.
 - **시나리오 검증:** [recovery tests](../tests/test_three_api_paging_recovery.py)는 정상 커서, 기준 ID 부재/주변 ID 연결, cursor invalid 후 resume_required→최신 페이지 overlap→대체 cursor, 순서 변경·추가·다중 누락, 관측 중복과 분석 dedupe, overlap 발견/미발견, 3페이지 한도 및 4페이지 거부를 검증한다. [reanchor tests](../tests/test_three_api_reanchor.py)는 원본 proof 보존과 별도 증거 라운드를 검증한다. 회귀 원인: 첫 전체 serial suite에서 상세 incident 추가 뒤 인덱스 행을 누락해 `test_incident_index_matches_unique_detailed_records`가 실패. follow-up handoff guard found the new long top line also pushed the direct ledger path beyond its 2,000-character scan; added an explicit short index line. 인덱스 행과 handoff link 보완 후 cursor/re-anchor 26/26, handoff guard 4/4, 공식 전체 분할 suite 987 run / 986 PASS / 1 SKIP / 0 FAIL로 완료.
@@ -242,6 +250,7 @@
 | P6-054 | 예약 A lane 진척·오류 | A 예약 tick에서 네 번째 계정 단위 HTTP400 발생 | 04:10: 2 page commits + 1 new no-evidence failure; A110/213 receipts, 4 failures no-retry, usage 28%; B/C usage holds 유지 |
 | P6-055 | A lane 예약 진척 | A 수집 도중 추가로 진행된 최신 안전 상태를 기록할 필요 | 04:30 n8n success, A122 / 225 receipts / 900 observations / 716 unique; usage 32%, 4 failed_no_retry, B/C holds unchanged |
 | P6-056 | A lane 예약 진척 | 최신 04:50 예약 tick·쿼터 상태 갱신 | n8n success, A134 / 237 receipts / 948 observations / 764 unique; usage 35%, 4 failed_no_retry; B/C holds unchanged |
+| P6-058 | n8n 진척 정체·B/C quota gate | 05:50 예약 실행은 success이나 신규 페이지 없음; B/C fresh usage evidence 부재 | 249 receipts / 996 observations / 812 unique; A146, B/C0; guarded B preflight refused; no reset/live request |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
