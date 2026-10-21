@@ -3,7 +3,7 @@
 ### P6-045 — 2026-10-22 · n8n tick 처리량을 정책 상한 3페이지로 조정
 - **근거:** 실제 수동 1페이지 실행과 n8n 스케줄 1페이지 실행이 성공했고, 이후 연속 스케줄에서도 추가 페이지가 영속 수집됐다. n8n이 계속 작동 중인데 tick당 1페이지만 실행하면 전체 294계정 목표가 불필요하게 늘어진다.
 - **수정:** adapter 기본값과 PowerShell launcher를 tick당 최대 3페이지로 설정. n8n Schedule Trigger는 매 5분이며, P6 coordinator는 각 response 뒤 85% 사용량/쿨다운 상태를 확인하고 제한에 도달하면 즉시 중단한다. Cursor recovery는 이 자동 tick에 포함되지 않는다.
-- **검증:** `tests/test_three_api_n8n_tick.py`에서 launcher 상한 3을 확인하고 targeted 76개 오프라인 테스트를 재실행. 3페이지를 처리한 실제 스케줄 tick을 추가 확인했다. 현재 확인 기준 오늘 9페이지 / 36개 신규 관측, 112 durable receipts / 448 observations / 422 unique posts; latest safe usage 4%. B/C는 계속 `live_pending_usage` hold, A만 이용 가능.
+- **검증:** `tests/test_three_api_n8n_tick.py`에서 launcher 상한 3을 확인하고 targeted 76개 오프라인 테스트를 재실행. 연속된 3페이지 scheduled tick을 두 차례 확인했다. 현재 확인 기준 오늘 12페이지 / 48개 신규 관측, 115 durable receipts / 460 observations / 423 unique posts; latest safe usage 6%. B/C는 계속 `live_pending_usage` hold, A만 이용 가능.
 - **경계:** 294계정 전체 수집과 B/C 사용량 확인은 여전히 미완료. 매 tick 최대 3페이지이지 한 번에 무제한 수집이 아니다. Legacy 49건과 cursor recovery는 미수정/미실행.
 
 ### P6-044 — 2026-10-22 · n8n KST scheduler와 P6 단일 tick 연결 준비
