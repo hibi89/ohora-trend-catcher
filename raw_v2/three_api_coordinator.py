@@ -337,7 +337,7 @@ class Coordinator:
 
         Mirrors lease_for_recovery eligibility without changing leases.
         Bound work with an active lease, blocked predecessor, or absent
-        cursor proof is excluded. A halted lane reports zero ready jobs.
+        cursor proof is excluded. Quota-halted lanes still report bound, no-HTTP recovery jobs.
         """
         now = now or utcnow()
         current = stamp(now)
@@ -358,8 +358,7 @@ class Coordinator:
         )
         rows = self.db.execute(
             """SELECT lane.lane,
-               CASE WHEN lane.halted=0 AND lane.ready_at<=?
-                    THEN 1 ELSE 0 END AS lane_ready,
+               1 AS lane_ready,
                COUNT(j.id) AS eligible_jobs
                FROM lanes lane
                LEFT JOIN jobs j ON j.lane=lane.lane
@@ -370,9 +369,9 @@ class Coordinator:
                      WHERE earlier.account_ordinal=j.account_ordinal
                        AND earlier.page<j.page AND earlier.state!='done'
                  )""" + proof + bound + """
-               GROUP BY lane.lane,lane.halted,lane.ready_at
+               GROUP BY lane.lane
                ORDER BY lane.lane""",
-            (current, current),
+            (current,),
         ).fetchall()
         return {
             "mode": "OFFLINE_RECOVERY_READ_ONLY_NO_DISPATCH",
