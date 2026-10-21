@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
-from three_api_evidence_audit import audit_page_evidence
+from three_api_evidence_audit import audit_page_evidence, audit_raw_receipt_links
 
 
 class EvidenceAuditTests(unittest.TestCase):
@@ -66,6 +66,62 @@ class EvidenceAuditTests(unittest.TestCase):
         result = audit_page_evidence(self.db)
         self.assertIn("head_has_cursor", result["findings"])
         self.assertIn("duplicate_receipt", result["findings"])
+
+    def test_missing_request_binding_is_fail_closed(self):
+        from unittest.mock import Mock
+        self.insert(1)
+        self.db.execute("CREATE TABLE job_request_bindings(job_id INTEGER, request_id TEXT)")
+        result = audit_raw_receipt_links(self.db, Mock(), Mock())
+        self.assertFalse(result["valid"])
+        self.assertIn("missing_request_binding", result["findings"])
+        self.assertEqual(result["verified_raw_receipts"], 0)
+
+    def test_missing_capture_is_fail_closed(self):
+        from unittest.mock import Mock
+        self.insert(1)
+        self.db.execute("CREATE TABLE job_request_bindings(job_id INTEGER, request_id TEXT)")
+        self.db.execute("INSERT INTO job_request_bindings VALUES (?,?)", (11, "req-test"))
+        capture = Mock()
+        capture.get_capture_for_request.return_value = None
+        raw = Mock()
+        result = audit_raw_receipt_links(self.db, raw, capture)
+        self.assertIn("missing_durable_capture", result["findings"])
+        raw.get_raw_receipt.assert_not_called()
+
+    def test_raw_receipt_mismatch_is_redacted(self):
+        from unittest.mock import Mock, patch
+        self.insert(1, receipt="receipt-secret")
+        self.db.execute("CREATE TABLE job_request_bindings(job_id INTEGER, request_id TEXT)")
+        self.db.execute("INSERT INTO job_request_bindings VALUES (?,?)", (11, "req-test"))
+        capture = Mock()
+        capture.get_capture_for_request.return_value = Mock(
+            capture_id="capture-test", request=Mock(request_id="req-test"))
+        raw = Mock()
+        raw.get_raw_receipt.return_value = Mock(
+            raw_receipt_id="raw-different", status="committed")
+        with patch("three_api_runtime_contract.validate_raw_receipt"):
+            result = audit_raw_receipt_links(self.db, raw, capture)
+        self.assertIn("raw_receipt_mismatch", result["findings"])
+        self.assertNotIn("receipt-secret", repr(result))
+
+    def test_matching_persisted_receipt_requires_capture_validation(self):
+        from unittest.mock import Mock, patch
+        self.insert(1, receipt="rawv2:capture-test")
+        self.db.execute("CREATE TABLE job_request_bindings(job_id INTEGER, request_id TEXT)")
+        self.db.execute("INSERT INTO job_request_bindings VALUES (?,?)", (11, "req-test"))
+        capture = Mock()
+        capture.get_capture_for_request.return_value = Mock(
+            capture_id="capture-test", request=Mock(request_id="req-test"))
+        raw = Mock()
+        raw.get_raw_receipt.return_value = Mock(
+            raw_receipt_id="rawv2:capture-test", status="already_committed")
+        with patch("three_api_runtime_contract.validate_raw_receipt") as validator:
+            result = audit_raw_receipt_links(self.db, raw, capture)
+        validator.assert_called_once()
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["external_raw_receipts_verified"])
+        self.assertEqual(result["verified_raw_receipts"], 1)
+        self.assertFalse(result["runtime_authorized"])
 
     def test_does_not_write_or_open_http(self):
         self.insert(1)
