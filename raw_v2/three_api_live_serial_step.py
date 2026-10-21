@@ -82,6 +82,12 @@ class LiveSerialStep:
                             requested_at=now, api_version=api_version,
                             caller_id=caller_ids[lane])
                     except Exception:
+                        self.coordinator.db.execute(
+                            "UPDATE jobs SET state='pending',lease_id=NULL,leased_until=NULL "
+                            "WHERE id=? AND lease_id=? AND state='leased' "
+                            "AND NOT EXISTS (SELECT 1 FROM job_request_bindings "
+                            "WHERE job_id=?)",
+                            (job["id"], job["lease_id"], job["id"]))
                         raise LiveSerialStepError("Request preflight failed") from None
                     # Hold the lane before any transport attempt. A crash or
                     # unknown HTTP outcome must not free quota automatically.
@@ -102,7 +108,8 @@ class LiveSerialStep:
                         saved = self.executor.capture.get_response_evidence(request.request_id)
                         usage = (saved.get("safe_usage", {}).get("max_usage_percent")
                                  if saved and saved.get("classification") == "safe" else None)
-                        if type(usage) is int and 0 <= usage < 85:
+                        if (type(usage) is int and 0 <= usage < 85
+                                and self.bindings.lookup(job["id"]) is not None):
                             self.coordinator.db.execute(
                                 "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
                                 "WHERE lane=? AND reason='live_pending_usage'",
