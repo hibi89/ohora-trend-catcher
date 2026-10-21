@@ -79,6 +79,24 @@ class PagingRecoveryTests(unittest.TestCase):
         self.assertTrue(result["recovery_round_requires_approval"])
         self.assertEqual(result["mutations"], [])
 
+    def test_invalid_cursor_to_newest_page_overlap_to_new_cursor_is_offline_only(self):
+        failure = cursor_failure_disposition(error_category="cursor_invalid",
+                                             request_id="failed-request")
+        self.assertEqual(failure["status"], "resume_required")
+        self.assertFalse(failure["retry_existing_request"])
+
+        recovery = plan_cursor_recovery(["old-4", "old-5", "old-6"], [{
+            "data": [{"id": "new-1"}, {"id": "new-2"},
+                     {"id": "new-3"}, {"id": "old-5"}],
+            "paging": {"cursors": {"after": "replacement-cursor"}},
+        }])
+        self.assertEqual(recovery["status"], "resume_ready")
+        self.assertEqual(recovery["anchor_media_id"], "old-5")
+        self.assertEqual(recovery["resume_cursor"], "replacement-cursor")
+        self.assertNotEqual(recovery["resume_cursor"], "invalid-cursor")
+        self.assertEqual(recovery["network_requests"], 0)
+        self.assertEqual(recovery["deleted_media_ids_confirmed"], [])
+
     def test_generic_http_400_is_not_inferred_as_cursor_failure(self):
         result = cursor_failure_disposition(error_category="http_400",
                                             request_id="failed-request")

@@ -138,6 +138,7 @@
 | P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
 | P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C capture-only recovery later completed under P6-040; n8n exports inactive |
 | P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
+| P6-042 | 무효 커서 재앵커 인수인계 | 기존 3-page planner가 이미 구현돼 있었으나 신규 요구를 top-level handoff/테스트 인덱스에 명시하지 않음 | invalid cursor → resume_required → known-ID overlap → replacement cursor 오프라인 회귀 추가; production runner/live recovery 미구현 |
 | P6-041 | Bounded live progress / n8n setup | A/B/C gates diverged after safe pilot; n8n CLI/runtime unavailable | bounded A batch 3/3 committed, P6 total 103/412; B/C holds unchanged; Docker service start denied |
 | P6-035 | 페이징·복구 | after-only cursor가 정상 종료 처리에서 소실 | cursor candidate 보존·49건 read-only 계획·3-page ID 재앵커 |
 | P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
@@ -470,3 +471,13 @@
 - **n8n runtime check:** No n8n CLI/process/local listener. Docker CLI and service are installed, but the daemon was unavailable. A user-authorized attempt to start the service failed with Windows service permission denial; no container/data was created. Existing two exports remain inactive 2-node manual-trigger/execute-command drafts without credential refs or webhook trigger. Automation integration remains incomplete.
 - **Git:** This state and the preceding P6-040 fix are documented on `codex/p6-readiness-hardening-20261019`; branch push/remote SHA verification follows this docs commit.
 - **Next:** Continue P6 collection only under the 65-minute cooldown and existing 85% stop gate, starting with read-only status/quota. Diagnose B's existing 400s offline; never replay them. n8n requires a locally available runtime or user-provided reachable endpoint and safe credential binding before activation.
+
+### P6-042 — 2026-10-22 · 커서 무효화 재앵커 요구사항 재검증 및 인수인계
+
+- **요구사항 반영:** 사용자는 무효 커서 오류에서 기존 요청을 재전송하지 않고 `resume_required`로 멈춘 뒤, 별도 승인 라운드에서 최신 페이지부터 기존 media ID 겹침을 찾고 새 커서로 이어갈 것을 추가 요청했다. 계정 배정/순서 294, 페이지당 4개, 라운드당 3페이지, 85% quota stop, cooldown, Capture/RAW 불변성은 그대로다.
+- **코드 상태:** 이 로직은 기존 `raw_v2/three_api_paging_recovery.py`에 이미 존재했다. `cursor_failure_disposition`은 정확히 분류된 `cursor_invalid`에만 `resume_required`를 반환하고 기존 요청 재전송을 거부한다. `plan_cursor_recovery`는 최대 세 개의 synthetic page만 받아 기존 ID 겹침 없이는 `coverage_gap`, 겹침과 새 `after`가 있으면 `resume_ready`를 낸다. 중복 관측 ID는 보존하고 분석 ID만 중복 제거한다. 삭제를 확정하지 않고 HTTP/DB/Capture/RAW 변경도 하지 않는다.
+- **최소 회귀 추가:** `tests/test_three_api_paging_recovery.py`에 무효 커서 → 새 첫 페이지 겹침 → 교체 커서 `resume_ready`까지 잇는 오프라인 planner 테스트를 추가했다. 기존 paging 테스트는 정상 `after` 커서 보존도 확인한다.
+- **한계:** 이는 계획 함수이며 실제 오류 본문 분류, 승인 프롬프트, Meta first-page fetch와 resume dispatch에 배선된 운영 복구 runner가 아니다. 실제 커서 무효화도 관측되지 않았다. API 호출과 운영 복구는 별도 승인 대기다.
+- **Git/P7:** 현재 사본은 fetch 후 원격 작업 브랜치 `188bc2f`까지 fast-forward했다. 오프라인 검증·HANDOFF/STATUS 동기화·기능 커밋·push 및 원격 SHA 확인을 마친 후만 branch-pushed로 보고할 것. `main` 병합은 금지.
+- **n8n:** n8n `2.44.5`를 별도 `%LOCALAPPDATA%\OHORA_N8N_RUNTIME`에 설치했으나 workflow import/연결/활성화는 수행하지 않았다. 기존 P6 상태 CLI는 운영 pilot DB를 SQLite read-only로 읽으려 했으나 OS access denied가 재현되어 안전하게 중단됐다. 기존 RAW workflow draft는 legacy collector를 호출하므로 실행하지 않는다. Automation은 미완료다.
+- **검증:** Full offline rerun selected 956 but was interrupted during the slow 294-account stress tests; prior full 956/956 on the earlier verified snapshot remains historical evidence. Current targeted reruns: paging recovery 14/14, paging 16/16, handoff guard 4/4 (34/34 PASS). 실 Meta HTTP 0회, 운영 DB/CSV/Capture 0회 변경.
