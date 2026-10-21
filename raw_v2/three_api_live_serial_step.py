@@ -108,17 +108,19 @@ class LiveSerialStep:
                         (hold, lane)).rowcount
                     if changed != 1:
                         raise LiveSerialStepError("Lane quota gate unavailable")
+                    page_committed = False
                     try:
                         self.bindings.dispatch_once(
                             job, request, self.evidence, self.executor, now=now)
                         result = self.bindings.commit_captured_page(
                             job, request, self.evidence, self.executor.capture,
                             self.executor.raw, now=now)
+                        page_committed = True
                     finally:
                         saved = self.executor.capture.get_response_evidence(request.request_id)
                         usage = (saved.get("safe_usage", {}).get("max_usage_percent")
                                  if saved and saved.get("classification") == "safe" else None)
-                        if (type(usage) is int and 0 <= usage < 85
+                        if (page_committed and type(usage) is int and 0 <= usage < 85
                                 and self.bindings.lookup(job["id"]) is not None
                                 and self.executor.capture.get_capture_for_request(request.request_id) is not None):
                             self.coordinator.db.execute(
