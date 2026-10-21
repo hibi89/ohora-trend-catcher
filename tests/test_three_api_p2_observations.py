@@ -78,6 +78,17 @@ class P2ObservationTests(unittest.TestCase):
             "SELECT checked_at FROM query_observations ORDER BY checked_at")])
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM posts").fetchone()[0], 1)
 
+    def test_unchanged_recheck_reuses_states_with_sqlite_row_factory(self):
+        # Production collector connections return sqlite3.Row. Row compares
+        # unequal to an equivalent tuple, so compare its values explicitly.
+        self.db.row_factory = sqlite3.Row
+        self.apply(1, day=0)
+        self.apply(2, day=1)
+        self.assertEqual(self.count("post_states"), 4)
+        self.assertEqual(self.count("account_states"), 1)
+        self.assertEqual(self.count("query_observations"), 2)
+        self.assertEqual(self.count("change_events"), 0)
+
     def test_a_to_b_to_a_never_erases_prior_state_or_events(self):
         self.apply(1, day=0)
         def b(_body, posts):

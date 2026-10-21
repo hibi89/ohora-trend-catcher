@@ -210,7 +210,7 @@ def _write_state(db, kind, entity, component, values, states, observed_at):
                 VALUES(?,?,?,?,?,?,?,?)""",
                 (sid, entity, component, _SCHEMA_VERSION, digest,
                  _json(values), _json(states), observed_at))
-        elif row != (_json(values), _json(states)):
+        elif tuple(row) != (_json(values), _json(states)):
             raise ValueError("Post state digest collision")
     else:
         sid = _id("astate-", entity, _SCHEMA_VERSION, digest)
@@ -223,7 +223,7 @@ def _write_state(db, kind, entity, component, values, states, observed_at):
                 VALUES(?,?,?,?,?,?,?)""",
                 (sid, entity, _SCHEMA_VERSION, digest,
                  _json(values), _json(states), observed_at))
-        elif row != (_json(values), _json(states)):
+        elif tuple(row) != (_json(values), _json(states)):
             raise ValueError("Account state digest collision")
     return sid
 
