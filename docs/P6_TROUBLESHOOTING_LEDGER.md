@@ -1,5 +1,10 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 
+### P6-050 — 2026-10-22 · 예약 A lane 수집 진행 재확인
+- **관측:** 03:10 KST read-only status at 179 receipts / 716 observations / 532 unique posts; daily A 76 done / 2 leased / 216 pending; B/C each 0 done / 294 pending. Compared with 03:08: +3 receipts / +12 observations / +3 A pages. n8n PID 20464 alive.
+- **안전 상태:** A lane unhalted. B/C remain `live_pending_usage` held despite expired ready_at; no reset. A account ordinals 32 and 61 remain HTTP400 `failed_no_retry`, with no Capture or response evidence and no automatic retry. Status/failure diagnostics made zero writes and zero Meta calls.
+- **완료도:** The scheduled A collection is progressing but all 294 accounts are not complete. Latest full offline suite remains P6-049: 987 run / 986 pass / 1 skip / 0 fail. No live cursor invalidation observed; runtime cursor recovery detection and separate re-anchor execution remain distinct.
+
 ### P6-049 — 2026-10-22 · 전체 오프라인 회귀 및 예약 수집 재확인
 - **검증:** 저장소 루트 import를 보장하는 `$py -m tests.run_offline` 실행에서 987 tests, 986 PASS, 1 SKIP, 0 FAIL, exit 0. Graph error redaction/transport/manual-pilot/n8n cursor error regressions 포함 targeted 155/155 PASS; 수정 파일 py_compile PASS. 이전 직접 파일 경로 실행은 `src`가 sys.path에 없어 `test_collection_schedule` import error를 냈으며, `python -m unittest tests.test_collection_schedule` 15/15 및 올바른 모듈 방식 full suite로 해소했다.
 - **예약 진행:** 03:08 KST read-only: P6 total 176 receipts / 704 observations / 520 unique posts; daily A 73 done / 2 leased / 219 pending; B/C each 0 done / 294 pending. n8n PID 20464 remains alive. A lane `halted=0`; B/C `halted=1`, reason `live_pending_usage` despite expired ready_at; no manual reset because fresh usage evidence is not available. The read-only status check did not call Meta or write DB.
@@ -175,6 +180,7 @@
 | P6-046 | 커서 무효화 재앵커 | 복구 회귀가 새 커서로 재개할 연결 흐름을 직접 고정하지 않음 | 정상 커서, `resume_required`, 최신 ID 겹침, replacement cursor 및 3-page 제한 회귀 추가; recovery 16 tests |
 | P6-048 | 커서 오류 런타임 분류 | HTTP 비성공 응답 메시지 제거로 invalid-cursor와 일반 400이 같은 진단으로 남음 | 원문 미보존 명시 문구 분류, durable `cursor_invalid`, read-only `resume_required`; 155 offline PASS; live recovery 미구현 |
 | P6-049 | 전체 오프라인 회귀 및 현재 진행 | 직접 파일 실행에서 저장소 루트 `src`를 import하지 못해 하나의 test module 오류 | `python -m tests.run_offline`: 987 run / 986 PASS / 1 SKIP / 0 FAIL, exit 0; A73/176 receipts; B/C usage hold 유지 |
+| P6-050 | 예약 A lane 진행 | 전체 테스트 완료 후 실수집이 실제 계속되는지 새 상태 확인 필요 | 03:10 KST read-only A73→76 / receipts176→179 / observations704→716; B/C hold 및 2 failed_no_retry 유지 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
 | P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
