@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from three_api_credentials import CredentialReference
 from three_api_graph_http import GraphHTTPClient
 from three_api_live_lane_router import ThreeLaneMetaTransport
-from three_api_manual_pilot import PilotConfigurationError, run_manual_pilot, read_pilot_status, main
+from three_api_manual_pilot import PilotConfigurationError, run_manual_pilot, read_pilot_status, read_pilot_failures, main
 from three_api_transport import MetaTransport
 from test_three_api_serial_bootstrap import MockResponse
 
@@ -179,6 +179,11 @@ class ManualPilotTests(unittest.TestCase):
         self.addCleanup(db.close)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 2)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 2)
+
+    def test_failure_diagnostic_missing_db_is_read_only(self):
+        with self.assertRaises(PilotConfigurationError):
+            read_pilot_failures(self.workspace, day="2026-10-21")
+        self.assertFalse(self.workspace.exists())
 
     def test_status_missing_stores_never_creates_anything(self):
         with self.assertRaisesRegex(PilotConfigurationError, "directory"):
