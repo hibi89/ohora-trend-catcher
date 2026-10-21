@@ -51,6 +51,8 @@ on:
       - 'raw_v2/three_api_evidence_audit.py'
       - 'raw_v2/three_api_verified_page_evidence.py'
       - 'raw_v2/three_api_serial_bootstrap.py'
+      - 'raw_v2/three_api_manual_pilot.py'
+      - 'tests/test_three_api_manual_pilot.py'
       - 'tests/test_three_api_serial_bootstrap.py'
       - 'raw_v2/three_api_live_serial_step.py'
       - 'tests/test_three_api_verified_page_evidence.py'
@@ -111,6 +113,8 @@ on:
       - 'raw_v2/three_api_evidence_audit.py'
       - 'raw_v2/three_api_verified_page_evidence.py'
       - 'raw_v2/three_api_serial_bootstrap.py'
+      - 'raw_v2/three_api_manual_pilot.py'
+      - 'tests/test_three_api_manual_pilot.py'
       - 'tests/test_three_api_serial_bootstrap.py'
       - 'raw_v2/three_api_live_serial_step.py'
       - 'tests/test_three_api_verified_page_evidence.py'
@@ -153,6 +157,8 @@ jobs:
             raw_v2/three_api_evidence_audit.py \
             raw_v2/three_api_verified_page_evidence.py \
             raw_v2/three_api_serial_bootstrap.py \
+            raw_v2/three_api_manual_pilot.py \
+            tests/test_three_api_manual_pilot.py \
             tests/test_three_api_serial_bootstrap.py \
             raw_v2/three_api_live_serial_step.py \
             tests/test_three_api_verified_page_evidence.py \
