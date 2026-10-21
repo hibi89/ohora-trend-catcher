@@ -1,4 +1,14 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-069 cursor recovery verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · [planner](raw_v2/three_api_paging_recovery.py) · Offline only; no live re-anchor.
+
+### P6-069 — 2026-10-22 · 사용자 추가 커서 무효화 복구 요구 오프라인 인수 검증
+- **요구/결정:** 커서 오류에서 무한 재시도·임의 커서를 금지하고 `resume_required`로 중단한다. 별도 승인 라운드에서 최신 페이지부터 최대 3페이지 재탐색, 기존 게시물 ID overlap이 있을 때만 응답 커서로 이어간다. overlap이 없으면 `coverage_gap`; 삭제를 확정하지 않는다. 기존 A/B/C 순서, 4개/page, 3-page round, 85%·cooldown·no-retry, Capture/RAW 불변성은 유지.
+- **기존 구현 확인:** [runtime failure handling](../raw_v2/three_api_manual_pilot.py)는 명시적 cursor-invalid 분류에 `resume_required`를 표시하고 기존 요청을 재전송하지 않는다. [planner](../raw_v2/three_api_paging_recovery.py)는 새 페이지 ID를 prior IDs와 비교하고 관측 중복은 보존하며 분석 목록만 deduplicate한다. 이 planner는 production runner와 연결되지 않았으며, 실제 복구 라운드는 별도 승인 필요.
+- **오프라인 시나리오:** 정상 cursor 후보, 기준 게시물 부재 후 주변 ID 연결, cursor-invalid→resume_required→최신 페이지 overlap→새 cursor, 다중 추가·누락 및 재정렬, duplicate observation, 연결 성공/실패, 3페이지 경계 및 4페이지 거부를 합성 데이터로 검증. recovery 대상 파일이나 운영 DB는 사용하지 않음.
+- **검증:** `python -m unittest tests.test_three_api_paging_recovery tests.test_three_api_reanchor tests.test_three_api_manual_pilot tests.test_three_api_transport` — 60/60 PASS. `python -m unittest tests.test_p6_troubleshooting_handoff_guard` — 4/4 PASS. `$py -m tests.run_offline` — 988 tests, 987 PASS / 1 SKIP / 0 FAIL, exit 0, 1361.508s. No live Meta request; no production DB/RAW/Capture mutation.
+- **Git/운영:** fetched `origin`; branch HEAD and origin both `362aa8a3bee8bbf2994311c91dff4d43c947e9b2` before this documentation-only update; tree was clean. No credentials staged. These docs record verification; the existing recovery code remains offline-only. Do not claim API collection or live recovery success.
+
+
 
 ### P6-068 — 2026-10-22 · C lane 10회 연속 예약 수집
 - **실제 수집:** 07:20, 07:25, 07:30 ticks committed 3 C pages each, 0 account failures. C stayed unhalted; latest and maximum safe usage across 30 C responses=20%.
@@ -329,6 +339,7 @@
 | P6-066 | C lane 4회 연속 예약 수집 | 06:45–07:00 ticks committed 12 C pages; usage max 5% | total 261 receipts / 1044 observations / 849 unique; C=12 done, B held |
 | P6-067 | C lane 7회 연속 예약 수집 | 06:45–07:15 ticks committed 21 C pages; usage max 13% | total 270 receipts / 1080 observations / 877 unique; C=21 done, B held |
 | P6-068 | C lane 10회 연속 예약 수집 | 06:45–07:30 ticks committed 30 C pages; usage max 20% | total 279 receipts / 1116 observations / 910 unique; C=30 done, B held |
+| P6-069 | 커서 무효화 재연결 인수검증 | 신규 요구가 기존 planner/runtime 구현과 오프라인 사례로 충족되는지 확인 | 60 targeted + 4 handoff PASS; full suite 987 PASS / 1 SKIP / 0 FAIL; live recovery 미실행 |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
