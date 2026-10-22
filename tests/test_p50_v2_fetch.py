@@ -51,8 +51,17 @@ class FetchTests(unittest.TestCase):
         self.assertIn("media.after(oldcursor).limit(5)",fields)
         self.assertIn("view_count",fields)
 
-    def test_terminal_page_exhausts_despite_after_cursor(self):
+    def test_cursor_only_page_remains_continuable(self):
         data,_=self.check(payload(["last"],"terminalcursor",False))
+        self.assertEqual(data[1],"terminalcursor")
+
+    def test_empty_terminal_page_exhausts_even_with_after_cursor(self):
+        data,_=self.check(payload([],"terminalcursor",False),
+                          cursor="previouscursor")
+        self.assertIsNone(data[1])
+
+    def test_page_without_cursor_is_terminal(self):
+        data,_=self.check(payload(["last"]))
         self.assertIsNone(data[1])
 
     def test_same_cursor_rejected(self):
