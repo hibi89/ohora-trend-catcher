@@ -1,5 +1,13 @@
 Operating instructions: [AGENTS.md](AGENTS.md) · [docs/P6_TROUBLESHOOTING_LEDGER.md](docs/P6_TROUBLESHOOTING_LEDGER.md).
 
+## P50 LIVE latest pilot / 2026-10-23 — partial success, B quota hold
+
+Owner's Windows evidence: focused quota recovery tests **5/5 PASS**; approved caller-scoped probes A/B/C returned HTTP 200, 1% usage and `released=true`; new-day P50 latest committed **53/150 pages (1+52)** with **0 account failures**; `no_ready_work` then returned. Lifetime stats from local read-only bridge: latest jobs 150 done on 2026-10-22 + 53 done on 2026-10-23; 438 RAW receipts, 1,752 post observations, 1,555 unique posts, history 235 verified pages. **Only B is quota held**, with `ready_at=2026-10-22T16:20:37.371659+00:00` (2026-10-23 01:20:37 KST); A/C unhalted, but no immediately dispatchable page was found. The precise block reason per lane and page-1 coverage are pending local diagnostic, not assumed. **No full-day or n8n completion claim.**
+
+NEW read-only `python raw_v2/three_api_p50_queue_diagnostic.py` (code commit `aa36809`, page coverage `9988901`; tests `1b7fada`, `6fcb1de`) reports earliest unfinished daily jobs, per-lane eligible/blocked/held counts, page-1 coverage 0..50, without Meta calls or SQLite writes. Offline new queue tests and Windows execution pending; use `python -m unittest discover -s tests -p test_three_api_p50_queue_diagnostic.py -v` to verify. B may be explicitly re-probed and released after cooldown using the existing approved `three_api_p50_quota_recovery.py --lane B --live --confirm-owner-approval --apply --credentials-dir <local path>`; do not release by time alone. Re-run the normal `p50.ps1 latest -Live -MaxPages 150` only after a safe available lane. See [P6-097](docs/P6_TROUBLESHOOTING_LEDGER.md).
+
+Operating instructions: [AGENTS.md](AGENTS.md) · [docs/P6_TROUBLESHOOTING_LEDGER.md](docs/P6_TROUBLESHOOTING_LEDGER.md).
+
 ## P50 quota recovery test correction / 2026-10-23
 
 Operator Windows Python 3.11 focused tests initially reported 5 ERROR, all due to SQLite fixture handles preventing TemporaryDirectory cleanup (WinError 32); this was a **test cleanup issue, not 5 product logic failures**. Fixed all 4 unclosed test connections in commit [4cf97ce](https://github.com/hibi89/ohora-trend-catcher/commit/4cf97ce6f3e8816ed50a0d976696a7f2ffdcb70f). Windows rerun still pending. User live read-only A caller quota probe: HTTP 200, usage 1.0%, quota_verified=true, released=false, applied=false. B/C fresh scoped probes and actual 50-account collection remain pending; no live data or quota gates modified. See [P6-096](docs/P6_TROUBLESHOOTING_LEDGER.md).
