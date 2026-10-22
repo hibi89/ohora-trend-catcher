@@ -108,6 +108,20 @@ def main(argv=None):
                         latest_result = run_p50(
                             args.source, args.workspace, live=True, approved=True,
                             environment=environment, max_pages=150)
+                # A quota-held or incomplete latest round is NOT permission
+                # to start history in the same invocation. Recheck durable
+                # latest completion, rather than trusting a return status.
+                if latest_result is not None and _needs_latest(args.workspace):
+                    result = {
+                        "status": "latest_incomplete",
+                        "http_requests_history": 0,
+                        "latest_preparation": {
+                            "status": latest_result["status"],
+                            "committed_pages": latest_result["committed_pages"],
+                        },
+                    }
+                    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+                    return 0
                 result = run_history(
                     args.source, args.workspace, environment=environment,
                     live=True, approved=True, max_pages=args.max_pages or 5000)
