@@ -34,7 +34,7 @@ def history_checkpoint(*, account_key, current_cursor, next_cursor,
         raise ValueError("Explicit receipt verification required")
     if type(terminal) is not bool or type(uncertain_http) is not bool:
         raise ValueError("Explicit terminal and HTTP state required")
-    if terminal and next_cursor is not None:
+    if terminal and next_cursor is not None and not uncertain_http and raw_receipt_verified and capture_verified:
         raise ValueError("Terminal page cannot have continuation cursor")
     if uncertain_http:
         return {"state": "blocked_unknown_http", "next_cursor": current_cursor,
