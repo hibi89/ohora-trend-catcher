@@ -29,10 +29,12 @@ FIELDS = ("id,caption,media_type,media_product_type,media_url,permalink,"
 CURSOR = re.compile(r"^[A-Za-z0-9_=-]{1,512}$")
 
 
-def fetch(lane, username, cursor, caller, token, version, sender):
+def fetch(lane, username, cursor, caller, token, version, sender, limit=8):
+    if not 1 <= limit <= 8:
+        raise ValueError('Invalid limit')
     if cursor is not None and not CURSOR.fullmatch(cursor):
         raise ValueError("Invalid cursor")
-    media = "media" + (f".after({cursor})" if cursor else "") + f".limit(8){{{FIELDS}}}"
+    media = "media" + (f".after({cursor})" if cursor else "") + f".limit({limit}){{{FIELDS}}}"
     fields = f"business_discovery.username({username}){{id,username,followers_count,media_count,{media}}}"
     url = f"https://graph.facebook.com/{version}/{caller}?" + urlencode({"fields":fields})
     req = Request(url, headers={"Authorization":"Bearer "+token,"Accept":"application/json"})
@@ -54,7 +56,7 @@ def fetch(lane, username, cursor, caller, token, version, sender):
     if not isinstance(media,dict) or not isinstance(media.get("data"),list):
         raise RuntimeError("Missing media data; reserved job retained")
     posts = media["data"]
-    if len(posts)>8 or any(not isinstance(p,dict) or not isinstance(p.get("id"),str) for p in posts):
+    if len(posts)>limit or any(not isinstance(p,dict) or not isinstance(p.get("id"),str) for p in posts):
         raise RuntimeError("Invalid posts; reserved job retained")
     paging = media.get("paging") or {}
     next_cursor = (paging.get("cursors") or {}).get("after")
@@ -144,7 +146,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
             try:
                 posts,cursor,oldest,usage,body,header_presence=fetch(
                     lane,accounts[ordinal-1]["username"],job["cursor"],
-                    caller,token,version,sender)
+                    caller,token,version,sender,limit=job['limit'])
                 # Missing usage means halt this lane after the committed page.
                 receipt=f"p50v2-{job['cycle']}-{lane}-{ordinal}"
                 raw.execute("BEGIN IMMEDIATE")
