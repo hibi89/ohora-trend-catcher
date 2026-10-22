@@ -88,8 +88,11 @@ def initialize_isolated_workspace(source, workspace):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
-    parser.add_argument("--initialize-workspace", type=Path, default=None,\n                        help="Create an isolated p50 RAW and control store; no Meta HTTP")\n    args = parser.parse_args(argv)
-    result = (initialize_isolated_workspace(args.source, args.initialize_workspace)\n              if args.initialize_workspace is not None else preview(args.source))
+    parser.add_argument("--initialize-workspace", type=Path, default=None,
+                        help="Create an isolated p50 RAW and control store; no Meta HTTP")
+    args = parser.parse_args(argv)
+    result = (initialize_isolated_workspace(args.source, args.initialize_workspace)
+              if args.initialize_workspace is not None else preview(args.source))
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
 
