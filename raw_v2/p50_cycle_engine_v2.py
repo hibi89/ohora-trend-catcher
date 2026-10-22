@@ -125,48 +125,39 @@ class CyclePlanner:
         return recovered
 
     def next_job(self):
-        """One page per account per sweep; retain current lane until quota halt.
-
-        Existing job receipts are immutable. Choose the unfinished account
-        with the fewest completed pages, breaking ties by account ordinal.
-        Continue the last successful lane until it is unavailable; then
-        switch to the next available lane in A/B/C order.
-        """
+        """Fixed A(1..50), B(1..50), C(1..50) per round; 20 rounds."""
         self.db.execute("BEGIN IMMEDIATE")
         try:
             if self.db.execute("SELECT 1 FROM jobs WHERE state='reserved' LIMIT 1").fetchone():
                 self.db.execute("COMMIT")
                 return None
-            lanes = {r["lane"]:r["halted"] for r in self.db.execute(
-                "SELECT lane,halted FROM lanes")}
-            last = self.db.execute(
-                "SELECT lane FROM jobs WHERE state='done' ORDER BY rowid DESC LIMIT 1"
-            ).fetchone()
-            current = last["lane"] if last else "A"
-            start = LANES.index(current)
-            lane = next((LANES[(start+i)%len(LANES)] for i in range(len(LANES))
-                         if not lanes[LANES[(start+i)%len(LANES)]]), None)
-            if lane is None:
-                self.db.execute("COMMIT")
-                return None
-            account = self.db.execute("""
-                SELECT ordinal,cursor FROM accounts
-                WHERE finished=0 ORDER BY ordinal LIMIT 1
-            """).fetchone()
-            if account is None:
-                self.db.execute("COMMIT")
-                return None
-            cycle=self.db.execute("""
-                SELECT COALESCE(MAX(cycle),0)+1 FROM jobs
-                WHERE lane=? AND ordinal=?
-            """,(lane,account["ordinal"])).fetchone()[0]
-            self.db.execute("""
-                INSERT INTO jobs(cycle,lane,ordinal,state,cursor_before)
-                VALUES (?,?,?,'reserved',?)
-            """,(cycle,lane,account["ordinal"],account["cursor"]))
+            for round_no in range(1,21):
+                for lane in LANES:
+                    for ordinal in range(1,ACCOUNTS+1):
+                        account=self.db.execute(
+                            "SELECT cursor,finished FROM accounts WHERE ordinal=?",(ordinal,)
+                        ).fetchone()
+                        if account["finished"]:
+                            continue
+                        existing=self.db.execute(
+                            "SELECT state FROM jobs WHERE cycle=? AND lane=? AND ordinal=?",
+                            (round_no,lane,ordinal)).fetchone()
+                        if existing:
+                            continue
+                        quota=self.db.execute(
+                            "SELECT halted FROM lanes WHERE lane=?",(lane,)).fetchone()
+                        if quota["halted"]:
+                            self.db.execute("COMMIT")
+                            return None
+                        self.db.execute("""INSERT INTO jobs
+                            (cycle,lane,ordinal,state,cursor_before)
+                            VALUES (?,?,?,'reserved',?)""",
+                            (round_no,lane,ordinal,account["cursor"]))
+                        self.db.execute("COMMIT")
+                        return {"cycle":round_no,"lane":lane,"ordinal":ordinal,
+                                "cursor":account["cursor"],"limit":PAGE_LIMIT}
             self.db.execute("COMMIT")
-            return {"cycle":cycle,"lane":lane,"ordinal":account["ordinal"],
-                    "cursor":account["cursor"],"limit":PAGE_LIMIT}
+            return None
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
