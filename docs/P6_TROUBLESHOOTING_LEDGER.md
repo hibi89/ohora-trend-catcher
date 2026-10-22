@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
-> Index: [P6-076 lane diagnosis](docs/P6_TROUBLESHOOTING_LEDGER.md) · Actual Desktop credentials structurally valid; A target-account errors identified; B/C remain usage-gated; n8n process absent.
+> Index: [P6-077 safe numeric failure diagnostics](docs/P6_TROUBLESHOOTING_LEDGER.md) · diagnostic exposes bounded code/subcode/usage integers only; tests 65/65 PASS.
+
+### P6-077 — 2026-10-22 · Read-only failure diagnostics expose safe numeric Meta codes
+- **결정/이유:** A/B error root-cause analysis required persisted Meta codes, but `--failures` hid all detail. Extend only the read-only summary to expose bounded integer `meta_error_code`, `meta_error_subcode`, and `safe_usage_percent`; do not expose `safe_message`, response bodies, tokens, IDs, or arbitrary text. This changes diagnostics only, not API lanes, scheduler, storage contract, retry behavior, or frozen collection policy.
+- **변경:** `raw_v2/three_api_manual_pilot.py` parses only regex-matched bounded numeric fields from the existing sanitized `safe_message`; `tests/test_three_api_manual_pilot.py` verifies code/subcode/usage extraction and rejection of out-of-range data/secret-like trailing text.
+- **시험 중 회귀/수정:** First focused run expected code/subcode on the cursor-invalid fixture and failed with `KeyError: meta_error_code`; the fixture's cursor-specific sanitized message intentionally omits numeric fields. Root cause was an incorrect test expectation, not diagnostic engine behavior. The test now validates numeric allowlisting with an account-error-shaped sanitized string while retaining the cursor test's redaction assertions. Exact final targeted command groups (manual pilot, serial live-step gates, coordinator, handoff guard): 65/65 PASS; `git diff --check` PASS.
+- **안전/롤백:** Meta calls=0; operational P6/RAW/Capture DB writes=0; failed requests resent=0; scheduler changes=0. Revert only this diagnostic parser/test and this ledger/HANDOFF/STATUS record to roll back; no runtime data impact. Implementation commit: `c8956d7b0c0be6678395d926ef59865aeb476f04`.
 
 ### P6-076 — 2026-10-22 · A/B/C usage/auth blocker diagnosis (OPEN)
 - **범위/증거:** Read-only P6 status at 10:45 KST: 321 durable receipts / 1284 observations / 1065 unique; A=146 done/4 leased/144 pending, B=0/0/294, C=72/0/222. No current-day state was modified.
@@ -332,6 +338,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-077 | 진단/민감정보 | read-only 실패 진단에 숫자 오류 코드·사용률만 노출 | 문자열 원문/재시도 불가, 65/65 PASS |
 | P6-076 | lane/auth 진단 | A code 110/2207013; B usage proof missing; C usage 85%; local credential files structurally valid | A 4건 no-retry; B/C hold 유지; 운영 tick은 자동 검토 차단 |
 | P6-001 | 개발운영 | 병렬 작업·웹 채팅 사용량 소진·원복 어려움 | 격리 브랜치/워크트리·복원지점·인수인계 필요 |
 | P6-002 | 인수인계 | 기획/계약은 Git에 있으나 STATUS/HANDOFF 미동기화 | 두 문서 동시 갱신 필수 |
