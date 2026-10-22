@@ -15,6 +15,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
     """Recover bounded verified pages, including multiple pages per account."""
     if type(max_steps) is not int or not 1 <= max_steps <= 50:
         raise ValueError("Recovery step budget must be 1..50")
+    if not isinstance(account_keys, (list, tuple)):
+        raise ValueError("Ordered 50-account roster required")
     account_keys = tuple(account_keys)
     if lane not in ("A", "B", "C"):
         raise ValueError("Unknown P50 API lane")
