@@ -81,6 +81,29 @@ class SheetsExportTests(unittest.TestCase):
         self.assertEqual(result["rows"], [])
         self.assertEqual(result["next_after_id"], 2)
 
+
+    def test_unverified_gap_then_verified_row_preserves_incremental_order(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "INSERT INTO post_observations VALUES (3,'p1',"
+                "'2026-10-22T03:00:00Z','batch-3','unverified',60,5,1,1)"
+            )
+            db.execute(
+                "INSERT INTO post_observations VALUES (4,'p1',"
+                "'2026-10-22T04:00:00Z','batch-4','req-4',61,6,1,1)"
+            )
+            db.execute(
+                "INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
+                ("cap-4", "P50_US_001", json.dumps({
+                    "request_id": "req-4", "posts": [{"id": "p1"}]
+                }))
+            )
+        result = export_observations(self.path, after_id=2, limit=1)
+        self.assertEqual([r["observation_id"] for r in result["rows"]], [4])
+        self.assertEqual(result["next_after_id"], 4)
+        self.assertEqual(export_observations(
+            self.path, after_id=4, limit=1)["rows"], [])
+
     def test_explicit_zero_is_not_missing(self):
         with sqlite3.connect(self.path) as db:
             payload = json.dumps({
