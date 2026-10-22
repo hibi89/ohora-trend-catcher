@@ -1,0 +1,24 @@
+name: P50 offline validation
+on:
+  push:
+    branches:
+      - feature/p6-50-account-pilot-20261022
+  pull_request:
+    paths:
+      - 'raw_v2/**'
+      - 'tests/test_three_api_p50_*.py'
+      - '.github/workflows/p50-offline.yml'
+jobs:
+  p50-offline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax check P50 modules
+        run: python -m compileall -q raw_v2/three_api_p50_*.py raw_v2/three_api_live_serial_step.py raw_v2/three_api_serial_bootstrap.py
+      - name: P50 offline unit and integration tests
+        run: python -m unittest discover -s tests -p 'test_three_api_p50_*.py' -v
