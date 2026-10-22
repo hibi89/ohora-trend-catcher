@@ -318,7 +318,7 @@ class RequestEnvelope:
             if (self.history_offline_only == self.history_live_approved
                     or self.cursor is None or self.request_spec.limit != 4
                     or not 1 <= self.account_ordinal <= 50):
-                raise ValueError("History requires exactly one explicit P50 history capability")
+                raise ValueError("History requires offline-only proof or an explicit P50 live capability")
         elif self.history_offline_only or self.history_live_approved:
             raise ValueError("History flag is not a front/catchup grant")
         if self.lane not in ("A", "B", "C") or self.request_spec.lane != self.lane:
