@@ -15,7 +15,10 @@ def export_observations(db_path, *, after_id=0, limit=500):
         raise ValueError("after_id must be a nonnegative integer")
     if type(limit) is not int or not 1 <= limit <= 5000:
         raise ValueError("limit must be 1..5000")
-    uri = Path(db_path).expanduser().resolve().as_uri() + "?mode=ro"
+    path = Path(db_path).expanduser()
+    if path.is_symlink():
+        raise ValueError("Symlink RAW database forbidden")
+    uri = path.resolve().as_uri() + "?mode=ro"
     db = sqlite3.connect(uri, uri=True)
     db.row_factory = sqlite3.Row
     try:
