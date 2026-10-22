@@ -179,6 +179,49 @@ class HistoryFixtureDispatcherTests(unittest.TestCase):
                 self.assertEqual(store.read(self.keys[1])["pages_verified"], 0)
                 ingress.assert_not_called()
 
+    def test_three_lanes_dispatch_distinct_accounts_in_serial_order(self):
+        with P50HistoryStore(self.path) as store:
+            store.anchor_verified_latest_tail(
+                account_key=self.keys[2], next_cursor="tail-2",
+                capture_id="latest-cap-2", raw_receipt_id="latest-raw-2",
+                raw_receipt_verified=True, capture_verified=True)
+        lanes = {key: "A" for key in self.keys}
+        lanes[self.keys[1]] = "B"
+        lanes[self.keys[2]] = "C"
+        pages = {}
+        for i in range(3):
+            page = self.fixture(i)
+            page["request"].lane = lanes[self.keys[i]]
+            page["request"].request_spec = build_request_spec(
+                lanes[self.keys[i]], self.names[self.keys[i]],
+                after=f"tail-{i}", limit=4)
+            pages[(self.keys[i], f"tail-{i}")] = page
+        def persist_three(store, journal, writer, batch, *, max_pages):
+            req = batch[0]["request"]
+            i = self.keys.index(req.account_key)
+            self.receipts.append((req.account_key, req.lane))
+            decision = store.commit_verified_page(
+                account_key=req.account_key, expected_cursor=req.cursor,
+                next_cursor=batch[0]["response"].next_cursor,
+                oldest_post_at=batch[0]["oldest_post_at"], terminal=False,
+                capture_id=f"history-cap-{i}", raw_receipt_id=f"history-raw-{i}",
+                raw_receipt_verified=True, capture_verified=True)
+            return {"pages_committed": 1, "completed": [{
+                "account_key": req.account_key, "state": decision["state"]}]}
+        with patch("three_api_p50_history_fixture_runner.ingest_offline_history_batch",
+                   side_effect=persist_three):
+            with P50HistoryStore(self.path) as store:
+                result = run_offline_history_fixture_dispatch(
+                    store, None, None, self.keys, self.names,
+                    latest_complete_keys=set(self.keys),
+                    fixture_pages=pages, lanes_by_account=lanes)
+                self.assertEqual(result["pages_committed"], 3)
+                self.assertEqual(self.receipts, [
+                    (self.keys[0], "A"), (self.keys[1], "B"),
+                    (self.keys[2], "C")])
+                for key in self.keys[:3]:
+                    self.assertEqual(store.read(key)["pages_verified"], 1)
+
     def test_invalid_page_budget_rejected_without_store(self):
         for limit in (0, 51, True, "10"):
             with self.subTest(limit=limit), self.assertRaisesRegex(
