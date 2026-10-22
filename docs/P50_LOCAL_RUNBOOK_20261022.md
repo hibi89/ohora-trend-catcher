@@ -65,3 +65,19 @@ Empty list/string RAW `post_field_status` containers (including nested per-post 
 ## 9. n8n export gap backoff (2026-10-22)
 
 The read-only export sets `has_more=true` for a blocking RAW receipt/post/account integrity gap, even if `rows=[]` and `next_after_id` does not advance. This preserves downstream awareness of unfinished work but **does not** authorize tight-loop retries. The n8n owner should back off, investigate RAW integrity, and replay the same checkpoint after reconciliation. A clean end returns `rows=[]`, `has_more=false` and the unchanged checkpoint. Added regression fixtures are **not yet verified by an executed Python test suite**.
+
+## 10. Emergency manual operation gate — 2026-10-22
+
+**CURRENT STATE: NOT READY FOR 365-DAY HISTORY.** Existing `three_api_p50_manual_pilot.py` provides only a bounded daily 150-job latest/catchup serial runner; the history job queue, account-specific durable history cursor, and next-day history resume are not connected. Do not run an overnight backfill command or claim this feature is available. The batch API is deliberately untouched.
+
+Use these commands from the repo root on Windows PowerShell **for offline validation** (commands documented, Windows execution not yet verified):
+
+```powershell
+python -m unittest discover -s tests -p "test_three_api_p50_*.py" -v
+python -m unittest discover -s tests -p "test_three_api_sheets_export.py" -v
+python raw_v2/three_api_p50_preflight.py --source "$env:USERPROFILE\Downloads\ohora_p50_roster_20261022.csv"
+python raw_v2/three_api_p50_manual_pilot.py --source "$env:USERPROFILE\Downloads\ohora_p50_roster_20261022.csv" --workspace "$env:LOCALAPPDATA\OHORA_P50\p50"
+python raw_v2/three_api_p50_status.py --workspace "$env:LOCALAPPDATA\OHORA_P50\p50"
+```
+
+The status command requires an initialized workspace; it is read-only. The latest live command from section 2 remains **approval-gated**, and is **not** proof of successful 50-account latest collection. Ctrl+C now returns exit code 130, but cross-process crash/restart and 365-day history resume have **not** been end-to-end tested. Check the P6-081 troubleshooting entry before approving a live call. Do not copy credentials into shell history, issue logs or Git.
