@@ -1,5 +1,13 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-084 Google Sheets output boundary](docs/P6_TROUBLESHOOTING_LEDGER.md) · User decision: add Google Sheets as a derived n8n output after SQLite/RAW; keep P6 collection and source-of-truth unchanged. Spec is documentation-only; implementation deferred until n8n core is complete.
 > Index: [P6-083 credential-backed n8n alert route (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Owner selected credential-based auth and deferred channel; endpoint/credential and operational activation pending. Do not enable global `$env` access; `$vars` are plan-restricted. No product/runtime change yet.
+
+### P6-084 — 2026-10-22 · Google Sheets as a derived n8n output
+- **결정/이유:** 사용자는 팀 공유·분석을 위해 Google Sheets를 최종 소비처에 추가하되 P6/RAW/SQLite의 전체 원본·이력·커서 기준 역할을 유지하도록 요청했다. 실제 Sheets 연동은 기존 n8n 핵심 자동화 완성 뒤 진행한다. 동결 P6 설계와 타 작업자의 구현 파일은 변경하지 않는다.
+- **계약:** 별도 명세 `docs/N8N_GOOGLE_SHEETS_INTEGRATION_SPEC.md`에 필수 출력 필드, durable receipt/observation 기반 증분 조회, `post_id` idempotency, 관측 이력 보존, 시트 ack 이후 checkpoint, Sheets 장애 격리, mock 검증 및 credential 경계를 기록했다. P6 수집과 시트 동기화는 독립 상태다.
+- **대안/결과:** P6/RAW를 Sheets로 이동하거나 Sheets 오류를 수집 실패로 취급하는 방안은 원본 보존·장애 격리 요구에 맞지 않아 제외했다. 구현 전에 Google 계정 인증과 대상 시트 식별이 필요하며 그 시점에 사용자에게 요청한다.
+- **검증/상태:** 문서 검토만 수행; n8n node, export API/view, checkpoint store, Google credential, spreadsheet ID, mock tests 및 실연동은 미구현/미검증. 신규 상세 기록을 추가한 첫 handoff guard는 P6-084 table index 누락으로 3/4 PASS, 1 FAIL; index row를 추가했고 최종 재실행 결과는 아래에 기록한다. Meta calls=0; operational DB/RAW/Capture writes=0. `git fetch origin`은 `.git/FETCH_HEAD` 권한 거부로 실패했으며 local과 remote-tracking branch는 모두 `6e206297edcdb72496875d7223e6257ff3399231`로 일치했다. Change commit SHA pending.
+- **예방/롤백:** export 구현은 별도 작업으로만 추가하고 Sheets 오류가 P6 ingest에 전달되지 않는지 검증한다. 이 문서 결정은 신규 명세와 HANDOFF/STATUS/ledger top entries를 되돌리면 원상 복구되며 런타임 영향은 없다.
 > Index: [P6-082 n8n alert webhook env-access blocker (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · alert URL expressions rely on `$env`; runtime env-access configuration and actual delivery remain unverified; no global security relaxation made.
 > Index: [P6-081 n8n native import verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · fixed missing workflow ID; actual installed runtime 2.44.5 scratch round trip: 2 workflows, both inactive; 23/23 focused PASS.
 > Index: [P6-080 n8n receipt readback](docs/P6_TROUBLESHOOTING_LEDGER.md) · approved tick compares the read-only before/after durable receipt counts to committed pages; mock tests 23/23 PASS; runtime store access pending.
@@ -387,6 +395,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-084 | Google Sheets 출력 경계 | durable receipt 기반 증분 export, post_id idempotency, ack 후 checkpoint, 장애 격리 | 명세만 작성; n8n core 완료 후 구현 |
 | P6-083 | n8n 자격증명 기반 알림 경로 | 사용자가 credential 방식 선택, 공급자/채널은 추후 결정 | OPEN; channel credential, endpoint, mock delivery 및 운영 활성화 pending |
 | P6-082 | n8n 경고 웹훅 환경 접근 | 2.44.5 `$env` 허용 설정/실제 발송 확인이 미완료; 프로필에 1 active schedule 존재 | OPEN; global env 접근 유지 여부 및 credential 통합 확인 |
 | P6-081 | n8n export/import 호환성 | missing daily workflow ID 수정; n8n 2.40.7 isolated round-trip, both inactive | 23/23 focused PASS; operational activation pending |
