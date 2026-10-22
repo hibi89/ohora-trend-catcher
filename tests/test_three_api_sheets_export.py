@@ -70,6 +70,15 @@ class SheetsExportTests(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             export_observations(Path(self.tmp.name) / "missing.sqlite")
 
+    def test_symlinked_raw_database_is_rejected(self):
+        link = Path(self.tmp.name) / "linked.sqlite"
+        try:
+            link.symlink_to(self.path)
+        except (OSError, NotImplementedError):
+            self.skipTest("File symlinks unavailable on this platform")
+        with self.assertRaises(ValueError):
+            export_observations(link)
+
     def test_unverified_capture_is_not_exported(self):
         with sqlite3.connect(self.path) as db:
             db.execute(
