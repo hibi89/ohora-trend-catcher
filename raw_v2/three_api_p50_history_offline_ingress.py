@@ -22,6 +22,8 @@ def ingest_offline_history_response(capture, raw_writer, request, response):
         raise ValueError("History request requires a persisted continuation cursor")
     if request.request_spec.after != request.cursor:
         raise ValueError("History RequestSpec cursor mismatch")
+    if request.request_spec.username != request.username:
+        raise ValueError("History request username mismatch")
     if response.request_id != request.request_id:
         raise ValueError("Response request mismatch")
     if not 200 <= response.http_status < 300:
