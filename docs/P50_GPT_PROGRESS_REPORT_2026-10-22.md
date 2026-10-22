@@ -1,5 +1,13 @@
 ## 최신 추가 보고 — P1/P2 재개 (2026-10-22)
 
+### v3 design and current remote recheck
+
+- Read the v2.0 Simulation skill and P50 architecture v3.0, plus official Issue #15 and documentation PR #16. Issue #15 describes the design as published/design-only; PR #16 is documentation, not runtime implementation or live approval.
+- Successfully fetched origin. The n8n branch base at fetch time was `4e1469225a17d28285b09132fdb7175fbee49e1e`; P2 source commit `0278cae64da5ec52430eaa034ca32ed0360d69c3` and the follow-up documentation sync are on the local work branch. Confirm the current GitHub branch ref and its checks before claiming publication. P50 engine branch is now `690383f2e3e02f4e6c7614f201731e3d1e7773e2` (supersedes prior `c4944f1` snapshot).
+- P50 changes since the reviewed engine pin add/extend history anchor, backlog, commit, offline ingress, recovery, request, session, status and store modules. The manual pilot CLI still exposes only the existing `run_p50` entry point and latest-oriented flags; n8n history integration is therefore pending an engine-owned CLI/status/receipt boundary. Keep pin `10ebaf8`.
+- The v3 throughput model is conditional: `H=max(0,Q−L−C−R)`, with latest page ceiling `L≤150` under the P50 three pages × 50 accounts rule. `Q` (safe API capacity), `C` (required catchup), `R` (reserve), quota-group sharing, posting distribution, and latency are **unknown**. Example 1,950-page / 3-posts-per-account-per-week assumptions and 7/14/30-day thresholds in v3 are illustrative only. Persistent `Q≤L+C+R` means zero history progress.
+- Re-run of focused local tests after fetch: **19 passed, 2 handoff guard subtests passed**. P50 owner CI at `690383f` was not independently confirmed; combined-status query returned no status contexts.
+
 - n8n P50 결과 분기 결함을 수정했다. 이전 export는 `MANUAL_REVIEW` 또는 계정 실패(`attention`)를 classifier에서 표시하고도 NoOp으로 끝내 n8n 실행이 성공 상태가 될 수 있었다. 이제 해당 상태를 `StopAndError`로 보내 n8n 실행 기록에 실패로 남긴다. 실패 메시지는 고정 문자열이며 runner stdout/토큰을 포함하지 않는다. 정상 진척과 대기 상태는 결과로 저장한다. Workflow는 계속 비활성이다.
 - 검증: `python -m pytest -q tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py tests/test_p6_troubleshooting_handoff_guard.py` → **19 PASS, 2 guard subtests PASS**; pinned engine `test_three_api_serial_lock.py` **8/8 PASS**; Node classifier 5/5 PASS (offline wait, clean progress, partial attention, manual review, serial busy). JSON parse 및 `git diff --check` PASS. 격리 n8n CLI E2E도 실제로 재실행했다.
 - 비교: 최신 P50 feature branch `c4944f1565ade857754a4a71b6c94af2e61903ec`; pinned `10ebaf8`부터 최신 tip까지 n8n이 호출하는 P50 entrypoint, Capture/RAW/coordinator, roster/status 경계 파일은 변경되지 않았다. 새 history 모듈은 P50 코드에는 추가됐으나 n8n tick에서 dispatch하지 않는다. 따라서 pin은 `10ebaf8` 유지; history 연동을 구현했다고 주장하지 않는다.
