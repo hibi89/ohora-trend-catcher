@@ -1,3 +1,10 @@
+### P6-093 — 2026-10-22 · Current handoff index omitted AGENTS.md pointer
+- **Observed failure:** Documentation SHA `1c06ff80802c1797979856c4da0c929e61fb5249`: Runtime push [39765324429](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765324429) failed Linux `offline-runtime` and Windows `remaining`; Runtime PR [39765330241](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765330241) also failed Linux. The exact assertion was `AssertionError: 'AGENTS.md' not found in ...`. Linux ran 1,175 tests and failed 2; Windows `remaining` ran 376 and failed 2. Both failures were the two first-2,000-character `HANDOFF.md`/`STATUS.md` subtests. No watchdog timeout occurred.
+- **Confirmed cause:** The latest summary retained the incident ledger link but omitted the literal `AGENTS.md` link inside the guard's first 2,000 characters. The historical link was below the tested prefix. This is a documentation-index regression, not an engine/test runtime fault.
+- **Repair:** Added a top-level operating-instructions pointer to `AGENTS.md` and the ledger in both `HANDOFF.md` and `STATUS.md`, within the guard's checked prefix; removed a duplicate P50 hold summary.
+- **Repair commit / tests / CI:** The repair is in the current documentation-only change; record its resulting commit SHA and rerun `tests/test_p6_troubleshooting_handoff_guard.py` before marking closed. Pre-fix SHA `1c06ff8`: Frozen, Sheets, C Contract, P50, and Three API SUCCESS; Runtime FAILED as above. New final-SHA CI PENDING until exact-sha verification.
+- **Data safety / rollback / prevention:** No Meta/HTTP, SQLite, RAW, Capture, cursor, quota, n8n, Sheets data, frozen design, or main changes. Roll back only the pointer/summary edit if needed. Keep both links within the guard's prefix and retain the guard itself.
+
 ### P6-092 — 2026-10-22 · P50 next-day isolation test fixture cleanup
 - **Symptom / reproduced error:** A newly added synthetic next-day latest regression first failed under direct module invocation with `ModuleNotFoundError: No module named 'test_three_api_serial_bootstrap'`; under repository-standard `unittest discover -s tests`, it exposed `TypeError: 'CaptureJournal' object does not support the context manager protocol`. The open SQLite handle then caused Windows `PermissionError [WinError 32]` while unittest removed the temporary directory.
 - **Confirmed cause:** The test fixture imported another test module using the discovery-mode top-level import convention (the first command used a different package invocation), and incorrectly treated `CaptureJournal` as a context manager. The production runner was not implicated. Closing the journal in `finally` removes the test-only file lock.
@@ -443,6 +450,7 @@
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
 | P6-090 | 오프라인 shard 3-way 계약 | stale `remaining` 단일 그룹 주장, 경로 필터 누락 | `74aa66d`; focused 14/14, Windows 3 groups PASS/SKIP; `8763c65` 6/6 core CI SUCCESS |
+| P6-093 | HANDOFF/STATUS current index pointer | AGENTS.md 링크가 first-2,000-character guard 밖으로 밀림 | `1c06ff8` Linux/Windows assertion; 링크 복구·focused/CI 검증 대기 |
 | P6-092 | P50 다음날 최신과거 분리 회귀 픽스처 | CaptureJournal 잘못된 context-manager 사용으로 WinError32 정리 실패 | `ff13186`; focused 7/7, P50 143 PASS/1 platform SKIP; final SHA 6/6 CI SUCCESS |
 | P6-091 | P50 active/backup 상태 불일치 | 운영 재개 증거 미확인; 원인 OPEN | read-only only; canonical DB/backup 확인 후 owner 판단 필요 |
 | P6-089 | P50 21·22일 종료·quota/CI | 별도 원본·일별 164/1,140, 쿼터 안전 경계, P6-089 색인 누락 | 보류 유지·읽기 전용 점검 대기 |
