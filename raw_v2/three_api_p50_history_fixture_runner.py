@@ -6,9 +6,12 @@ responses. Every page is committed through the existing Capture/RAW ingress.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from three_api_p50_history_batch import ingest_offline_history_batch
 from three_api_p50_history_plan import plan_next_history_page
 from three_api_p50_history_request import prepare_history_request
+from three_api_request_spec import build_request_spec
 
 
 def run_offline_history_fixture_dispatch(
@@ -38,6 +41,7 @@ def run_offline_history_fixture_dispatch(
         raise ValueError("Invalid latest-complete accounts or usernames")
     if not isinstance(fixture_pages, dict):
         raise ValueError("Explicit offline fixture index required")
+    seen_requests = set()
     for entry, page in fixture_pages.items():
         if (not isinstance(entry, tuple) or len(entry) != 2
                 or entry[0] not in keys or not isinstance(entry[1], str)
@@ -49,6 +53,35 @@ def run_offline_history_fixture_dispatch(
                 or getattr(request, "cursor", None) != entry[1]
                 or getattr(request, "lane", None) != lane):
             raise ValueError("History fixture index differs from request")
+        # Validate every supplied fixture before any page is durably written;
+        # a bad later account must not cause partial success in earlier ones.
+        if entry[0] not in usernames or not isinstance(usernames[entry[0]], str):
+            raise ValueError("Fixture account has no verified username")
+        if (getattr(request, "phase", None) != "history"
+                or getattr(request, "history_offline_only", None) is not True
+                or getattr(request, "username", None) != usernames[entry[0]]
+                or getattr(request, "request_spec", None) != build_request_spec(
+                    lane, usernames[entry[0]], after=entry[1], limit=4)):
+            raise ValueError("History fixture differs from approved request spec")
+        response = page["response"]
+        request_id = getattr(request, "request_id", None)
+        if (not isinstance(request_id, str) or not request_id
+                or request_id in seen_requests
+                or getattr(response, "request_id", None) != request_id
+                or type(getattr(response, "http_status", None)) is not int
+                or not 200 <= response.http_status < 300):
+            raise ValueError("Invalid or duplicate history fixture response")
+        seen_requests.add(request_id)
+        if (type(page["terminal"]) is not bool
+                or (page["oldest_post_at"] is not None and
+                    (not isinstance(page["oldest_post_at"], datetime)
+                     or page["oldest_post_at"].utcoffset() is None))
+                or (page["oldest_post_at"] is None and not page["terminal"])
+                or (page["terminal"] and response.next_cursor is not None)
+                or (not page["terminal"] and
+                    (not isinstance(response.next_cursor, str) or
+                     not response.next_cursor))):
+            raise ValueError("Invalid offline history fixture boundary")
     available = set(complete)
     completed = []
     deferred = []
