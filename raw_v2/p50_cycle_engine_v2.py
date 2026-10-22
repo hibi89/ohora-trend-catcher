@@ -13,7 +13,6 @@ import math
 
 LANES = ("A", "B", "C")
 ACCOUNTS = 50
-MAX_CYCLES = 20
 PAGE_LIMIT = 8
 MAX_USAGE = 85
 COOLDOWN_MINUTES = 63
@@ -80,6 +79,14 @@ class CyclePlanner:
             except BaseException:
                 self.db.execute("ROLLBACK")
                 raise
+        self.db.execute("""CREATE TABLE IF NOT EXISTS schedule_state(
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            round_no INTEGER NOT NULL DEFAULT 1,
+            lane_index INTEGER NOT NULL DEFAULT 0,
+            ordinal INTEGER NOT NULL DEFAULT 1,
+            slot_count INTEGER NOT NULL DEFAULT 0,
+            ready_at TEXT
+        )""")
         # Previously marked year-cutoff accounts must resume at their saved cursor.
         self.db.execute("""UPDATE accounts SET finished=0,finished_reason=NULL
             WHERE finished=1 AND finished_reason='one_year_cutoff'""")
@@ -124,40 +131,89 @@ class CyclePlanner:
             recovered += 1
         return recovered
 
-    def next_job(self):
-        """Fixed A(1..50), B(1..50), C(1..50) per round; 20 rounds."""
+    def _schedule(self):
+        row = self.db.execute("SELECT * FROM schedule_state WHERE id=1").fetchone()
+        if row is None:
+            self.db.execute("""INSERT INTO schedule_state
+                (id,round_no,lane_index,ordinal,slot_count) VALUES (1,1,0,1,0)""")
+            row = self.db.execute("SELECT * FROM schedule_state WHERE id=1").fetchone()
+        return row
+
+    def pause(self, *, now=None):
+        """Explain why dispatch is currently blocked, without mutating cursors."""
+        if self.db.execute("SELECT 1 FROM jobs WHERE state='reserved' LIMIT 1").fetchone():
+            return {"reason": "reserved", "until": None}
+        if not self.db.execute("SELECT 1 FROM accounts WHERE finished=0 LIMIT 1").fetchone():
+            return {"reason": "complete", "until": None}
+        state = self._schedule()
+        now = now or datetime.now(timezone.utc)
+        if state["ready_at"] and now < datetime.fromisoformat(state["ready_at"]):
+            return {"reason": "round_wait", "until": state["ready_at"]}
+        lane = LANES[state["lane_index"]]
+        quota = self.db.execute("SELECT halted,ready_at FROM lanes WHERE lane=?", (lane,)).fetchone()
+        if quota["halted"]:
+            return {"reason": "quota_hold", "until": quota["ready_at"], "lane": lane}
+        return {"reason": "ready", "until": None}
+
+    def next_job(self, *, now=None):
+        """Strict A 1..50, B 1..50, C 1..50; 63m after C.
+
+        A short non-exhausted page keeps the same account and lane until all
+        eight posts have been collected. Cursor state is durably checkpointed.
+        """
+        now = now or datetime.now(timezone.utc)
         self.db.execute("BEGIN IMMEDIATE")
         try:
             if self.db.execute("SELECT 1 FROM jobs WHERE state='reserved' LIMIT 1").fetchone():
                 self.db.execute("COMMIT")
                 return None
-            for round_no in range(1,21):
-                for lane in LANES:
-                    for ordinal in range(1,ACCOUNTS+1):
-                        account=self.db.execute(
-                            "SELECT cursor,finished FROM accounts WHERE ordinal=?",(ordinal,)
-                        ).fetchone()
-                        if account["finished"]:
-                            continue
-                        existing=self.db.execute(
-                            "SELECT state FROM jobs WHERE cycle=? AND lane=? AND ordinal=?",
-                            (round_no,lane,ordinal)).fetchone()
-                        if existing:
-                            continue
-                        quota=self.db.execute(
-                            "SELECT halted FROM lanes WHERE lane=?",(lane,)).fetchone()
-                        if quota["halted"]:
-                            self.db.execute("COMMIT")
-                            return None
-                        self.db.execute("""INSERT INTO jobs
-                            (cycle,lane,ordinal,state,cursor_before)
-                            VALUES (?,?,?,'reserved',?)""",
-                            (round_no,lane,ordinal,account["cursor"]))
-                        self.db.execute("COMMIT")
-                        return {"cycle":round_no,"lane":lane,"ordinal":ordinal,
-                                "cursor":account["cursor"],"limit":PAGE_LIMIT}
+            if not self.db.execute("SELECT 1 FROM accounts WHERE finished=0 LIMIT 1").fetchone():
+                self.db.execute("COMMIT")
+                return None
+            state = self._schedule()
+            if state["ready_at"]:
+                if now < datetime.fromisoformat(state["ready_at"]):
+                    self.db.execute("COMMIT")
+                    return None
+                self.db.execute("UPDATE schedule_state SET ready_at=NULL WHERE id=1")
+            lane_index, ordinal, count = state["lane_index"], state["ordinal"], state["slot_count"]
+            # Advance phases only in fixed order, never to exploit spare quota.
+            while True:
+                account = self.db.execute("""SELECT ordinal,cursor FROM accounts
+                    WHERE finished=0 AND ordinal>=?
+                    ORDER BY ordinal LIMIT 1""",(ordinal,)).fetchone()
+                if account is not None:
+                    break
+                if lane_index == 2:
+                    self.db.execute("""UPDATE schedule_state SET
+                        round_no=round_no+1,lane_index=0,ordinal=1,slot_count=0,
+                        ready_at=? WHERE id=1""",
+                        (iso(now+timedelta(minutes=COOLDOWN_MINUTES)),))
+                    self.db.execute("COMMIT")
+                    return None
+                lane_index += 1
+                ordinal, count = 1, 0
+                self.db.execute("""UPDATE schedule_state SET lane_index=?,
+                    ordinal=1,slot_count=0 WHERE id=1""",(lane_index,))
+            if account["ordinal"] != ordinal:
+                ordinal, count = account["ordinal"], 0
+                self.db.execute("""UPDATE schedule_state SET ordinal=?,slot_count=0
+                    WHERE id=1""",(ordinal,))
+            lane = LANES[lane_index]
+            halted = self.db.execute("SELECT halted FROM lanes WHERE lane=?",
+                                     (lane,)).fetchone()["halted"]
+            if halted:
+                self.db.execute("COMMIT")
+                return None
+            cycle = self.db.execute("""SELECT COALESCE(MAX(cycle),0)+1 FROM jobs
+                WHERE lane=? AND ordinal=?""",(lane,ordinal)).fetchone()[0]
+            self.db.execute("""INSERT INTO jobs(cycle,lane,ordinal,state,cursor_before)
+                VALUES (?,?,?,'reserved',?)""",(cycle,lane,ordinal,account["cursor"]))
+            round_no = self.db.execute(
+                "SELECT round_no FROM schedule_state WHERE id=1").fetchone()[0]
             self.db.execute("COMMIT")
-            return None
+            return {"cycle":cycle,"round":round_no,"lane":lane,"ordinal":ordinal,
+                    "cursor":account["cursor"],"limit":PAGE_LIMIT-count}
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
@@ -195,10 +251,38 @@ class CyclePlanner:
                 UPDATE jobs SET state='done',cursor_after=?,receipt_id=?,post_count=?
                 WHERE cycle=? AND lane=? AND ordinal=?""",
                 (next_cursor,receipt_id,len(posts),job["cycle"],job["lane"],job["ordinal"]))
+            state = self.db.execute("SELECT * FROM schedule_state WHERE id=1").fetchone()
+            if state is not None:
+                expected_lane = LANES[state["lane_index"]]
+                if job["lane"] != expected_lane or job["ordinal"] != state["ordinal"]:
+                    raise ValueError("Schedule position changed before acknowledgement")
+                page_size = len(posts)
+                remaining = PAGE_LIMIT-state["slot_count"]
+                if page_size > remaining:
+                    raise ValueError("Page exceeds remaining per-account slot")
             self.db.execute("""
                 UPDATE accounts SET cursor=?,finished=?,finished_reason=?
                 WHERE ordinal=?""",
                 (next_cursor,int(finished),reason,job["ordinal"]))
+                if finished or state["slot_count"] + page_size >= PAGE_LIMIT:
+                    subsequent = self.db.execute("""SELECT 1 FROM accounts
+                        WHERE finished=0 AND ordinal>? LIMIT 1""",
+                        (job["ordinal"],)).fetchone()
+                    if subsequent is not None:
+                        self.db.execute("""UPDATE schedule_state SET ordinal=?,
+                            slot_count=0 WHERE id=1""",(job["ordinal"]+1,))
+                    elif state["lane_index"] < 2:
+                        self.db.execute("""UPDATE schedule_state SET lane_index=lane_index+1,
+                            ordinal=1,slot_count=0 WHERE id=1""")
+                    else:
+                        # Exactly 63 minutes after C's last committed page.
+                        self.db.execute("""UPDATE schedule_state SET
+                            round_no=round_no+1,lane_index=0,ordinal=1,slot_count=0,
+                            ready_at=? WHERE id=1""",
+                            (iso(datetime.now(timezone.utc)+timedelta(minutes=COOLDOWN_MINUTES)),))
+                else:
+                    self.db.execute("UPDATE schedule_state SET slot_count=slot_count+? WHERE id=1",
+                                    (page_size,))
             self.db.execute("COMMIT")
         except BaseException:
             self.db.execute("ROLLBACK")
