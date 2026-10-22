@@ -29,6 +29,8 @@ def commit_persisted_history_page(store, journal, raw_writer, *,
         raise ValueError("Cursor evidence mismatch")
     if record.cursor_state.page != request.page:
         raise ValueError("Page evidence mismatch")
+    if request.cursor is None or not isinstance(request.cursor, str) or not request.cursor:
+        raise ValueError("History Capture requires nonempty request cursor")
     if record.cursor_state.next_cursor == request.cursor:
         raise ValueError("Persisted history Capture repeats its input cursor")
     if (record.cursor_state.next_cursor is not None and
