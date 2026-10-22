@@ -70,6 +70,15 @@ class SheetsExportTests(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             export_observations(Path(self.tmp.name) / "missing.sqlite")
 
+    def test_duplicate_observation_key_rejected_across_pages(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(3,'p1','2026-10-22T03:00:00Z','batch-3','req-1',60,5,1,1)"
+            )
+        with self.assertRaisesRegex(ValueError, "Duplicate observation_key"):
+            export_observations(self.path, limit=1)
+
     def test_duplicate_raw_receipt_fails_closed(self):
         with sqlite3.connect(self.path) as db:
             db.execute("""INSERT INTO three_api_raw_receipts
