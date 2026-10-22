@@ -49,3 +49,7 @@ Verify at least one immutable Capture receipt, a matching RAW receipt, and a com
 The initialized P50 status returns `live_meta_called: null` because persisted row counts cannot prove whether a Meta HTTP call occurred. An uninitialized workspace still reports `false`. The status reader rejects a symlinked `p50` root; the Sheets exporter rejects a symlinked RAW database. The exporter excludes observations without matching RAW receipts and rejects ambiguous duplicate receipt matches instead of silently emitting duplicate rows. No SQLite or Google Sheets write is performed by these readers.
 
 The two focused test commands in section 1 are required before an operational approval request. GitHub commits alone are **not** test evidence; if DNS/network restrictions prevent repository checkout, record offline test status as **UNVERIFIED**, not PASS. Never treat the first page or an export fixture as evidence of 50-account live collection.
+
+## 6. Fail-closed malformed RAW receipt checks
+
+The read-only Sheets exporter rejects malformed RAW `posts` containers, non-object post entries, and invalid `post_field_status` mappings. The focused Sheets export test suite includes parameterized fixtures for these cases, as well as duplicate receipt pagination and Reels view status/value mismatches. These are defensive read-path changes only; they do not repair, discard, or rewrite RAW evidence. Execute the focused suite locally before claiming PASS; GitHub commit existence is not a test result.
