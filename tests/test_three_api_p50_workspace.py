@@ -1,5 +1,6 @@
 """P50 RAW bootstrap smoke test: offline and isolated."""
 import csv
+from datetime import datetime, timedelta, timezone
 import sys
 import tempfile
 import sqlite3
@@ -27,7 +28,8 @@ class P50WorkspaceTests(unittest.TestCase):
             self.assertEqual(result["planned_pages"], 150)
             with sqlite3.connect(workspace / "p50_raw.sqlite") as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 50)
-            with sqlite3.connect(workspace / "control" / "coordinator.sqlite") as db:
+            day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+            with sqlite3.connect(workspace / day / "coordinator.sqlite") as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 150)
             with self.assertRaises(ValueError):
                 initialize_isolated_workspace(source, workspace)
