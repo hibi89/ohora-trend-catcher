@@ -37,11 +37,22 @@ class P50CycleSafetyTests(unittest.TestCase):
             result = cycle.main(["history", "--live", "--confirm-owner-approval",
                                  "--credentials-dir", "/synthetic",
                                  "--workspace", "/synthetic/p50"])
-        self.assertEqual(result, 0)
+        self.assertEqual(result, 2)
         latest.assert_not_called()
         history.assert_called_once()
         self.assertEqual(json.loads(out.getvalue())["status"], "quota_hold")
 
+
+    def test_history_manual_review_returns_nonzero(self):
+        with patch.object(cycle, "_needs_latest", return_value=False), \
+             patch.object(cycle, "run_history", return_value={"status": "manual_review"}), \
+             patch.object(cycle, "load_three_api_environment", return_value={}), \
+             patch("sys.stdout", new_callable=io.StringIO) as output:
+            code = cycle.main(["history", "--live", "--confirm-owner-approval",
+                               "--credentials-dir", "/synthetic",
+                               "--workspace", "/synthetic/p50"])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output.getvalue())["status"], "manual_review")
 
     def test_latest_recovery_then_history(self):
         latest_result = {"status": "completed", "committed_pages": 1}
