@@ -44,6 +44,10 @@ def commit_persisted_history_page(store, journal, raw_writer, *,
             raise ValueError("Oldest post timestamp differs from persisted Capture")
     elif actual_oldest is not None:
         raise ValueError("Missing oldest post timestamp from persisted Capture")
+    if type(terminal) is not bool:
+        raise ValueError("Explicit terminal boolean required")
+    if terminal and record.cursor_state.next_cursor is not None:
+        raise ValueError("Terminal history Capture contains continuation cursor")
     receipt = raw_writer.get_raw_receipt(capture_id)
     if receipt is None:
         raise ValueError("Missing durable RAW receipt")
