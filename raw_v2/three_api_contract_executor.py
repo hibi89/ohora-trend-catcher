@@ -118,9 +118,10 @@ class ThreeApiContractExecutor:
         # History's explicit offline-only envelope is ONLY for ingesting an
         # already-supplied synthetic response through a no-sender adapter.
         # Do not even persist an HTTP intent here.
-        if getattr(request, "phase", None) == "history":
+        if (getattr(request, "phase", None) == "history"
+                and getattr(request, "history_live_approved", False) is not True):
             raise ContractExecutionError(
-                "History transport remains disabled; use offline fixture ingress"
+                "Offline history fixture cannot enter live transport"
             )
         existing_capture = self.capture.get_capture_for_request(request.request_id)
         if existing_capture is not None:
