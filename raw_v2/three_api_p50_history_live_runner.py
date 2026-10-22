@@ -203,11 +203,16 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
             _release_verified_history_hold(
                 store, coordinator, journal, raw,
                 lane_state["lane"], lane_state["reason"], now)
-    # If any lane remains held, the A/B/C shared-quota assumption is unknown:
-    # no alternate-lane bypass or automatic reset after 65 minutes.
-    for row in coordinator.db.execute("SELECT lane,halted FROM lanes").fetchall():
-        if row["halted"]:
-            return {"status": "quota_hold", "lane": row["lane"]}
+    # The operator confirmed A/B/C use distinct Meta app IDs. A lane held
+    # for verified usage_limit must not starve the other independent apps.
+    # Unknown/missing usage and unresolved history_pending remain global holds.
+    lane_states = coordinator.db.execute(
+        "SELECT lane,halted,reason FROM lanes ORDER BY lane").fetchall()
+    for held in lane_states:
+        if held["halted"] and held["reason"] != "usage_limit":
+            return {"status": "quota_hold", "lane": held["lane"]}
+    if all(held["halted"] for held in lane_states):
+        return {"status": "quota_hold", "lane": "all"}
     plan = plan_next_history_page(
         store, [a["key"] for a in accounts],
         latest_complete_keys=[a["key"] for a in accounts
@@ -217,8 +222,11 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
         account = by_key[job["account_key"]]
         row = store.read(account["key"])
         ordinal, page = account["ordinal"], row["pages_verified"] + 4
-        lane = LANES[(ordinal + row["pages_verified"] - 1) % 3]
-        if not _ready_lane(coordinator, lane, now):
+        preferred = (ordinal + row["pages_verified"] - 1) % 3
+        lane = next((candidate for candidate in
+                     (LANES[(preferred + offset) % 3] for offset in range(3))
+                     if _ready_lane(coordinator, candidate, now)), None)
+        if lane is None:
             continue
         spec = build_request_spec(
             lane, account["username"], after=row["cursor"], limit=4,
