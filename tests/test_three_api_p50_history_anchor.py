@@ -50,7 +50,7 @@ class HistoryAnchorTests(unittest.TestCase):
         capture_id = "capture-tail-invalid"
         record = SimpleNamespace(
             capture_id=capture_id,
-            request=SimpleNamespace(account_key=self.keys[0], phase="catchup",
+            request=SimpleNamespace(account_key=self.keys[0], account_ordinal=1, phase="catchup",
                                     page=3, request_id="req-3", cursor="prior"),
             cursor_state=SimpleNamespace(request_id="req-3", current_cursor="prior",
                                          page=3, next_cursor="next"),
@@ -81,6 +81,22 @@ class HistoryAnchorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 anchor_latest_tail(store, journal, raw, account_key=self.keys[0],
                                    capture_id="repeat-tail")
+            self.assertEqual(store.read(self.keys[0])["state"], "ready")
+
+    def test_nonpilot_ordinal_rejected_before_raw_lookup(self):
+        record = SimpleNamespace(
+            capture_id="outside-p50",
+            request=SimpleNamespace(account_key=self.keys[0], account_ordinal=51,
+                                    phase="catchup", page=3),
+        )
+        journal = SimpleNamespace(get_capture=lambda _: record)
+        def unexpected(_):
+            raise AssertionError("Out-of-pilot Capture must not access RAW")
+        raw = SimpleNamespace(get_raw_receipt=unexpected)
+        with P50HistoryStore(self.path) as store:
+            with self.assertRaises(ValueError):
+                anchor_latest_tail(store, journal, raw, account_key=self.keys[0],
+                                   capture_id="outside-p50")
             self.assertEqual(store.read(self.keys[0])["state"], "ready")
 
     def test_wrong_account_does_not_read_raw(self):
