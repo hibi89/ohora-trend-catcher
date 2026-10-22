@@ -9,8 +9,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 import sqlite3
+import re
 
 from three_api_p50_history_checkpoint import history_checkpoint
+
+_KEY = re.compile(r"P50_(?:US|KR|JP)_[0-9]{3}\Z")
 
 
 class P50HistoryStore:
@@ -61,7 +64,7 @@ class P50HistoryStore:
             raise ValueError("History cutoff must be a date")
         keys = tuple(account_keys)
         if (len(keys) != 50 or len(set(keys)) != 50
-                or any(not isinstance(k, str) or not k.startswith("P50_") for k in keys)):
+                or any(not isinstance(k, str) or not _KEY.fullmatch(k) for k in keys)):
             raise ValueError("Exactly 50 distinct P50 account keys required")
         self.db.execute("BEGIN IMMEDIATE")
         try:
@@ -92,6 +95,8 @@ class P50HistoryStore:
             raise ValueError("Capture identifier required")
         if not isinstance(raw_receipt_id, str) or not raw_receipt_id:
             raise ValueError("RAW receipt identifier required")
+        if raw_receipt_verified is not True or capture_verified is not True or uncertain_http is True:
+            raise ValueError("Verified RAW and Capture receipts required; uncertain HTTP blocked")
         self.db.execute("BEGIN IMMEDIATE")
         try:
             row = self.read(account_key)
@@ -112,9 +117,6 @@ class P50HistoryStore:
                 raw_receipt_verified=raw_receipt_verified,
                 capture_verified=capture_verified, terminal=terminal,
                 uncertain_http=uncertain_http)
-            if not (raw_receipt_verified and capture_verified) or uncertain_http:
-                self.db.execute("COMMIT")
-                return decision
             self.db.execute(
                 "INSERT INTO history_receipts VALUES(?,?,?,?,?,?)",
                 (capture_id, account_key, raw_receipt_id, decision["state"],
