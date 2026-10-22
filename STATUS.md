@@ -1,3 +1,5 @@
+Operating instructions: [AGENTS.md](AGENTS.md) · [docs/P6_TROUBLESHOOTING_LEDGER.md](docs/P6_TROUBLESHOOTING_LEDGER.md).
+
 ## P50 quota recovery tool — 2026-10-23 (implemented, live unverified)
 
 Code: [raw_v2/three_api_p50_quota_recovery.py](raw_v2/three_api_p50_quota_recovery.py), offline tests: [tests/test_three_api_p50_quota_recovery.py](tests/test_three_api_p50_quota_recovery.py). New operator command checks one caller-scoped Meta Business Use Case usage header per A/B/C lane, without reading or persisting response bodies. Explicit `--apply --live --confirm-owner-approval` releases only expired `usage_limit` holds after HTTP 200, scoped Instagram usage below 85%, and estimated regain time 0. Missing header, malformed telemetry, >=85 usage, other hold reasons, or unexpired cooldown never release. No automatic scheduling, no DB reset/RAW/cursor writes. **This caller-ID endpoint is a quota proxy, not a full Business Discovery payload test; live end-to-end 50-account run remains unverified.** Commit implementation `81f27f6`; tests committed `f3ea8e8` but not yet executed in this session.
