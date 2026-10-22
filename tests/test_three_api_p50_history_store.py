@@ -76,6 +76,18 @@ class P50HistoryStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.initialize(self.keys, date(2025, 10, 21))
 
+    def test_blocked_state_never_advances(self):
+        self.initialize()
+        with P50HistoryStore(self.path) as store:
+            store.db.execute(
+                "UPDATE history_accounts SET state='blocked_missing_cursor' WHERE account_key=?",
+                (self.keys[0],))
+            with self.assertRaises(ValueError):
+                self.commit(store)
+            self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
+            self.assertEqual(store.db.execute(
+                "SELECT COUNT(*) FROM history_receipts").fetchone()[0], 0)
+
     def test_stale_cursor_rejected(self):
         self.initialize()
         with P50HistoryStore(self.path) as store:
