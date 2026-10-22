@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 from three_api_p50_history_offline_ingress import ingest_offline_history_response
@@ -60,6 +61,48 @@ class OfflineHistoryIngressTests(unittest.TestCase):
             with self.subTest(metadata=metadata), self.assertRaises(ValueError):
                 ingest_and_commit_offline_history_page(
                     store, object(), object(), request, object(), **metadata)
+
+    def test_ingest_then_commit_order_and_receipt_failure(self):
+        from three_api_p50_history_offline_ingress import (
+            ingest_and_commit_offline_history_page)
+        request = SimpleNamespace(
+            phase="history", history_offline_only=True,
+            account_key="P50_US_001", cursor="cursor-1", request_id="req-1")
+        store = SimpleNamespace(read=lambda _: {
+            "state": "continuation_ready", "cursor": "cursor-1"})
+        capture = SimpleNamespace(get_capture_for_request=lambda _: SimpleNamespace(
+            capture_id="cap-1"))
+        events = []
+        def ingest(*args):
+            events.append("raw")
+            return "receipt-1"
+        def commit(*args, **kwargs):
+            events.append("cursor")
+            self.assertEqual(kwargs["capture_id"], "cap-1")
+            return {"state": "continuation_ready"}
+        with patch("three_api_p50_history_offline_ingress.ingest_offline_history_response",
+                   side_effect=ingest), patch(
+                   "three_api_p50_history_commit.commit_persisted_history_page",
+                   side_effect=commit):
+            result = ingest_and_commit_offline_history_page(
+                store, capture, object(), request, object(),
+                oldest_post_at=None)
+        self.assertEqual(events, ["raw", "cursor"])
+        self.assertEqual(result["history"]["state"], "continuation_ready")
+
+        events.clear()
+        def fail_raw(*args):
+            events.append("raw")
+            raise OSError("RAW unavailable")
+        with patch("three_api_p50_history_offline_ingress.ingest_offline_history_response",
+                   side_effect=fail_raw), patch(
+                   "three_api_p50_history_commit.commit_persisted_history_page",
+                   side_effect=commit):
+            with self.assertRaises(OSError):
+                ingest_and_commit_offline_history_page(
+                    store, capture, object(), request, object(),
+                    oldest_post_at=None)
+        self.assertEqual(events, ["raw"])
 
     def test_wrong_response_identity_never_touches_capture(self):
         request = SimpleNamespace(
