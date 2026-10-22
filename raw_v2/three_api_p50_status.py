@@ -29,7 +29,7 @@ def inspect_p50(workspace):
             "contract_receipts": _count(
                 raw, "SELECT COUNT(*) FROM sqlite_master "
                 "WHERE type='table' AND name='three_api_contract_receipts'"),
-            "live_meta_called": False,
+            "live_meta_called": None,  # Cannot infer network activity from persisted counts.
         }
         if report["contract_receipts"]:
             report["contract_receipts"] = _count(
