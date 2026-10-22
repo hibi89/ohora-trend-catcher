@@ -21,7 +21,20 @@ def build_bridge_status(workspace):
     holds = [lane["lane"] for lane in lanes if lane["halted"]]
     # A missing or malformed quota state must never be represented as ready.
     ready = len(lanes) == 3 and not holds and quota.get("quota") == "read_only"
+    states = history.get("states", {})
+    daily = latest.get("daily_jobs", [])
     return {
+        "summary": {
+            "accounts": latest.get("accounts"),
+            "unique_posts": latest.get("unique_posts"),
+            "post_observations": latest.get("post_observations"),
+            "contract_receipts": latest.get("contract_receipts"),
+            "history_pages_verified": history.get("history_pages_verified", 0),
+            "history_continuation_ready": states.get("continuation_ready", 0),
+            "history_window_covered": states.get("window_covered", 0),
+            "latest_dates": [row.get("date") for row in daily],
+            "latest_jobs_done": sum(row.get("jobs", {}).get("done", 0) for row in daily),
+        },
         "schema": "ohora.p50.bridge.status.v1",
         "source": "local_read_only",
         "meta_calls": 0,
@@ -39,9 +52,13 @@ def build_bridge_status(workspace):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=_paths()[1])
+    parser.add_argument("--compact", action="store_true", help="Small JSON payload for n8n polling; no per-account details")
     args = parser.parse_args(argv)
     try:
         result = build_bridge_status(args.workspace)
+        if args.compact:
+            result.pop("history", None)
+            result.pop("latest", None)
     except (OSError, ValueError, RuntimeError, TypeError) as exc:
         print(json.dumps({
             "schema": "ohora.p50.bridge.status.v1",
