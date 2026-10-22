@@ -261,7 +261,7 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
                 usage = (evidence.get("safe_usage", {}).get("max_usage_percent")
                          if evidence and evidence.get("classification") == "safe" else None)
                 if failure is not None and type(usage) is not int:
-                    match = re.search(r"\\busage_pct=(\\d{1,3})\\b", failure.safe_message)
+                    match = re.search(r"\busage_pct=(\d{1,3})\b", failure.safe_message)
                     if match is not None:
                         usage = int(match.group(1))
                 isolated = (failure is not None and failure.scope == "account"
