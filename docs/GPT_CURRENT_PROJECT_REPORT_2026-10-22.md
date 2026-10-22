@@ -4,7 +4,7 @@
 **저장소:** `hibi89/ohora-trend-catcher`
 **로컬 작업 루트:** `C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher`
 **작업 브랜치:** `codex/p6-readiness-hardening-20261019`
-**원격/로컬 코드 HEAD:** `2a09fb346721893a749df4b74ab7a427551a38d3` (일치 확인)
+**P6-103 code fix:** `2a09fb346721893a749df4b74ab7a427551a38d3` (pushed); this report records the current P50 owner-branch recheck
 
 ## 1. 사용자 목표와 현재 우선순위
 
@@ -38,7 +38,7 @@
 
 ## 4. P50 엔진·n8n·데이터 상태
 
-- n8n은 검토된 P50 엔진 SHA `10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb`에 고정되어 있다. 최신 엔진 tip `e0ecd043b70c2f8f49936bc279e40d544232c862`은 roster/history guard 등을 추가했지만, n8n에 연결할 latest/history/status/recover CLI 및 receipt contract가 아직 준비되지 않아 pin을 올리지 않았다.
+- n8n은 검토된 P50 엔진 SHA `10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb`에 고정되어 있다. P50 담당 브랜치 `feature/p6-50-account-pilot-20261022`의 최신 tip은 `04df3817e3c983f5457d1a8a111e4c1affecd354`다. P50 offline/history workflows는 성공했으며, P6 Runtime은 pending·Three API offline은 in progress였다. 최신 CLI에는 latest 실행만 있고 status는 별도 read-only command이며, history/recover CLI와 n8n receipt contract가 없어 pin은 `10ebaf8`로 유지한다.
 - n8n workflow는 비활성이다. 로컬 n8n CLI 2.40.7은 설치되어 있으나 현재 프로세스/listener는 없고, 원격 n8n 운영 주소/host는 확인되지 않았다.
 - 알림 채널은 사용자가 “나중에”로 미뤘다. Google Sheets는 이후 단계이며 인증/스프레드시트 ID를 아직 요청하지 않았다.
 - P294, unattended scheduling, 추가 live collection은 보류다. P50/P294 간 DB·커서·이력 독립성을 유지한다.
@@ -46,10 +46,10 @@
 
 ## 5. Git 및 문서 상태
 
-- `2a09fb346721893a749df4b74ab7a427551a38d3`은 기존 작업 브랜치에 push됐으며 원격 ref와 일치한다. `main` merge 및 force push는 없다.
-- P6-103 사고 기록은 `docs/P6_TROUBLESHOOTING_LEDGER.md`에 추가됐다.
-- 현재 로컬 작업 트리에는 HANDOFF/STATUS, GPT handoff/progress/TODO/ledger 등 문서 수정이 **커밋되지 않은 상태로 남아 있다**. 보고서 신규 파일도 별도 상태로 추가된다. 이 문서 변경은 아직 원격에 반영됐다고 간주하지 않는다.
-- Project Book 중앙 색인 동기화는 미완료다.
+- P6-103 code fix `2a09fb3` is pushed. HANDOFF/STATUS, the GPT handoff, progress checklist, and ledger reflect the latest P50 branch recheck in a documentation-only commit on `codex/p6-readiness-hardening-20261019`. The final branch SHA is rechecked after push; no main merge or force push.
+- P6-103 incident record and the current P50 owner branch recheck are documented in `docs/P6_TROUBLESHOOTING_LEDGER.md`.
+- HANDOFF/STATUS, GPT reports, progress checklist, and ledger are synchronized as documentation-only updates on the existing branch; check the final branch HEAD after the documentation commit.
+- Project Book `main/BOOK.md` is updated and re-fetched after the branch documentation sync.
 
 ## 6. 다음 GPT 담당자의 작업 순서
 

@@ -4,7 +4,7 @@
 **저장소:** `C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher`
 **현재 브랜치:** `codex/p6-readiness-hardening-20261019`
 **P2 source fix:** `0278cae64da5ec52430eaa034ca32ed0360d69c3`; **P6-103 n8n correction:** `2a09fb346721893a749df4b74ab7a427551a38d3` (pushed; all 6 Actions success, including Runtime Integration `39733073179`)
-**P50 엔진 origin tip:** `e0ecd043b70c2f8f49936bc279e40d544232c862`
+**P50 owner branch:** `feature/p6-50-account-pilot-20261022` at `04df3817e3c983f5457d1a8a111e4c1affecd354`
 
 ## 최근 사용자 지시와 현재 우선순위
 
@@ -38,14 +38,14 @@
 
 - 기존 HANDOFF에는 별도의 사용자 승인으로 수행된 P50 A 레인 1페이지 성공 기록이 있다: HTTP 200, 안전 usage 0%, 게시물 관측 4건, durable receipt/Capture ack/coordinator 완료를 read-only로 확인했다. 이번 P1/P2 수정 중 새 Meta 요청은 없었다.
 - 이번 격리 E2E는 코드/워크플로의 오프라인 결과 라우팅만 검증했다. 예약 운영 workflow는 비활성이다. 운영 n8n 인스턴스, 예약 cadence/budget, 경고 채널/자격증명은 미확정 또는 보류 상태다.
-- P50 upstream은 `e0ecd04`까지 진행했다. 추가/수정된 history modules 및 2페이지 연속 과거 복구 테스트가 있고 최신 변경은 history recovery 전 latest-complete roster 검증을 추가했다. 최신 `three_api_p50_manual_pilot.py`는 기존 `run_p50`과 latest용 flags만 제공하므로 n8n에서 history를 안전하게 호출할 owner CLI 계약이 아직 없다. Keep pin `10ebaf8`. `e0ecd04` combined-status query returned no contexts; P50 CI is unknown.
+- P50 담당 브랜치는 `feature/p6-50-account-pilot-20261022` at `04df3817e3c983f5457d1a8a111e4c1affecd354`. `10ebaf8..04df381` has history-module additions but no history/recover dispatcher in the pilot CLI; read-only status is a separate command. P50 offline/history Actions passed; P6 Runtime was pending and Three API in progress at latest check. Keep pin `10ebaf8` until an owner CLI/receipt contract and relevant CI are available.
 - 로컬 n8n 인프라 read-only probe: CLI `2.40.7` 설치, n8n/Node 실행 프로세스 0, 포트 5678/5680/5681 listener 0, Docker service 미설치. 이는 이 Windows PC의 상태만 나타내며 원격 학원 n8n host는 미확인이다.
 - Simulation v2/v3 illustrative throughput uses `H=max(0,Q−L−C−R)`, with P50 `L≤150`; `Q`, `C`, `R`, actual posts, quota sharing and latency remain unknown. If `Q≤L+C+R` persists, history cannot progress. Example page/day estimates are hypothetical, not measured Meta capacity.
 - P294 활성화와 Google Sheets 연동은 미완료 후속 범위다. Google 계정 인증/스프레드시트 ID는 Sheets 단계가 실제 시작될 때 요청한다.
 
 ## Git 및 문서 상태
 
-- P6-103 source commit push 이후 GitHub branch API에서 origin ref가 `2a09fb346721893a749df4b74ab7a427551a38d3`임을 재확인했다. P50 origin feature ref는 `e0ecd043b70c2f8f49936bc279e40d544232c862`다.
+- P6-103 source commit push 이후 GitHub branch API에서 origin ref가 `2a09fb346721893a749df4b74ab7a427551a38d3`임을 재확인했다. P50 owner branch is `feature/p6-50-account-pilot-20261022` at `04df3817e3c983f5457d1a8a111e4c1affecd354`; P50 offline/history Actions passed; P6 Runtime was pending and Three API was in progress at latest check.
 - 수정 상세 및 테스트 증거는 `docs/P50_GPT_PROGRESS_REPORT_2026-10-22.md`, `docs/P50_N8N_COMPLETION_TODO.md`, `docs/P6_TROUBLESHOOTING_LEDGER.md`에 있다. HANDOFF/STATUS 상단 요약도 이번 P1/P2 및 v3 자료를 가리킨다.
 - GitHub Actions on `2a09fb346721893a749df4b74ab7a427551a38d3`: Frozen Design Guard `39733073246`, C Contract `39733073167`, Three API offline `39733073258`, Frozen Guard `39733068560`, RAW v2 offline `39733068493` **SUCCESS**; P6 Runtime Integration Offline `39733073179` completed **SUCCESS**. Focused local suite is 20 passed +6 subtests and serial-lock is 8/8.
 - Project Book 색인 업데이트/재조회는 다음 인계 작업이다.

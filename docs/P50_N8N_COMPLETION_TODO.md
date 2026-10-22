@@ -7,11 +7,11 @@ Use this list to track the user's agreed sequence. P50 and P294 use independent 
 ### Current recheck against P50 v3
 
 - [x] Re-read Simulation v2.0, P50 v3, official Issue #15, and PR #16; v3 is the current design target and is explicitly design-only.
-- [x] Re-fetch origin: n8n branch base `4e1469225a17d28285b09132fdb7175fbee49e1e`; P50 owner tip `e0ecd043b70c2f8f49936bc279e40d544232c862`.
+- [x] Re-fetch origin: n8n branch base `4e1469225a17d28285b09132fdb7175fbee49e1e`; P50 owner branch `feature/p6-50-account-pilot-20261022` tip `04df3817e3c983f5457d1a8a111e4c1affecd354`.
 - [x] Re-run the focused n8n adapter/export/handoff suite after P6-103: 20 passed + 6 subtests. P50 engine serial-lock suite and Node classifier/E2E evidence remain as recorded below/P6-098–100.
 - [x] Compare P50 history changes to n8n boundary: history internals have advanced, but the pilot CLI still exposes the old latest runner only. Keep reviewed `10ebaf8` pin and do not import engine internals into n8n.
 - [ ] P50 `latest/history/status/recover` owner CLI, receipt contract, and Windows/offline verification are still required before n8n history integration.
-- [ ] GitHub status for P50 `e0ecd04` was not returned by combined-status query; do not claim it green.
+- [x] Recheck P50 owner branch `04df381`: offline validation `39734635979` and history `39734628888` SUCCESS. P6 Runtime `39734635964` was IN_PROGRESS and Three API `39734635988` IN_PROGRESS at latest check; the overall owner branch is not fully green yet.
 - [x] Diagnosed pushed n8n commit `3e59672` CI: Three API, C Contract, Frozen Guard PASS; Runtime Linux and Windows failed only because P6-101's detail lacked a quick-index table row. Added matching P6-101/P6-102 rows; local handoff guard 4 PASS +2 subtests.
 - [x] Push this guard repair and verify the new CI: Three API, Runtime Linux+all Windows shards, C Contract, and Frozen Design Guard all SUCCESS on branch HEAD `fa89ef7`.
 
@@ -19,8 +19,8 @@ Use this list to track the user's agreed sequence. P50 and P294 use independent 
 - [x] Verify CI on pushed `2a09fb3`: all 6 Actions SUCCESS, including Runtime Integration Offline `39733073179`.
 - [x] P2 result routing is fail-visible: `manual_review` and partial `attention` go through an IF node to `StopAndError`; clean progress/waiting remain recorded in n8n execution history. Focused tests 19 PASS + 2 handoff subtests PASS; pinned P50 serial-lock suite 8/8 PASS; direct Node classifier cases 5/5 PASS. `serial_busy` stays a no-call waiting outcome.
 - [ ] No n8n production/instance execution was repeated after this edit. The workflow remains inactive, the user deferred the credential-backed alert channel, and no n8n schedule is authorized to run Meta calls.
-- [ ] Latest P50 source tip `e0ecd04` leaves the pilot CLI latest-run-only; history/status/recover dispatch and receipt contract are not integrated with the n8n tick. Keep the exact pin unchanged until an offline contract test against the candidate SHA and green relevant CI.
-- [ ] Upstream P50 CI run `39727639343` has OPEN blockers: Ubuntu offline-runtime failed three handoff-link/index assertions; Windows `remaining` failed those and 17 temporary SQLite cleanup errors (`WinError 32`). P50 owner must repair/retest that branch. Do not change its source from this n8n branch.
+- [ ] Latest P50 source tip `04df381` leaves the pilot CLI latest-run-only; read-only status is a separate command, and history/recover dispatch plus receipt contract are not integrated with the n8n tick. Keep the exact pin unchanged until an offline contract test against the candidate SHA and green relevant CI.
+- [ ] Upstream P50 CI run `39727639343` has OPEN blockers: Ubuntu offline-runtime failed three handoff-link/index assertions; Windows `remaining` failed those and 17 temporary SQLite cleanup errors (`WinError 32`). That was the earlier `c4944f1` run; current `04df381` P50 offline/history checks pass, with P6 Runtime pending and Three API in progress at latest recheck. Do not change engine source from this n8n branch.
 
 ## P50 readiness and one-page proof
 
