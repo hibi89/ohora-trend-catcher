@@ -72,8 +72,9 @@ class P50CycleSafetyTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue())["latest_preparation"]["committed_pages"], 1)
 
     def test_nonpositive_max_pages_rejected_before_any_dispatch(self):
-        for mode in ("latest", "history"):
-            for value in ("0", "-1"):
+        for mode, values in (("latest", ("0", "-1", "151")),
+                             ("history", ("0", "-1", "50001"))):
+            for value in values:
                 with self.subTest(mode=mode, value=value), \
                      patch.object(cycle, "run_p50") as latest, \
                      patch.object(cycle, "run_history") as history, \
