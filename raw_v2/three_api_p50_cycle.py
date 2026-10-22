@@ -34,7 +34,7 @@ def _needs_latest(workspace):
         raise ValueError("Dedicated non-symlink P50 workspace required")
     candidates = sorted(root.glob("????-??-??/coordinator.sqlite"))
     if not candidates:
-        return True
+        raise ValueError("P50 latest coordinator missing; refusing implicit workspace initialization")
     latest = candidates[-1]
     if latest.is_symlink() or latest.parent.is_symlink():
         raise ValueError("Symlink P50 coordinator is forbidden")
