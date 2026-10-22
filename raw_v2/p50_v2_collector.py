@@ -107,6 +107,10 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved):
       cycle INTEGER,lane TEXT,ordinal INTEGER,receipt_id TEXT UNIQUE,
       response_json TEXT NOT NULL,created_at TEXT NOT NULL,
       PRIMARY KEY(cycle,lane,ordinal))""")
+    raw.execute("""CREATE TABLE IF NOT EXISTS post_ids(
+      post_id TEXT PRIMARY KEY, first_cycle INTEGER NOT NULL,
+      first_lane TEXT NOT NULL, first_ordinal INTEGER NOT NULL,
+      published_at TEXT)""")
     sender=make_strict_sender()
     done=0
     try:
@@ -128,6 +132,12 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved):
                     (job["cycle"],lane,ordinal,receipt,
                      json.dumps(body,ensure_ascii=False),
                      datetime.now(timezone.utc).isoformat()))
+                for post in posts:
+                    published = post.get("timestamp")
+                    raw.execute("""INSERT OR IGNORE INTO post_ids
+                        (post_id,first_cycle,first_lane,first_ordinal,published_at)
+                        VALUES (?,?,?,?,?)""",
+                        (post["id"],job["cycle"],lane,ordinal,published))
                 raw.execute("COMMIT")
                 planner.acknowledge(job,receipt_id=receipt,posts=posts,
                     next_cursor=cursor,exhausted=cursor is None,
