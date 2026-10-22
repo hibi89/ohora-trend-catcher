@@ -68,6 +68,10 @@ def fetch(lane, username, cursor, caller, token, version, sender, limit=8):
         raise RuntimeError("Next page indicated without after cursor; reserved job retained")
     if next_cursor is not None and (not isinstance(next_cursor,str) or not CURSOR.fullmatch(next_cursor)):
         raise RuntimeError("Invalid response cursor; reserved job retained")
+    if next_cursor is not None and next_cursor == cursor:
+        raise RuntimeError("Pagination cursor did not advance; reserved job retained")
+    if len({post["id"] for post in posts}) != len(posts):
+        raise RuntimeError("Duplicate post IDs within one page; reserved job retained")
     dates = []
     for post in posts:
         if isinstance(post.get("timestamp"),str):
@@ -96,6 +100,19 @@ def run(source,workspace,credentials_dir,*,max_requests=None,live,approved,verif
     if root.name.lower()!="p50_v2" or root.is_symlink():
         raise ValueError("Dedicated p50_v2 workspace required")
     planner=CyclePlanner(root/"planner.sqlite")
+    # A changed CSV order must never silently assign an old cursor to a
+    # different Instagram account. Keep the fingerprint in the planner DB.
+    planner.db.execute("""CREATE TABLE IF NOT EXISTS collection_identity(
+        id INTEGER PRIMARY KEY CHECK(id=1),
+        roster_sha256 TEXT NOT NULL)""")
+    known=planner.db.execute(
+        "SELECT roster_sha256 FROM collection_identity WHERE id=1").fetchone()
+    if known is not None and known["roster_sha256"] != digest:
+        planner.db.close()
+        raise RuntimeError("P50 roster has changed; refusing to reuse saved cursors")
+    if known is None:
+        planner.db.execute("INSERT INTO collection_identity(id,roster_sha256) VALUES (1,?)",
+                           (digest,))
     raw=sqlite3.connect(root/"raw.sqlite",isolation_level=None)
     raw.execute("""CREATE TABLE IF NOT EXISTS pages(
       cycle INTEGER,lane TEXT,ordinal INTEGER,receipt_id TEXT UNIQUE,
