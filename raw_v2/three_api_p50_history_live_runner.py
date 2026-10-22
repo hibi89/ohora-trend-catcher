@@ -325,6 +325,16 @@ def _latest_captures(coordinator, journal, accounts):
     return captures
 
 
+def _final_history_status(events, coordinator):
+    """Preserve explicit failure, otherwise surface any durable quota hold."""
+    status = events[-1]["status"] if events else "no_ready_work"
+    if status in ("manual_review", "blocked_unknown_http"):
+        return status
+    held = coordinator.db.execute(
+        "SELECT lane FROM lanes WHERE halted=1 ORDER BY lane LIMIT 1").fetchone()
+    return "quota_hold" if held is not None else status
+
+
 def run_history(source, workspace, *, environment, max_pages=5000,
                 live=False, approved=False, clock=None):
     """Explicit operator invocation; no HTTP unless both live gates are set."""
@@ -397,15 +407,7 @@ def run_history(source, workspace, *, environment, max_pages=5000,
                         break
                 counts = dict(store.db.execute(
                     "SELECT state,COUNT(*) FROM history_accounts GROUP BY state").fetchall())
-                # A page can commit successfully while its verified usage is >=85%,
-                # leaving the lane halted at the exact step budget boundary.
-                # Never report that boundary as a successful collection run.
-                held = coordinator.db.execute(
-                    "SELECT lane FROM lanes WHERE halted=1 ORDER BY lane LIMIT 1").fetchone()
-                final_status = events[-1]["status"] if events else "no_ready_work"
-                if held is not None and final_status not in ("manual_review", "blocked_unknown_http"):
-                    final_status = "quota_hold"
-                return {"status": final_status,
+                return {"status": _final_history_status(events, coordinator),
                         "pages_committed": committed, "attempted_steps": len(events),
                         "account_states": counts,
                         "last_account": events[-1].get("account_key") if events else None,
