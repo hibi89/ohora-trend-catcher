@@ -41,6 +41,19 @@ class P50HistoryCheckpointTests(unittest.TestCase):
         self.assertEqual(self.check(oldest_post_at=datetime(
             2025, 10, 21, tzinfo=timezone.utc))["state"], "window_covered")
 
+    def test_kst_boundary_does_not_prematurely_mark_window_covered(self):
+        # 2025-10-21 16:00 UTC is 2025-10-22 01:00 KST.
+        # KST cutoff=Oct 22 means this post is still in the window.
+        self.assertEqual(self.check(oldest_post_at=datetime(
+            2025, 10, 21, 16, tzinfo=timezone.utc))["state"],
+                         "continuation_ready")
+
+    def test_kst_previous_day_marks_window_covered(self):
+        # 2025-10-21 14:59 UTC is still 2025-10-21 in KST.
+        self.assertEqual(self.check(oldest_post_at=datetime(
+            2025, 10, 21, 14, 59, tzinfo=timezone.utc))["state"],
+                         "window_covered")
+
     def test_terminal_page_completes(self):
         self.assertEqual(self.check(terminal=True, next_cursor=None)["state"],
                          "terminal_verified")
