@@ -148,6 +148,74 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                 self.assertEqual(reopened.read(keys[0])["pages_verified"], 1)
                 self.assertEqual(reopened.read(keys[1])["pages_verified"], 0)
 
+    def test_real_capture_raw_sqlite_history_pipeline_no_transport(self):
+        """Exercise actual durable ports, not mocked receipt verification."""
+        import sqlite3
+        from three_api_capture import CaptureJournal
+        from three_api_raw_writer import ContractRawWriter
+        from three_api_request_spec import build_request_spec
+        from three_api_runtime_contract import (
+            CONTRACT_VERSION, RequestEnvelope, ResponseEnvelope, digest_sha256)
+        from test_three_api_raw_writer import SCHEMA
+        from three_api_p50_history_store import P50HistoryStore
+        from three_api_p50_history_offline_ingress import (
+            ingest_and_commit_offline_history_page)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            history_path = root / "p50" / "history.sqlite"
+            keys = [f"P50_US_{i:03d}" for i in range(1, 51)]
+            journal = CaptureJournal(str(root / "capture.sqlite"))
+            self.addCleanup(journal.close)
+            raw_db = sqlite3.connect(":memory:", isolation_level=None)
+            self.addCleanup(raw_db.close)
+            raw_db.executescript(SCHEMA)
+            raw_db.execute("INSERT INTO accounts VALUES(?)", (keys[0],))
+            raw = ContractRawWriter(raw_db)
+            spec = build_request_spec("A", "nailartist", after="tail", limit=4)
+            request = RequestEnvelope(
+                contract_version=CONTRACT_VERSION,
+                request_id="req-" + "a" * 64, run_id="offline-history",
+                roster_digest="b" * 64, day_kst=date(2026, 10, 22),
+                account_ordinal=1, account_key=keys[0],
+                username="nailartist", lane="A", phase="history", page=4,
+                cursor="tail", requested_at=datetime(2026, 10, 22, tzinfo=timezone.utc),
+                request_spec=spec, api_version="v26.0",
+                target_ig_user_id="17840000000000000",
+                request_spec_digest=digest_sha256({
+                    "api_version": "v26.0",
+                    "target_ig_user_id": "17840000000000000", "spec": spec}),
+                history_offline_only=True)
+            response = ResponseEnvelope(
+                CONTRACT_VERSION, request.request_id, 200,
+                {"business_discovery": {
+                    "id": "17840000000000099", "username": "nailartist",
+                    "media": {"data": [{
+                        "id": "1234567890", "media_type": "IMAGE",
+                        "timestamp": "2026-01-01T10:00:00+0000",
+                        "caption": "synthetic nail design",
+                        "permalink": "https://www.instagram.com/p/SYNTHETIC/",
+                    }], "paging": {"cursors": {"after": "next"}}}}},
+                {"x-app-usage": '{"call_count":20}'},
+                datetime(2026, 10, 22, tzinfo=timezone.utc), "next")
+            with P50HistoryStore(history_path) as store:
+                store.initialize(keys, date(2025, 10, 22))
+                store.anchor_verified_latest_tail(
+                    account_key=keys[0], next_cursor="tail",
+                    capture_id="latest-cap", raw_receipt_id="latest-raw",
+                    raw_receipt_verified=True, capture_verified=True)
+                result = ingest_and_commit_offline_history_page(
+                    store, journal, raw, request, response,
+                    oldest_post_at=datetime(2026, 1, 1, 10, tzinfo=timezone.utc),
+                    terminal=False)
+                self.assertEqual(result["history"]["state"], "continuation_ready")
+                self.assertEqual(store.read(keys[0])["cursor"], "next")
+                self.assertEqual(store.read(keys[0])["pages_verified"], 1)
+                self.assertIsNotNone(journal.get_capture_for_request(request.request_id))
+                self.assertEqual(raw_db.execute(
+                    "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
+            with P50HistoryStore(history_path) as reopened:
+                self.assertEqual(reopened.read(keys[0])["cursor"], "next")
+
     def test_terminal_cursor_contradiction_never_writes_raw(self):
         from three_api_p50_history_offline_ingress import (
             ingest_and_commit_offline_history_page)
