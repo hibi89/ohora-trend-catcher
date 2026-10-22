@@ -16,7 +16,7 @@ from test_three_api_raw_writer import SCHEMA
 from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter
 from three_api_p50_history_store import P50HistoryStore
-from three_api_p50_history_offline_ingress import ingest_and_commit_offline_history_page
+from three_api_p50_history_offline_ingress import (\n    ingest_and_commit_offline_history_page, ingest_offline_history_response)
 from three_api_request_spec import build_request_spec
 from three_api_runtime_contract import digest_sha256
 
@@ -57,7 +57,7 @@ class HistoricalFixtureE2E(unittest.TestCase):
                         oldest_post_at=datetime(2026, 10, 19, tzinfo=timezone.utc),
                         terminal=True)
                     self.assertEqual(result["history"]["state"], "terminal_verified")
-                    self.assertEqual(store.read(keys[0])["pages_verified"], 1)
+                    self.assertEqual(store.read(keys[0])["pages_verified"], 1)\n                    self.assertEqual(raw_db.execute(\n                        "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
                     self.assertEqual(journal.get_intent_outcome(request.request_id),
                                      "captured")
                     self.assertIsNotNone(writer.get_raw_receipt("cap-" + request.request_id))
