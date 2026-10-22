@@ -9,6 +9,8 @@ from datetime import datetime, timezone, timedelta
 import json
 from pathlib import Path
 import re
+import signal
+import threading
 import sqlite3
 import time
 import traceback
@@ -59,7 +61,11 @@ def fetch(lane, username, cursor, caller, token, version, sender, limit=8):
     if len(posts)>limit or any(not isinstance(p,dict) or not isinstance(p.get("id"),str) for p in posts):
         raise RuntimeError("Invalid posts; reserved job retained")
     paging = media.get("paging") or {}
-    next_cursor = (paging.get("cursors") or {}).get("after")
+    # A cursor alone does not prove there is another page. Graph may expose
+    # an after cursor even on the terminal page without a next link.
+    next_cursor = (paging.get("cursors") or {}).get("after") if paging.get("next") else None
+    if paging.get("next") and next_cursor is None:
+        raise RuntimeError("Next page indicated without after cursor; reserved job retained")
     if next_cursor is not None and (not isinstance(next_cursor,str) or not CURSOR.fullmatch(next_cursor)):
         raise RuntimeError("Invalid response cursor; reserved job retained")
     dates = []
@@ -75,7 +81,7 @@ def fetch(lane, username, cursor, caller, token, version, sender, limit=8):
     return posts,next_cursor,oldest,observed,bd,{'app': 'x-app-usage' in headers,'business': 'x-business-use-case-usage' in headers}
 
 
-def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_usage=None):
+def run(source,workspace,credentials_dir,*,max_requests=None,live,approved,verified_usage=None,stop_event=None):
     accounts,digest = load_p50_roster(source)
     if not live or not approved:
         return {"status":"offline","accounts":len(accounts),"meta_calls":0}
@@ -112,6 +118,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
         raise RuntimeError('Unreconciled HTTP attempt; manual review required')
     sender=make_strict_sender()
     done=0
+    stop_event = stop_event if stop_event is not None else threading.Event()
     try:
         # Verify all three independent API quotas on every manual start.
         # A quota hold does not permit jumping ahead to B or C.
@@ -122,7 +129,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
             print(json.dumps({"event":"quota_probe","lane":candidate,
                               "usage":observation["usage_percent"],
                               "verified":observation["quota_verified"]}),flush=True)
-        while max_requests is None or done < max_requests:
+        while not stop_event.is_set() and (max_requests is None or done < max_requests):
             job=planner.next_job()
             if job is None:
                 pause=planner.pause()
@@ -137,11 +144,14 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                 seconds=max(0,(until-datetime.now(timezone.utc)).total_seconds())
                 print(json.dumps({"status":reason,"wait_seconds":round(seconds),
                                   "committed":done}),flush=True)
-                time.sleep(seconds)
+                if stop_event.wait(seconds):
+                    break
                 # 63m barrier: refresh all lanes before starting the next A pass.
                 # Quota stop: refresh only the blocked lane, then resume its slot.
                 candidates=("A","B","C") if reason=="round_wait" else (pause["lane"],)
                 for candidate in candidates:
+                    if stop_event.is_set():
+                        break
                     observation=probe_lane(candidate,env,sender=sender)
                     planner.set_usage(candidate,observation["usage_percent"]
                                       if observation["quota_verified"] else None)
@@ -195,7 +205,8 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                 # Keep the reservation: unknown HTTP outcomes must never resend.
                 planner.set_usage(lane,None)
                 raise
-        return {"status":"request_limit_reached","recovered_requests":recovered,"committed_requests":done,
+        return {"status":"operator_stopped" if stop_event.is_set() else "request_limit_reached",
+                "recovered_requests":recovered,"committed_requests":done,
                 "summary":planner.summary()}
     finally:
         raw.close()
@@ -214,10 +225,18 @@ def main():
     p.add_argument("--live",action="store_true")
     p.add_argument("--confirm-owner-approval",action="store_true")
     a=p.parse_args()
+    stopping = threading.Event()
+    # Ctrl+C requests a graceful stop, retaining all committed page cursors.
+    # An HTTP request already in flight is allowed to finish and checkpoint.
+    def request_stop(signum, frame):
+        stopping.set()
+    signal.signal(signal.SIGINT, request_stop)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, request_stop)
     try:
         result=run(a.source,a.workspace,a.credentials_dir,
                    max_requests=a.max_requests,live=a.live,
-                   approved=a.confirm_owner_approval,
+                   approved=a.confirm_owner_approval,stop_event=stopping,
                    verified_usage={lane:value for lane,value in (
                        ("A",a.verified_usage_a),("B",a.verified_usage_b),
                        ("C",a.verified_usage_c)) if value is not None})
