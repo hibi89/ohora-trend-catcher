@@ -93,6 +93,62 @@ class OfflineHistoryBatchTests(unittest.TestCase):
                     SimpleNamespace(read=read), None, None, pages)
             ingest.assert_not_called()
 
+    def test_fifty_accounts_serial_batch_and_restart_cursor(self):
+        """50 account pages use isolated persisted cursors in deterministic order."""
+        import tempfile
+        from datetime import date
+        from three_api_p50_history_store import P50HistoryStore
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "p50" / "history.sqlite"
+            keys = ([f"P50_US_{i:03d}" for i in range(1, 19)] +
+                    [f"P50_KR_{i:03d}" for i in range(1, 17)] +
+                    [f"P50_JP_{i:03d}" for i in range(1, 17)])
+            pages = []
+            for index, key in enumerate(keys, 1):
+                p = page(index if index <= 28 else index - 28,
+                         f"tail-{index}", f"next-{index}")
+                p["request"].account_key = key
+                p["request"].request_id = f"history-{index}"
+                p["response"].request_id = f"history-{index}"
+                pages.append(p)
+            with P50HistoryStore(db_path) as store:
+                store.initialize(keys, date(2025, 10, 22))
+                for index, key in enumerate(keys, 1):
+                    store.anchor_verified_latest_tail(
+                        account_key=key, next_cursor=f"tail-{index}",
+                        capture_id=f"latest-capture-{index}",
+                        raw_receipt_id=f"latest-raw-{index}",
+                        raw_receipt_verified=True, capture_verified=True)
+                committed = []
+                def persist(store_arg, capture, raw, request, response, **kwargs):
+                    index = keys.index(request.account_key) + 1
+                    self.assertEqual(store_arg.read(request.account_key)["cursor"],
+                                     f"tail-{index}")
+                    decision = store_arg.commit_verified_page(
+                        account_key=request.account_key,
+                        expected_cursor=request.cursor,
+                        next_cursor=response.next_cursor,
+                        oldest_post_at=kwargs["oldest_post_at"],
+                        terminal=False,
+                        capture_id=f"history-capture-{index}",
+                        raw_receipt_id=f"history-raw-{index}",
+                        raw_receipt_verified=True, capture_verified=True)
+                    committed.append(request.account_key)
+                    return {"history": decision}
+                with patch(
+                    "three_api_p50_history_batch.ingest_and_commit_offline_history_page",
+                    side_effect=persist):
+                    result = ingest_offline_history_batch(
+                        store, object(), object(), pages, max_pages=50)
+                self.assertEqual(result["pages_committed"], 50)
+                self.assertEqual(committed, keys)
+                self.assertEqual(result["network_requests"], 0)
+            with P50HistoryStore(db_path) as reopened:
+                for index, key in enumerate(keys, 1):
+                    row = reopened.read(key)
+                    self.assertEqual(row["cursor"], f"next-{index}")
+                    self.assertEqual(row["pages_verified"], 1)
+
     def test_first_commit_failure_stops_remaining_pages(self):
         pages = [page(1, "tail", "next"), page(2, "next", None, terminal=True)]
         with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page",
