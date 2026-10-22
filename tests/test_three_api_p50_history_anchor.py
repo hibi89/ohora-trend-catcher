@@ -46,6 +46,27 @@ class HistoryAnchorTests(unittest.TestCase):
                         capture_id="capture-1")
                 self.assertEqual(store.read(self.keys[0])["state"], "ready")
 
+    def test_invalid_tail_timestamp_rejected_before_store_write(self):
+        capture_id = "capture-tail-invalid"
+        record = SimpleNamespace(
+            capture_id=capture_id,
+            request=SimpleNamespace(account_key=self.keys[0], phase="catchup",
+                                    page=3, request_id="req-3", cursor="prior"),
+            cursor_state=SimpleNamespace(request_id="req-3", current_cursor="prior",
+                                         page=3, next_cursor="next"),
+            normalized_posts=[{"timestamp": "2026-10-20T12:00:00+00:00"}],
+        )
+        journal = SimpleNamespace(get_capture=lambda _: record)
+        receipt = SimpleNamespace(raw_receipt_id="receipt-3")
+        raw = SimpleNamespace(get_raw_receipt=lambda _: receipt)
+        with P50HistoryStore(self.path) as store:
+            # The caller cannot manufacture an older cutoff date.
+            with self.assertRaises(ValueError):
+                anchor_latest_tail(store, journal, raw, account_key=self.keys[0],
+                                   capture_id=capture_id, terminal=False,
+                                   oldest_post_at=datetime(2025, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual(store.read(self.keys[0])["state"], "ready")
+
     def test_wrong_account_does_not_read_raw(self):
         record = SimpleNamespace(capture_id="capture-1",
             request=SimpleNamespace(account_key=self.keys[1], phase="front"))
