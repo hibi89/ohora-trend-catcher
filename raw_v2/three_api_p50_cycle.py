@@ -136,6 +136,8 @@ def main(argv=None):
                         "status": latest_result["status"],
                         "committed_pages": latest_result["committed_pages"]}
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        if args.mode == "history" and result.get("collection_complete") is False:
+            return 2
         if args.mode != "status" and result.get("status") in (
                 "quota_hold", "manual_review", "blocked_unknown_http",
                 "needs_verified_latest", "latest_incomplete", "account_blocked",
