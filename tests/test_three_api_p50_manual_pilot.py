@@ -91,6 +91,23 @@ class P50ManualPilotTests(unittest.TestCase):
         with sqlite3.connect(self.workspace / day_kst / "capture.sqlite") as capture:
             self.assertEqual(capture.execute("SELECT COUNT(*) FROM intents").fetchone()[0], 1)
         self.assertNotIn("synthetic-token", str(result))
+        # Cross-component contract: the actual P50 RAW schema must be readable
+        # by the downstream n8n export, not merely a synthetic SQLite fixture.
+        from three_api_sheets_export import export_observations
+        exported = export_observations(self.workspace / "p50_raw.sqlite")
+        self.assertEqual(len(exported["rows"]), 1)
+        row = exported["rows"][0]
+        self.assertEqual(row["country"], "US")
+        self.assertEqual(row["account_key"], "P50_US_001")
+        self.assertTrue(row["post_id"])
+        self.assertEqual(row["collection_batch"], "three-api-p50-" +
+                         day_kst.replace("-", ""))
+        self.assertTrue(row["observation_key"].endswith(":" + row["post_id"]))
+        self.assertEqual(exported["next_after_id"], row["observation_id"])
+        self.assertEqual(export_observations(
+            self.workspace / "p50_raw.sqlite",
+            after_id=exported["next_after_id"])["rows"], [])
+
 
     def test_three_independent_lanes_commit_three_distinct_accounts(self):
         """One bounded serial cycle uses A, B and C, each with verified RAW."""
