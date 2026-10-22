@@ -1,4 +1,9 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+### P6-083 — 2026-10-22 · Windows P50 suite second run and SQLite fixture handle repairs
+- **User-executed second result:** `Ran 18 tests in 0.942s; FAILED (errors=3, skipped=1)`. All three errors are `PermissionError [WinError 32]` during `TemporaryDirectory` cleanup: two P50 manual pilot fixtures (`capture.sqlite`, `coordinator.sqlite`) and one status fixture (`coordinator.sqlite`). The earlier batch-name assertion and workspace test error are gone.
+- **Root cause in fixtures:** Python `with sqlite3.connect(path) as db` controls transactions but does **not** close the connection. Windows forbids unlink of the still-open SQLite file. Replace fixture context managers with `contextlib.closing(sqlite3.connect(...))` for both tests; repairs `18373f4` (status) and `be29f38` (manual pilot). The production runner already uses ExitStack cleanup; do not modify it based on test-only lock evidence.
+- **Post-fix test run:** not executed, **verification pending**. Owner explicitly requests only to be contacted for a true blocking issue; avoid repeated routine test requests. No Meta calls, P294 DB writes, or main merge.
+
 ### P6-082 — 2026-10-22 · Windows P50 offline suite actual failure evidence
 - **User-executed result:** `python -m unittest discover -s tests -p "test_three_api_p50_*.py" -v` from a checkout at `bb9b2ed`: **18 run; failures=1, errors=4, skipped=1**. The full traceback of three other errors has not been supplied; do not call them fixed.
 - **Confirmed batch-name regression:** `test_injected_graph_response_commits_p50_raw_and_capture` expected `three-api-p50-20261022` but actual `three-api-three-api-p50-20261022`. Cause: previous change added `three-api-` at the caller while the downstream RAW path already prefixes it. Reverted that caller prefix in `raw_v2/three_api_p50_manual_pilot.py`, repair commit `a7dbc5c`.
