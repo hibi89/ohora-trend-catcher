@@ -34,6 +34,11 @@ def anchor_latest_tail(store, journal, raw_writer, *, account_key, capture_id,
         raise ValueError("Terminal latest-tail Capture contains continuation cursor")
     if not terminal and not record.cursor_state.next_cursor:
         raise ValueError("Missing verified continuation cursor")
+    if (record.cursor_state.next_cursor is not None and
+            (not isinstance(record.cursor_state.next_cursor, str)
+             or not record.cursor_state.next_cursor
+             or record.cursor_state.next_cursor == record.request.cursor)):
+        raise ValueError("Invalid or repeated latest-tail continuation cursor")
     # The history cutoff must be based on persisted posts, never caller input.
     timestamps = []
     for post in record.normalized_posts:
