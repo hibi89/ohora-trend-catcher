@@ -5,6 +5,7 @@ Optional: --details (50-account progress), --samples 3 (redacted examples).
 No tokens, cursor contents, media URLs, or full API response JSON are printed.
 """
 import argparse
+from contextlib import closing
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 import json
@@ -45,9 +46,9 @@ def report(workspace, include_details=False, sample_count=0):
     root = Path(workspace)
     if root.name.lower() != "p50_v2":
         raise ValueError("Expected existing dedicated p50_v2 workspace")
-    with read_only_database(root / "raw.sqlite") as raw, read_only_database(
+    with closing(read_only_database(root / "raw.sqlite")) as raw, closing(read_only_database(
         root / "planner.sqlite"
-    ) as planner:
+    )) as planner:
         raw.execute("BEGIN")
         planner.execute("BEGIN")
         totals = Counter()
