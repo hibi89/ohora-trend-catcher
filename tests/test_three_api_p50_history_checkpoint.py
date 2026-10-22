@@ -62,6 +62,12 @@ class P50HistoryCheckpointTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check(terminal=True)
 
+    def test_terminal_cursor_conflict_even_when_window_covered(self):
+        with self.assertRaisesRegex(ValueError, "Terminal page"):
+            self.check(
+                terminal=True, next_cursor="unexpected",
+                oldest_post_at=datetime(2025, 1, 1, tzinfo=timezone.utc))
+
     def test_missing_cursor_blocks(self):
         self.assertEqual(self.check(next_cursor=None)["state"],
                          "blocked_missing_cursor")
