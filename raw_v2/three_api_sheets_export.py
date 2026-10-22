@@ -74,6 +74,8 @@ def export_observations(db_path, *, after_id=0, limit=500):
                                "null" if post["view_count"] is None else "returned")
             if view_status not in ("returned", "absent", "null", "not_tested", "error"):
                 raise ValueError("Invalid Reels view_count field status")
+            if view_status == "returned" and post.get("view_count") is None:
+                raise ValueError("RAW view_count status conflicts with value")
             output.append({
                 "observation_key": row["request_id"] + ":" + row["post_id"],
                 "observation_id": row["observation_id"],
