@@ -88,7 +88,7 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                    side_effect=commit):
             result = ingest_and_commit_offline_history_page(
                 store, capture, object(), request, object(),
-                oldest_post_at=None)
+                oldest_post_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
         self.assertEqual(events, ["raw", "cursor"])
         self.assertEqual(result["history"]["state"], "continuation_ready")
 
@@ -103,7 +103,7 @@ class OfflineHistoryIngressTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 ingest_and_commit_offline_history_page(
                     store, capture, object(), request, object(),
-                    oldest_post_at=None)
+                    oldest_post_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
         self.assertEqual(events, ["raw"])
 
     def test_sqlite_cursor_persists_only_after_verified_commit(self):
