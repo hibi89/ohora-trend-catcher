@@ -60,6 +60,13 @@ class HistoricalFixtureE2E(unittest.TestCase):
                     self.assertEqual(store.read(keys[0])["pages_verified"], 0)
                     journal.close()
                     journal = CaptureJournal(str(base / "capture.sqlite"))
+                    with self.assertRaisesRegex(ValueError, "differs from persisted Capture"):
+                        ingest_and_commit_offline_history_page(
+                            store, journal, writer, request, response,
+                            oldest_post_at=datetime(2025, 10, 1, tzinfo=timezone.utc),
+                            terminal=True)
+                    self.assertEqual(store.read(keys[0])["pages_verified"], 0)
+                    self.assertEqual(store.read(keys[0])["cursor"], "tail-1")
                     result = ingest_and_commit_offline_history_page(
                         store, journal, writer, request, response,
                         oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
