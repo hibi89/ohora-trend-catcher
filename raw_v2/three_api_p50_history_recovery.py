@@ -22,19 +22,19 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
         latest_complete_keys=latest_complete_keys, captured_pages=captured_pages)
     available = {j['account_key'] for j in backlog['ready']}
     deferred = [j['account_key'] for j in backlog['awaiting_persisted_page']]
-    for _ in range(max_steps):
+    for _ in range(min(max_steps, len(available))):
         job = prepare_history_request(
             store, account_keys, usernames,
             latest_complete_keys=available, lane=lane)
         if job is None:
-            return {"status": "no_eligible_cursor", "completed": completed,
+            return {"status": "awaiting_persisted_page" if deferred else "no_eligible_cursor", "completed": completed,
                     "network_requests": 0, "deferred_accounts": deferred}
         key = (job["account_key"], job["cursor"])
         evidence = captured_pages.get(key)
         if evidence is None:
-            return {"status": "awaiting_persisted_page", "next_account": key[0],
-                    "next_cursor": key[1], "completed": completed,
-                    "network_requests": 0}
+            deferred.append(key[0])
+            available.discard(key[0])
+            continue
         if not isinstance(evidence, dict) or set(evidence) != {
                 "capture_id", "oldest_post_at", "terminal"}:
             raise ValueError("Invalid persisted history page descriptor")
