@@ -86,6 +86,33 @@ class HistoryCommitTests(unittest.TestCase):
                             terminal=True)
             self.assertEqual(store.read(account)["pages_verified"], 0)
 
+    def test_empty_request_cursor_never_reaches_raw(self):
+        account = self.keys[0]
+        with P50HistoryStore(self.path) as store:
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            for bad_cursor in (None, "", 7):
+                with self.subTest(cursor=bad_cursor):
+                    request = SimpleNamespace(
+                        account_key=account, phase="history",
+                        history_offline_only=True, cursor=bad_cursor,
+                        request_id="req", page=4)
+                    record = SimpleNamespace(
+                        capture_id="cap", request=request,
+                        cursor_state=SimpleNamespace(
+                            request_id="req", current_cursor=bad_cursor,
+                            next_cursor=None, page=4))
+                    journal = SimpleNamespace(get_capture=lambda _: record)
+                    raw = SimpleNamespace(get_raw_receipt=lambda _:
+                        self.fail("RAW accessed for invalid request cursor"))
+                    with self.assertRaises(ValueError):
+                        commit_persisted_history_page(
+                            store, journal, raw, account_key=account,
+                            capture_id="cap", oldest_post_at=None, terminal=True)
+            self.assertEqual(store.read(account)["pages_verified"], 0)
+
     def test_wrong_phase_rejected_before_raw_lookup(self):
         record = SimpleNamespace(capture_id="cap",
             request=SimpleNamespace(account_key=self.keys[0], phase="front"))
