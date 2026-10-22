@@ -80,6 +80,31 @@ class HistoryRecoveryTests(unittest.TestCase):
             self.assertEqual(store.read(account)["state"], "terminal_verified")
             self.assertEqual(result["network_requests"], 0)
 
+    def test_commit_cannot_skip_durable_page_counter(self):
+        with P50HistoryStore(self.path) as store:
+            account = self.keys[0]
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            captured = {(account, "tail"): {
+                "capture_id": "cap-1", "oldest_post_at": None,
+                "terminal": True}}
+            def fake_commit(store_arg, *_args, **_kwargs):
+                store_arg.db.execute(
+                    "UPDATE history_accounts SET cursor=NULL,"
+                    "state='terminal_verified',pages_verified=2 "
+                    "WHERE account_key=?", (account,))
+                return {"state": "terminal_verified"}
+            with patch("three_api_p50_history_recovery.commit_persisted_history_page",
+                       side_effect=fake_commit):
+                with self.assertRaisesRegex(RuntimeError, "did not advance"):
+                    recover_history_pages(
+                        store, None, None, self.keys, self.names,
+                        latest_complete_keys={account},
+                        captured_pages=captured, max_steps=1)
+            self.assertEqual(store.read(account)["pages_verified"], 2)
+
     def test_commit_claim_without_durable_progress_stops_recovery(self):
         with P50HistoryStore(self.path) as store:
             account = self.keys[0]
