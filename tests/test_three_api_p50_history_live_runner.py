@@ -28,9 +28,9 @@ from test_three_api_serial_bootstrap import MockResponse
 class HistoryFinalStatusTests(unittest.TestCase):
     def test_durable_hold_overrides_success_at_budget_boundary(self):
         with closing(sqlite3.connect(":memory:")) as db:
-            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER)")
-            db.executemany("INSERT INTO lanes VALUES (?,?)",
-                           [("A", 1), ("B", 0), ("C", 0)])
+            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
+            db.executemany("INSERT INTO lanes VALUES (?,?,?)",
+                           [("A", 1, "missing_usage"), ("B", 0, None), ("C", 0, None)])
             coordinator = SimpleNamespace(db=db)
             self.assertEqual(_final_history_status([{"status": "recovered"}],
                                                    coordinator), "quota_hold")
@@ -45,9 +45,9 @@ class HistoryFinalStatusTests(unittest.TestCase):
 
     def test_completion_requires_fifty_verified_accounts(self):
         with closing(sqlite3.connect(":memory:")) as db:
-            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER)")
+            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
             db.executemany("INSERT INTO lanes VALUES (?,?)",
-                           [("A", 0), ("B", 0), ("C", 0)])
+                           [("A", 0, None), ("B", 0, None), ("C", 0, None)])
             coordinator = SimpleNamespace(db=db)
             counts = {"window_covered": 1, "continuation_ready": 49}
             self.assertEqual(_history_completion_status(
@@ -61,15 +61,27 @@ class HistoryFinalStatusTests(unittest.TestCase):
                 [{"status": "recovered"}], coordinator,
                 {"window_covered": 49, "terminal_verified": 1}, 50),
                 ("completed", 50))
-            db.execute("UPDATE lanes SET halted=1 WHERE lane='A'")
+            db.execute("UPDATE lanes SET halted=1,reason='missing_usage' WHERE lane='A'")
             self.assertEqual(_history_completion_status(
                 [{"status": "recovered"}], coordinator,
                 {"window_covered": 50}, 50),
                 ("quota_hold", 50))
 
+    def test_independent_usage_hold_does_not_mask_progress(self):
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
+            db.executemany("INSERT INTO lanes VALUES (?,?,?)",
+                           [("A", 1, "usage_limit"), ("B", 0, None), ("C", 0, None)])
+            coordinator = SimpleNamespace(db=db)
+            self.assertEqual(_final_history_status([{"status": "recovered"}],
+                                                   coordinator), "recovered")
+            db.execute("UPDATE lanes SET halted=1,reason='usage_limit' WHERE lane!='A'")
+            self.assertEqual(_final_history_status([{"status": "recovered"}],
+                                                   coordinator), "quota_hold")
+
     def test_unheld_lane_does_not_invent_quota_hold(self):
         with closing(sqlite3.connect(":memory:")) as db:
-            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER)")
+            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
             db.executemany("INSERT INTO lanes VALUES (?,?)",
                            [("A", 0), ("B", 0), ("C", 0)])
             coordinator = SimpleNamespace(db=db)
