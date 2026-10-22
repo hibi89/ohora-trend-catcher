@@ -71,6 +71,32 @@ def history_status(workspace):
                 "history_pages_verified": verified, "accounts": accounts}
 
 
+
+def quota_status(workspace):
+    """Read-only lane gates; elapsed cooldown is NOT evidence of quota recovery."""
+    root = Path(workspace).expanduser()
+    if root.name.lower() != "p50" or root.is_symlink():
+        raise ValueError("Dedicated non-symlink P50 workspace required")
+    candidates = sorted(root.glob("????-??-??/coordinator.sqlite"))
+    if not candidates:
+        return {"quota": "not_initialized"}
+    path = candidates[-1]
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError("Symlink P50 coordinator forbidden")
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+        lanes = [
+            {"lane": lane, "halted": bool(halted), "reason": reason,
+             "ready_at_utc": ready_at,
+             "operator_action": ("await_verified_usage" if halted else "none")}
+            for lane, halted, reason, ready_at in db.execute(
+                "SELECT lane,halted,reason,ready_at FROM lanes ORDER BY lane")
+        ]
+    if len(lanes) != 3 or [x["lane"] for x in lanes] != ["A", "B", "C"]:
+        raise ValueError("Invalid P50 quota lane roster")
+    return {"quota": "read_only", "quota_lanes": lanes,
+            "cooldown_expiry_is_not_quota_recovery": True}
+
+
 def main(argv=None):
     source, workspace = _paths()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -93,7 +119,8 @@ def main(argv=None):
             if args.live or args.confirm_owner_approval or args.credentials_dir:
                 raise ValueError("Read-only status cannot accept live options")
             result = {"latest": inspect_p50(args.workspace),
-                      **history_status(args.workspace)}
+                      **history_status(args.workspace),
+                      **quota_status(args.workspace)}
         else:
             if not args.live or not args.confirm_owner_approval:
                 raise ValueError("Live operation requires both explicit approval flags")
