@@ -262,6 +262,106 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                 journal2.close()
                 raw_db2.close()
 
+    def test_fifty_accounts_real_capture_raw_sqlite_batch(self):
+        """50 real Capture and RAW receipts; durable independent SQLite cursors."""
+        import sqlite3
+        from three_api_capture import CaptureJournal
+        from three_api_raw_writer import ContractRawWriter
+        from three_api_request_spec import build_request_spec
+        from three_api_runtime_contract import (
+            CONTRACT_VERSION, RequestEnvelope, ResponseEnvelope, digest_sha256)
+        from test_three_api_raw_writer import SCHEMA
+        from three_api_p50_history_store import P50HistoryStore
+        from three_api_p50_history_batch import ingest_offline_history_batch
+        keys = ([f"P50_US_{i:03d}" for i in range(1, 19)] +
+                [f"P50_KR_{i:03d}" for i in range(1, 17)] +
+                [f"P50_JP_{i:03d}" for i in range(1, 17)])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            journal = CaptureJournal(str(root / "capture.sqlite"))
+            db = sqlite3.connect(root / "raw.sqlite", isolation_level=None)
+            try:
+                db.executescript(SCHEMA)
+                db.executemany("INSERT INTO accounts VALUES(?)",
+                               [(key,) for key in keys])
+                raw = ContractRawWriter(db)
+                pages = []
+                with P50HistoryStore(root / "p50" / "history.sqlite") as store:
+                    store.initialize(keys, date(2025, 10, 22))
+                    for i, key in enumerate(keys, 1):
+                        store.anchor_verified_latest_tail(
+                            account_key=key, next_cursor=f"tail-{i}",
+                            capture_id=f"latest-capture-{i}",
+                            raw_receipt_id=f"latest-raw-{i}",
+                            raw_receipt_verified=True, capture_verified=True)
+                        username = f"nail_{i}"
+                        spec = build_request_spec(
+                            "A", username, after=f"tail-{i}", limit=4)
+                        request = RequestEnvelope(
+                            contract_version=CONTRACT_VERSION,
+                            request_id="req-" + f"{i:064x}",
+                            run_id="offline-fifty", roster_digest="b" * 64,
+                            day_kst=date(2026, 10, 22),
+                            account_ordinal=i, account_key=key,
+                            username=username, lane="A", phase="history",
+                            page=4, cursor=f"tail-{i}",
+                            requested_at=datetime(2026, 10, 22, tzinfo=timezone.utc),
+                            request_spec=spec, api_version="v26.0",
+                            target_ig_user_id="17840000000000000",
+                            request_spec_digest=digest_sha256({
+                                "api_version": "v26.0",
+                                "target_ig_user_id": "17840000000000000",
+                                "spec": spec}),
+                            history_offline_only=True)
+                        response = ResponseEnvelope(
+                            CONTRACT_VERSION, request.request_id, 200,
+                            {"business_discovery": {
+                                "id": str(17840000000000000 + i),
+                                "username": username,
+                                "media": {"data": [{
+                                    "id": str(900000000000 + i),
+                                    "media_type": "IMAGE",
+                                    "timestamp": "2026-01-01T10:00:00+0000",
+                                    "caption": "synthetic nails",
+                                    "permalink": f"https://www.instagram.com/p/SYNTHETIC{i}/",
+                                }]}}},
+                            {"x-app-usage": '{"call_count":20}'},
+                            datetime(2026, 10, 22, tzinfo=timezone.utc),
+                            None)
+                        pages.append({
+                            "request": request, "response": response,
+                            "oldest_post_at": datetime(
+                                2026, 1, 1, 10, tzinfo=timezone.utc),
+                            "terminal": True})
+                    result = ingest_offline_history_batch(
+                        store, journal, raw, pages, max_pages=50)
+                    self.assertEqual(result["pages_committed"], 50)
+                    self.assertEqual(result["network_requests"], 0)
+                    self.assertEqual(db.execute(
+                        "SELECT COUNT(*) FROM three_api_contract_receipts"
+                    ).fetchone()[0], 50)
+                    self.assertEqual(db.execute(
+                        "SELECT COUNT(*) FROM post_observations"
+                    ).fetchone()[0], 50)
+                    for key in keys:
+                        self.assertEqual(store.read(key)["pages_verified"], 1)
+                journal.close()
+                db.close()
+                with P50HistoryStore(root / "p50" / "history.sqlite") as reopened:
+                    self.assertTrue(all(
+                        reopened.read(key)["pages_verified"] == 1
+                        for key in keys))
+                check = sqlite3.connect(root / "raw.sqlite")
+                try:
+                    self.assertEqual(check.execute(
+                        "SELECT COUNT(*) FROM three_api_contract_receipts"
+                    ).fetchone()[0], 50)
+                finally:
+                    check.close()
+            finally:
+                journal.close()
+                db.close()
+
     def test_terminal_cursor_contradiction_never_writes_raw(self):
         from three_api_p50_history_offline_ingress import (
             ingest_and_commit_offline_history_page)
