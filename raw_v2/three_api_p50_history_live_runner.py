@@ -94,6 +94,17 @@ def _recover(store, journal, raw, account, pending):
             or record.request.lane != pending["lane"]
             or record.request.page != pending["page"]):
         raise ValueError("History Capture does not match persistent request binding")
+    # A full four-post page with no next cursor is ambiguous, not proof
+    # that the target account has ended. Preserve Capture/RAW for review.
+    if record.cursor_state.next_cursor is None and len(record.normalized_posts) == 4:
+        commit_raw_and_confirm(journal, raw, record)
+        store.db.execute(
+            "UPDATE history_accounts SET state='blocked_missing_cursor' WHERE account_key=?",
+            (key,))
+        store.db.execute(
+            "UPDATE history_requests SET status='blocked' WHERE request_id=?",
+            (pending["request_id"],))
+        return {"status": "blocked_missing_cursor", "account_key": key}
     # Idempotent RAW recovery. Does not access transport.
     receipt = commit_raw_and_confirm(journal, raw, record)
     persisted = raw.get_raw_receipt(record.capture_id)
@@ -218,6 +229,10 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
 def _latest_captures(coordinator, journal, accounts):
     """Derive page-3 Capture IDs from exact immutable job/request bindings."""
     captures = {}
+    if coordinator.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='job_request_bindings'").fetchone() is None:
+        return captures
     for account in accounts:
         ordinal = account["ordinal"]
         jobs = coordinator.db.execute(
