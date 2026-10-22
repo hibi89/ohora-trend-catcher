@@ -70,6 +70,14 @@ class SheetsExportTests(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             export_observations(Path(self.tmp.name) / "missing.sqlite")
 
+    def test_duplicate_raw_receipt_fails_closed(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute("""INSERT INTO three_api_raw_receipts
+                          SELECT 'duplicate', account_key, payload_json
+                          FROM three_api_raw_receipts WHERE capture_id='cap-1'""")
+        with self.assertRaisesRegex(ValueError, "Ambiguous RAW receipts"):
+            export_observations(self.path)
+
     def test_symlinked_raw_database_is_rejected(self):
         link = Path(self.tmp.name) / "linked.sqlite"
         try:
