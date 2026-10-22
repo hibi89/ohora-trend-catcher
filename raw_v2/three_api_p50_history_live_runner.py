@@ -122,6 +122,45 @@ def _recover(store, journal, raw, account, pending):
     return {"status": "recovered", "account_key": key, "state": decision["state"]}
 
 
+def _release_verified_history_hold(store, coordinator, journal, raw, lane, reason, now):
+    """Resume a completed history request without waiting or replaying HTTP.
+
+    A missing/unknown response, uncommitted checkpoint or unverified RAW
+    receipt NEVER opens the lane.
+    """
+    if not isinstance(reason, str) or not reason.startswith("history_pending:"):
+        return False
+    request_id = reason[len("history_pending:"):]
+    binding = store.db.execute(
+        "SELECT status FROM history_requests WHERE request_id=? AND lane=?",
+        (request_id, lane)).fetchone()
+    if binding is None or binding["status"] != "committed":
+        return False
+    record = journal.get_capture_for_request(request_id)
+    if record is None or record.request.lane != lane:
+        return False
+    receipt = raw.get_raw_receipt(record.capture_id)
+    if receipt is None:
+        return False
+    validate_raw_receipt(record, receipt)
+    if store.db.execute(
+            "SELECT 1 FROM history_receipts WHERE capture_id=?",
+            (record.capture_id,)).fetchone() is None:
+        return False
+    evidence = journal.get_response_evidence(request_id)
+    usage = (evidence.get("safe_usage", {}).get("max_usage_percent")
+             if evidence and evidence.get("classification") == "safe" else None)
+    if type(usage) is int and 0 <= usage < 85:
+        coordinator.db.execute(
+            "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
+            "WHERE lane=? AND reason=?",
+            (stamp(now), lane, reason))
+        return True
+    if type(usage) is int and usage >= 85:
+        coordinator.observe_usage(lane, usage, now=now)
+    return False
+
+
 def _ready_lane(coordinator, lane, now):
     item = coordinator.db.execute(
         "SELECT halted,reason,ready_at FROM lanes WHERE lane=?", (lane,)).fetchone()
@@ -155,11 +194,19 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
     for pending in store.db.execute(
             "SELECT * FROM history_requests WHERE status='pending' ORDER BY page,account_key").fetchall():
         return _recover(store, journal, raw, by_key[pending["account_key"]], pending)
-    # Other history attempts can be blocked, but a transport failure must never
-    # be silently retried by picking a new account/request ID.
-    for row in coordinator.db.execute("SELECT lane,halted,reason FROM lanes"):
-        if row["halted"] and row["reason"] in (
-                "usage_limit", "missing_usage", "live_pending_usage"):
+    # Completed history requests may have crashed after checkpoint commit but
+    # before clearing their conservative lane hold. Reconcile from BOTH durable
+    # receipts and below-85 quota evidence, never from elapsed time alone.
+    for lane_state in coordinator.db.execute(
+            "SELECT lane,halted,reason FROM lanes").fetchall():
+        if lane_state["halted"] and isinstance(lane_state["reason"], str):
+            _release_verified_history_hold(
+                store, coordinator, journal, raw,
+                lane_state["lane"], lane_state["reason"], now)
+    # If any lane remains held, the A/B/C shared-quota assumption is unknown:
+    # no alternate-lane bypass or automatic reset after 65 minutes.
+    for row in coordinator.db.execute("SELECT lane,halted FROM lanes").fetchall():
+        if row["halted"]:
             return {"status": "quota_hold", "lane": row["lane"]}
     plan = plan_next_history_page(
         store, [a["key"] for a in accounts],
@@ -191,10 +238,13 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
             api_version=api_version, target_ig_user_id=caller_ids[lane],
             history_live_approved=True)
         _reserve(store, account, row, lane, request_id, page)
-        coordinator.db.execute(
-            "UPDATE lanes SET halted=1,reason='live_pending_usage',ready_at=MAX(ready_at,?) "
+        hold_reason = "history_pending:" + request_id
+        changed = coordinator.db.execute(
+            "UPDATE lanes SET halted=1,reason=?,ready_at=MAX(ready_at,?) "
             "WHERE lane=? AND halted=0",
-            (stamp(now + timedelta(minutes=COOLDOWN_MINUTES)), lane))
+            (hold_reason, stamp(now + timedelta(minutes=COOLDOWN_MINUTES)), lane)).rowcount
+        if changed != 1:
+            raise ValueError("History lane safety hold could not be reserved")
         executor = ThreeApiContractExecutor(transport, journal, raw)
         try:
             executor.execute(request)
@@ -218,8 +268,8 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
         if type(usage) is int and 0 <= usage < 85:
             coordinator.db.execute(
                 "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
-                "WHERE lane=? AND reason='live_pending_usage'",
-                (stamp(now), lane))
+                "WHERE lane=? AND reason=?",
+                (stamp(now), lane, hold_reason))
         elif type(usage) is int and usage >= 85:
             coordinator.observe_usage(lane, usage, now=now)
         return dict(outcome, lane=lane, usage_percent=usage)
