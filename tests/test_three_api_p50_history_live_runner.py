@@ -58,6 +58,7 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.names = []
         self.next_cursors = []
         self.post_count = 1
+        self.fail_first = False
 
         def sender(prepared, timeout):
             self.calls += 1
@@ -67,6 +68,10 @@ class HistoryHTTPIntegration(unittest.TestCase):
                 username = self.accounts[self.calls - 1]["username"]
             next_cursor = self.next_cursors.pop(0) if self.next_cursors else "cursor" + str(self.calls)
             response = MockResponse()
+            if self.fail_first and self.calls == 1:
+                response.status = 400
+                response.payload = {"error": {"code": 110, "error_subcode": 2207013}}
+                return response
             response.payload["business_discovery"]["username"] = username
             post = response.payload["business_discovery"]["media"]["data"][0]
             post["username"] = username
@@ -186,6 +191,18 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.step()["status"], "recovered")
         self.assertEqual(self.calls, 2)
         self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 2)
+
+    def test_one_account_http_400_does_not_stall_other_safe_account(self):
+        self.anchor(1)
+        self.anchor(2)
+        self.fail_first = True
+        self.names = ["nail_us_1", "nail_us_2"]
+        self.assertEqual(self.step()["status"], "account_blocked")
+        self.assertEqual(self.step()["status"], "recovered")
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["state"],
+                         "blocked_unverified_page")
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 1)
 
     def test_fair_round_of_fifty_pages(self):
         for ordinal in range(1, 51):
