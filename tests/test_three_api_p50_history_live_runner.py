@@ -86,7 +86,7 @@ class HistoryFinalStatusTests(unittest.TestCase):
         with closing(sqlite3.connect(":memory:")) as db:
             db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
             db.executemany("INSERT INTO lanes VALUES (?,?,?)",
-                           [("A", 0), ("B", 0), ("C", 0)])
+                           [("A", 0, None), ("B", 0, None), ("C", 0, None)])
             db.row_factory = sqlite3.Row
             coordinator = SimpleNamespace(db=db)
             self.assertEqual(_final_history_status([{"status": "recovered"}],
