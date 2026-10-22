@@ -222,6 +222,19 @@ class HistoryFixtureDispatcherTests(unittest.TestCase):
                 for key in self.keys[:3]:
                     self.assertEqual(store.read(key)["pages_verified"], 1)
 
+    def test_budget_one_reports_unserved_anchored_account_as_pending(self):
+        first = self.fixture(0)
+        pages = {(self.keys[0], "tail-0"): first}
+        with patch("three_api_p50_history_fixture_runner.ingest_offline_history_batch",
+                   side_effect=self.persist):
+            with P50HistoryStore(self.path) as store:
+                result = self.dispatch(store, pages, max_pages=1)
+                self.assertEqual(result["pages_committed"], 1)
+                self.assertEqual(result["status"], "step_budget_exhausted")
+                self.assertIn(self.keys[1], result["deferred_accounts"])
+                self.assertEqual(store.read(self.keys[1])["cursor"], "tail-1")
+                self.assertEqual(store.read(self.keys[1])["pages_verified"], 0)
+
     def test_invalid_page_budget_rejected_without_store(self):
         for limit in (0, 51, True, "10"):
             with self.subTest(limit=limit), self.assertRaisesRegex(
