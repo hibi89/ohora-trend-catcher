@@ -99,6 +99,50 @@ class GuardedBResumeTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "conditions not met"):
                         run(root, "2026-10-22", True, now=NOW)
 
+    def test_operator_attested_fresh_dashboard_usage_is_audited(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            make_workspace(root)
+            observed = (NOW - timedelta(seconds=30)).isoformat()
+            preview = run(root, "2026-10-22", False, now=NOW,
+                          verified_usage_percent=42,
+                          evidence_observed_at=observed)
+            self.assertFalse(preview["lane_resumed"])
+            self.assertEqual(preview["usage_evidence_source"],
+                             "operator_attested_meta_dashboard")
+            result = run(root, "2026-10-22", True, now=NOW,
+                         verified_usage_percent=42,
+                         evidence_observed_at=observed)
+            self.assertTrue(result["lane_resumed"])
+            db = sqlite3.connect(root / "2026-10-22" / "coordinator.sqlite")
+            try:
+                self.assertEqual(db.execute(
+                    "SELECT source,usage_percent FROM lane_resume_evidence").fetchone(),
+                    ("operator_attested_meta_dashboard", 42))
+                self.assertEqual(db.execute(
+                    "SELECT halted,reason FROM lanes WHERE lane='B'").fetchone(),
+                    (0, None))
+                self.assertEqual(db.execute(
+                    "SELECT state FROM jobs WHERE id=451").fetchone()[0], "leased")
+            finally:
+                db.close()
+
+    def test_operator_attestation_rejects_high_stale_and_future_usage(self):
+        cases = (
+            (85, NOW - timedelta(seconds=30)),
+            (30, NOW - timedelta(minutes=2)),
+            (30, NOW + timedelta(seconds=1)),
+        )
+        for usage, observed_at in cases:
+            with self.subTest(usage=usage, observed_at=observed_at):
+                with tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    make_workspace(root)
+                    with self.assertRaisesRegex(ValueError, "conditions not met"):
+                        run(root, "2026-10-22", True, now=NOW,
+                            verified_usage_percent=usage,
+                            evidence_observed_at=observed_at.isoformat())
+
 
 if __name__ == "__main__":
     unittest.main()
