@@ -67,6 +67,22 @@ class HistoryAnchorTests(unittest.TestCase):
                                    oldest_post_at=datetime(2025, 1, 1, tzinfo=timezone.utc))
             self.assertEqual(store.read(self.keys[0])["state"], "ready")
 
+    def test_repeated_latest_tail_cursor_rejected_without_raw_lookup(self):
+        record = SimpleNamespace(
+            capture_id="repeat-tail",
+            request=SimpleNamespace(account_key=self.keys[0], phase="catchup",
+                                    page=3, request_id="req", cursor="same"),
+            cursor_state=SimpleNamespace(request_id="req", current_cursor="same",
+                                         page=3, next_cursor="same"),
+        )
+        journal = SimpleNamespace(get_capture=lambda _: record)
+        raw = SimpleNamespace(get_raw_receipt=lambda _: SimpleNamespace(raw_receipt_id="raw"))
+        with P50HistoryStore(self.path) as store:
+            with self.assertRaises(ValueError):
+                anchor_latest_tail(store, journal, raw, account_key=self.keys[0],
+                                   capture_id="repeat-tail")
+            self.assertEqual(store.read(self.keys[0])["state"], "ready")
+
     def test_wrong_account_does_not_read_raw(self):
         record = SimpleNamespace(capture_id="capture-1",
             request=SimpleNamespace(account_key=self.keys[1], phase="front"))
