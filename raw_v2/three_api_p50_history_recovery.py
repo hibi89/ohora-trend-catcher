@@ -30,13 +30,17 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
                 or not isinstance(key[1], str) or not key[1]):
             raise ValueError("Invalid persisted history page index key")
     # Reject malformed page descriptors before the first cursor can advance.
+    from datetime import datetime
     for descriptor in captured_pages.values():
         if (not isinstance(descriptor, dict) or set(descriptor) !=
                 {"capture_id", "oldest_post_at", "terminal"}):
             raise ValueError("Invalid persisted history page descriptor")
         if (not isinstance(descriptor["capture_id"], str)
                 or not descriptor["capture_id"]
-                or type(descriptor["terminal"]) is not bool):
+                or type(descriptor["terminal"]) is not bool
+                or (descriptor["oldest_post_at"] is not None and
+                    (not isinstance(descriptor["oldest_post_at"], datetime) or
+                     descriptor["oldest_post_at"].utcoffset() is None))):
             raise ValueError("Invalid persisted history page evidence")
     completed = []
     latest_complete_keys = frozenset(latest_complete_keys)
