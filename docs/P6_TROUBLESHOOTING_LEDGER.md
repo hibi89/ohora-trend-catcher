@@ -1,4 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+### P6-085 — 2026-10-22 · P50 v3 P1 safety fixes and KST cutoff decision
+- **Owner decision:** begin implementing goal-driven P50 manual latest/history cycle v3 on isolated feature branch; frozen P294 design, limit=4, 85% stop, 65-minute/unknown-HTTP protections remain unchanged. No live Meta, operational DB, scheduler, main merge authorization.
+- **Confirmed fixture defect:** `tests/test_three_api_p50_manual_pilot.py::test_three_independent_lanes_commit_three_distinct_accounts` used `with sqlite3.connect(...)` which commits a transaction but does not close Windows DB handle. Fixed with `contextlib.closing` in commit `ba3a27c`. Postfix suite not run; Windows WinError 32 risk addressed at source, outcome still unverified.
+- **Confirmed calendar discrepancy:** history checkpoint compared oldest post UTC date against cutoff specified as P50/KST date. A post at 2025-10-21T16:00Z is 2025-10-22T01:00+09:00 and must not falsely complete the 365-day window for cutoff 2025-10-22. Fixed at `8d3f4d9`; edge tests added at `2de5af4`.
+- **OPEN P0:** verified latest page-3 tail anchor, actual history transport and durable RAW/Capture readback are not wired. History preview is read-only; status must not claim success. Simulation v2 capacity formula needs real lane quota measurements; A/B/C must not be assumed independent.
+- **Verification:** offline Python suite NOT RUN, CI unverified, no real Meta HTTP, operational SQLite writes, n8n activation or main merge. Safe rollback: revert individual P50 commits. Next: evidence-gated history anchor and offline regression.
+
 ### P6-084 — 2026-10-22 · P50 365-day history checkpoint foundation
 - Added `raw_v2/three_api_p50_history_checkpoint.py`: pure offline cursor decision. Requires RAW and Capture verification before advancement; uncertain HTTP blocks; missing/repeated cursor blocks; explicit terminal or timestamp older than cutoff stops. Cursor remains opaque, not reconstructed from paging URL.
 - Added `tests/test_three_api_p50_history_checkpoint.py` with 11 unit cases. **Tests not executed in assistant environment; no success claim.**
