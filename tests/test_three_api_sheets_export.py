@@ -123,6 +123,45 @@ class SheetsExportTests(unittest.TestCase):
         self.assertEqual(export_observations(
             self.path, after_id=4, limit=1)["rows"], [])
 
+    def test_orphan_post_blocks_cursor(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(3,'missing-post','2026-10-22T03:00:00Z','batch-3','req-3',60,5,1,1)"
+            )
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(4,'p1','2026-10-22T04:00:00Z','batch-4','req-4',61,6,1,1)"
+            )
+            db.execute("INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
+                       ("cap-4", "P50_US_001", json.dumps({
+                           "request_id": "req-4", "posts": [{"id": "p1"}]})))
+        result = export_observations(self.path, after_id=2)
+        self.assertEqual(result["rows"], [])
+        self.assertEqual(result["next_after_id"], 2)
+
+    def test_orphan_account_blocks_cursor(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "INSERT INTO posts VALUES "
+                "('p-orphan','missing-account','2026-10-22T00:00:00Z',"
+                "'IMAGE',NULL,'nails','https://instagram.com/p/orphan/')"
+            )
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(3,'p-orphan','2026-10-22T03:00:00Z','batch-3','req-3',60,5,1,1)"
+            )
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(4,'p1','2026-10-22T04:00:00Z','batch-4','req-4',61,6,1,1)"
+            )
+            db.execute("INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
+                       ("cap-4", "P50_US_001", json.dumps({
+                           "request_id": "req-4", "posts": [{"id": "p1"}]})))
+        result = export_observations(self.path, after_id=2)
+        self.assertEqual(result["rows"], [])
+        self.assertEqual(result["next_after_id"], 2)
+
     def test_late_receipt_restores_ordered_export(self):
         with sqlite3.connect(self.path) as db:
             db.execute(
