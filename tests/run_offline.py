@@ -36,7 +36,7 @@ _ROSTER_METHOD_GROUPS = {
     "test_missing_account_294_blocks_global_gap_without_lying_about_coverage": "roster-3",
 }
 GROUP_NAMES = ORCHESTRATOR_GROUPS + ROSTER_GROUPS + (
-    "report", "observations", "projection", "remaining"
+    "report", "observations", "projection", "remaining", "remaining-2", "remaining-3"
 )
 _ORCHESTRATOR_MODULES = frozenset({
     "test_three_api_daily_orchestrator",
@@ -102,7 +102,11 @@ def group_for_case(case):
         # 480-second Windows job. Never skip/re-execute a case across shards.
         index = zlib.crc32(case.id().encode("utf-8")) % len(ORCHESTRATOR_GROUPS)
         return ORCHESTRATOR_GROUPS[index]
-    return _MODULE_GROUPS.get(module, "remaining")
+    if module in _MODULE_GROUPS:
+        return _MODULE_GROUPS[module]
+    # Balance otherwise-unassigned cases across deterministic Windows shards.
+    shards = ("remaining", "remaining-2", "remaining-3")
+    return shards[zlib.crc32(case.id().encode("utf-8")) % len(shards)]
 
 
 def select_group(suite, group):
