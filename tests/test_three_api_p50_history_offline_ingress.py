@@ -263,7 +263,7 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                 raw_db2.close()
 
     def test_fifty_accounts_real_capture_raw_sqlite_batch(self):
-        """50 real Capture and RAW receipts; durable independent SQLite cursors."""
+        """50 accounts across A/B/C, real Capture and RAW and SQLite restart."""
         import sqlite3
         from three_api_capture import CaptureJournal
         from three_api_raw_writer import ContractRawWriter
@@ -272,7 +272,6 @@ class OfflineHistoryIngressTests(unittest.TestCase):
             CONTRACT_VERSION, RequestEnvelope, ResponseEnvelope, digest_sha256)
         from test_three_api_raw_writer import SCHEMA
         from three_api_p50_history_store import P50HistoryStore
-        from three_api_p50_history_batch import ingest_offline_history_batch
         keys = ([f"P50_US_{i:03d}" for i in range(1, 19)] +
                 [f"P50_KR_{i:03d}" for i in range(1, 17)] +
                 [f"P50_JP_{i:03d}" for i in range(1, 17)])
@@ -295,15 +294,16 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                             raw_receipt_id=f"latest-raw-{i}",
                             raw_receipt_verified=True, capture_verified=True)
                         username = f"nail_{i}"
+                        assigned_lane = ("A", "B", "C")[(i - 1) % 3]
                         spec = build_request_spec(
-                            "A", username, after=f"tail-{i}", limit=4)
+                            assigned_lane, username, after=f"tail-{i}", limit=4)
                         request = RequestEnvelope(
                             contract_version=CONTRACT_VERSION,
                             request_id="req-" + f"{i:064x}",
                             run_id="offline-fifty", roster_digest="b" * 64,
                             day_kst=date(2026, 10, 22),
                             account_ordinal=i, account_key=key,
-                            username=username, lane="A", phase="history",
+                            username=username, lane=assigned_lane, phase="history",
                             page=4, cursor=f"tail-{i}",
                             requested_at=datetime(2026, 10, 22, tzinfo=timezone.utc),
                             request_spec=spec, api_version="v26.0",
@@ -342,10 +342,15 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                         store, journal, raw, keys,
                         {key: f"nail_{i}" for i, key in enumerate(keys, 1)},
                         latest_complete_keys=set(keys),
-                        fixture_pages=fixtures, max_pages=50, lane="A")
+                        fixture_pages=fixtures, max_pages=50, lane="A",
+                        lanes_by_account={key: ("A", "B", "C")[i % 3]
+                                          for i, key in enumerate(keys)})
                     self.assertEqual(result["pages_committed"], 50)
                     self.assertEqual(result["status"], "completed")
                     self.assertEqual(result["network_requests"], 0)
+                    self.assertEqual([p["request"].lane for p in pages].count("A"), 17)
+                    self.assertEqual([p["request"].lane for p in pages].count("B"), 17)
+                    self.assertEqual([p["request"].lane for p in pages].count("C"), 16)
                     self.assertEqual(db.execute(
                         "SELECT COUNT(*) FROM three_api_contract_receipts"
                     ).fetchone()[0], 50)
