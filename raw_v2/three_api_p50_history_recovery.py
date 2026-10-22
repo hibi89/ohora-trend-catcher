@@ -25,6 +25,7 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
         raise ValueError("Exactly 50 pilot accounts required")
     for key in captured_pages:
         if (not isinstance(key, tuple) or len(key) != 2
+                or not isinstance(key[0], str)
                 or key[0] not in valid_accounts
                 or not isinstance(key[1], str) or not key[1]):
             raise ValueError("Invalid persisted history page index key")
