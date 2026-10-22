@@ -17,6 +17,8 @@ def commit_persisted_history_page(store, journal, raw_writer, *,
     request = record.request
     if request.account_key != account_key or request.phase != "history":
         raise ValueError("Wrong account or non-history Capture")
+    if getattr(request, "history_offline_only", None) is not True:
+        raise ValueError("Explicit offline history Capture required")
     current = store.read(account_key)
     if (current is None or current["state"] != "continuation_ready"
             or current["cursor"] != request.cursor):
