@@ -144,6 +144,7 @@ class LiveSerialStep:
                     page_committed = False
                     account_failed = False
                     account_error_usage = None
+                    error_response_usage = None
                     try:
                         try:
                             self.bindings.dispatch_once(
@@ -154,6 +155,13 @@ class LiveSerialStep:
                             # durable, already-bound failed intent, NOT a retry.
                             binding = self.bindings.lookup(job["id"])
                             failure = self.executor.capture.get_failure(request.request_id)
+                            if failure is not None:
+                                usage_match = re.search(
+                                    r"\busage_pct=(\d{1,3})\b", failure.safe_message)
+                                if usage_match is not None:
+                                    candidate_usage = int(usage_match.group(1))
+                                    if 0 <= candidate_usage <= 100:
+                                        error_response_usage = candidate_usage
                             if (binding is None
                                     or binding["request_id"] != request.request_id
                                     or self.executor.capture.get_intent_outcome(
@@ -202,6 +210,10 @@ class LiveSerialStep:
                                 (stamp(now), lane))
                         elif account_failed and type(account_error_usage) is int and account_error_usage >= 85:
                             self.coordinator.observe_usage(lane, account_error_usage, now=now)
+                        elif type(error_response_usage) is int and error_response_usage >= 85:
+                            # Preserve a global quota stop on any received error
+                            # response; sub-threshold unknown errors remain held.
+                            self.coordinator.observe_usage(lane, error_response_usage, now=now)
                         elif type(usage) is int and usage >= 85:
                             self.coordinator.observe_usage(lane, usage, now=now)
                         # Missing quota evidence, unknown outcomes and failures

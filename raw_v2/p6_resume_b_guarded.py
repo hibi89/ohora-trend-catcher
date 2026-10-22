@@ -5,13 +5,14 @@ supply --approve-b-resume; otherwise this is read-only. Does not dispatch work.
 """
 from __future__ import annotations
 import argparse
+from contextlib import closing
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
 import sys
 
-def run(workspace: Path, day: str, approve: bool):
+def run(workspace: Path, day: str, approve: bool, *, now=None):
     root = workspace.expanduser()
     control = root / day / "coordinator.sqlite"
     capture = root / day / "capture.sqlite"
@@ -19,7 +20,7 @@ def run(workspace: Path, day: str, approve: bool):
             or not capture.is_file() or control.is_symlink() or capture.is_symlink()):
         raise ValueError("Existing isolated pilot stores required")
     uri = control.resolve().as_uri() + ("?mode=rw" if approve else "?mode=ro")
-    with sqlite3.connect(uri, uri=True, timeout=15, isolation_level=None) as db:
+    with closing(sqlite3.connect(uri, uri=True, timeout=15, isolation_level=None)) as db:
         db.row_factory = sqlite3.Row
         if approve:
             db.execute("BEGIN IMMEDIATE")
@@ -27,36 +28,48 @@ def run(workspace: Path, day: str, approve: bool):
             lane = db.execute(
                 "SELECT halted,reason,ready_at FROM lanes WHERE lane='B'"
             ).fetchone()
-            failed = db.execute(
-                "SELECT j.id,j.state,j.account_ordinal,j.page,b.request_id "
-                "FROM jobs j JOIN job_request_bindings b ON b.job_id=j.id "
-                "WHERE j.id=451 AND j.lane='B'"
-            ).fetchone()
             candidate = db.execute(
                 "SELECT j.id,j.state,j.lane,j.page,"
                 "EXISTS(SELECT 1 FROM job_request_bindings b WHERE b.job_id=j.id) AS bound "
-                "FROM jobs j WHERE j.account_ordinal=152 AND j.page=1"
+                "FROM jobs j WHERE j.lane='B' AND j.page=1 AND j.state='pending' "
+                "AND NOT EXISTS (SELECT 1 FROM job_request_bindings b WHERE b.job_id=j.id) "
+                "ORDER BY j.account_ordinal LIMIT 1"
             ).fetchone()
-            if lane is None or failed is None or candidate is None:
+            if lane is None or candidate is None:
                 raise ValueError("Required B-lane evidence missing")
-            with sqlite3.connect(capture.resolve().as_uri()+"?mode=ro",uri=True) as c:
-                outcome = c.execute(
-                    "SELECT outcome FROM intents WHERE request_id=?",
-                    (failed["request_id"],)
-                ).fetchone()
-                captured = c.execute(
-                    "SELECT COUNT(*) FROM captures WHERE request_id=?",
-                    (failed["request_id"],)
-                ).fetchone()[0]
-            now = datetime.now(timezone.utc)
+            db.execute("ATTACH DATABASE ? AS capture_ro",
+                       (capture.resolve().as_uri()+"?mode=ro",))
+            evidence_rows = db.execute(
+                "SELECT r.received_at,r.http_status,r.safe_usage_json "
+                "FROM capture_ro.response_evidence r "
+                "JOIN capture_ro.intents i USING(request_id) "
+                "JOIN capture_ro.captures cap USING(request_id) "
+                "JOIN job_request_bindings b USING(request_id) "
+                "JOIN jobs j ON j.id=b.job_id "
+                "WHERE j.lane='B' AND j.state='done' AND i.outcome='captured' "
+                "AND cap.processed_receipt IS NOT NULL "
+                "AND r.classification='safe' AND r.http_status BETWEEN 200 AND 299 "
+                "ORDER BY r.received_at DESC"
+            ).fetchall()
+            now = now or datetime.now(timezone.utc)
             ready = datetime.fromisoformat(lane["ready_at"])
+            fresh_safe_usage = None
+            for evidence in evidence_rows:
+                try:
+                    observed_at = datetime.fromisoformat(
+                        evidence["received_at"].replace("Z", "+00:00"))
+                    metrics = json.loads(evidence["safe_usage_json"])
+                    usage = metrics.get("max_usage_percent")
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                if (observed_at.tzinfo is not None and observed_at >= ready
+                        and type(usage) is int and 0 <= usage < 85):
+                    fresh_safe_usage = usage
+                    break
             safe = (
-                failed["account_ordinal"] == 151
-                and failed["page"] == 1
-                and failed["state"] == "leased"
-                and outcome is not None and outcome[0] == "failed_no_retry"
-                and captured == 0
+                fresh_safe_usage is not None
                 and candidate["lane"] == "B"
+                and candidate["page"] == 1
                 and candidate["state"] == "pending"
                 and candidate["bound"] == 0
                 and lane["halted"] == 1
@@ -79,8 +92,9 @@ def run(workspace: Path, day: str, approve: bool):
                 "mode": "MANUAL_B_RESUME" if approve else "READ_ONLY_B_RESUME_PREFLIGHT",
                 "safe_conditions": True,
                 "lane_resumed": bool(approve),
-                "failed_job_451_preserved": True,
-                "account_152_unbound": True,
+                "fresh_safe_usage_percent": fresh_safe_usage,
+                "failed_requests_replayed": False,
+                "candidate_job_unbound": True,
                 "meta_called": False,
             }
         except BaseException:

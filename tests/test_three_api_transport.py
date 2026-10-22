@@ -203,6 +203,17 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(ctx.exception.category, "http_error")
         self.assertFalse(ctx.exception.retryable)
 
+    def test_generic_error_retains_only_numeric_usage_evidence(self):
+        sender = lambda *_a, **_k: MemoryResponse(
+            {"error": {"code": 999, "message": "private provider text"}},
+            status=400, headers={"X-App-Usage": '{"call_count":85.2}'})
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "http_error")
+        self.assertEqual(ctx.exception.safe_message,
+                         "HTTP rejected (code=999) usage_pct=86")
+        self.assertNotIn("private provider text", ctx.exception.safe_message)
+
     def test_default_graph_gate_blocks_before_sender(self):
         calls = []
         client = GraphHTTPClient(sender=lambda *_a, **_k: calls.append(1))

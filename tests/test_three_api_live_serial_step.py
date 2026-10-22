@@ -117,6 +117,14 @@ class LiveSerialStepGateTests(unittest.TestCase):
         self.assertEqual(len(self._write_calls(runner.coordinator.db)), 1)
         runner.bindings.dispatch_once.assert_called_once()
 
+    def test_generic_error_high_usage_keeps_hold_and_records_global_stop(self):
+        runner, result = self._simulate_missing_account(
+            "HTTP rejected (code=999) usage_pct=86")
+        self.assertIsNone(result)
+        self.assertEqual(len(self._write_calls(runner.coordinator.db)), 1)
+        runner.coordinator.observe_usage.assert_called_once_with(
+            "A", 86, now=self.kwargs["requested_at"])
+
     def test_missing_account_usage_at_threshold_preserves_quota_hold(self):
         runner, result = self._simulate_missing_account(
             "Target account unavailable code=110 subcode=2207013 usage_pct=85")

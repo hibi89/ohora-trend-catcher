@@ -36,6 +36,16 @@ def parse_meta_usage(headers):
     return value
 
 
+def _safe_usage_suffix(headers):
+    """Expose only a bounded numeric quota observation from an error response."""
+    from math import ceil
+    from three_api_usage import parse_usage
+    observed = parse_usage(headers)
+    if observed is None:
+        return ""
+    return f" usage_pct={ceil(observed)}"
+
+
 def extract_next_cursor(payload, *, requested_cursor=None):
     """Validate Business Discovery paging without following or storing next URL."""
     if not isinstance(payload, dict):
@@ -111,7 +121,8 @@ class MetaTransport:
         if (status == 400 and code == 100 and isinstance(error, dict)
                 and error.get("cursor_invalid") is True):
             _fail(request.request_id, "cursor_invalid", "account",
-                  "Meta explicitly rejected the supplied cursor", status=status)
+                  "Meta explicitly rejected the supplied cursor"
+                  + _safe_usage_suffix(result.get("headers")), status=status)
         # GraphHTTPClient already strips all free-form Meta text and tokens.
         # Retain only bounded integer diagnostics for *future* failures.
         safe_codes = []
@@ -121,11 +132,17 @@ class MetaTransport:
             safe_codes.append(f"subcode={subcode}")
         diagnostic = " (" + ", ".join(safe_codes) + ")" if safe_codes else ""
         if code in (4, 17, 32, 613) or status == 429:
-            _fail(request.request_id, "rate_limit", "global", "Meta rate limit" + diagnostic, status=status)
+            _fail(request.request_id, "rate_limit", "global",
+                  "Meta rate limit" + diagnostic
+                  + _safe_usage_suffix(result.get("headers")), status=status)
         if status == 401:
-            _fail(request.request_id, "auth", "global", "Authentication rejected", status=status)
+            _fail(request.request_id, "auth", "global",
+                  "Authentication rejected" + _safe_usage_suffix(result.get("headers")),
+                  status=status)
         if status == 403 or code in (10, 200):
-            _fail(request.request_id, "permission", "account", "Permission rejected" + diagnostic, status=status)
+            _fail(request.request_id, "permission", "account",
+                  "Permission rejected" + diagnostic
+                  + _safe_usage_suffix(result.get("headers")), status=status)
         # Meta code 110 / subcode 2207013 denotes an unavailable target user.
         # Classify the immutable failed request only; quota remains held because
         # error responses do not carry verified usage evidence in this contract.
@@ -133,18 +150,13 @@ class MetaTransport:
             # Error responses can contain trustworthy per-lane usage headers.
             # Persist only the conservative integer percentage, never raw
             # headers/body. Missing/malformed usage remains a held lane.
-            from math import ceil
-            from three_api_usage import parse_usage
-            observed_usage = parse_usage(result.get("headers"))
-            usage_suffix = (
-                f" usage_pct={ceil(observed_usage)}"
-                if observed_usage is not None else ""
-            )
             _fail(request.request_id, "http_error", "account",
                   "Target account unavailable code=110 subcode=2207013"
-                  + usage_suffix, status=status)
+                  + _safe_usage_suffix(result.get("headers")), status=status)
         if not 200 <= status < 300 or "error" in result["body"]:
-            _fail(request.request_id, "http_error", "account", "HTTP rejected" + diagnostic, status=status)
+            _fail(request.request_id, "http_error", "account",
+                  "HTTP rejected" + diagnostic
+                  + _safe_usage_suffix(result.get("headers")), status=status)
         # Keep the successfully received body available for P1's durable
         # response-evidence journal, even at >=85% usage or malformed paging.
         # The following request is blocked; a received response is not lost.

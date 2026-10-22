@@ -1,5 +1,11 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
-> Index: [P6-077 safe numeric failure diagnostics](docs/P6_TROUBLESHOOTING_LEDGER.md) · diagnostic exposes bounded code/subcode/usage integers only; tests 65/65 PASS.
+> Index: [P6-078 B resume evidence gate](docs/P6_TROUBLESHOOTING_LEDGER.md) · B can clear only with a completed post-cooldown safe response under 85%; diagnostic and gate regressions 62/62 PASS.
+
+### P6-078 — 2026-10-22 · B resume requires durable fresh quota evidence
+- **확정된 안전 결함:** `p6_resume_b_guarded.py --approve-b-resume` previously could clear `live_pending_usage` based on an elapsed `ready_at` plus a hard-coded historical failed job/candidate check. It did not require any post-hold usage evidence. Current B has no current-day response evidence, so it must remain halted.
+- **최소 수정:** Resume now requires a completed B-bound job, a processed durable Capture, a sanitized successful HTTP response received after cooldown readiness, and persisted usage below 85%, plus an unbound pending B page-1 candidate. It never replays an old failure. Generic transport errors now retain only a bounded numeric usage percentage; a value >=85 applies the global stop while other generic errors remain held.
+- **테스트 회귀와 원인:** First test import failed because the new test used a module path absent from the project root; corrected to `raw_v2.p6_resume_b_guarded`. The next fixture run showed `no such table: job_request_bindings` because evidence joins span coordinator and Capture databases; corrected with a read-only attached Capture DB. Test fixtures initially rolled back setup rows when closing SQLite connections; explicit commits/closes fixed the fixture. Final command `python -m unittest tests.test_p6_resume_b_guarded tests.test_three_api_transport tests.test_three_api_live_serial_step -v`: **62/62 PASS**; `git diff --check` PASS.
+- **안전·한계:** Offline synthetic SQLite only. No Meta call, operational DB/Capture/RAW edit, cooldown reset, retry, scheduler action, or frozen-design change. Current B still lacks the fresh evidence required by the new gate; B resume remains unavailable pending authorized evidence. Changes are uncommitted in the local worktree. GitHub push/CI not performed.
 
 ### P6-077 — 2026-10-22 · Read-only failure diagnostics expose safe numeric Meta codes
 - **결정/이유:** A/B error root-cause analysis required persisted Meta codes, but `--failures` hid all detail. Extend only the read-only summary to expose bounded integer `meta_error_code`, `meta_error_subcode`, and `safe_usage_percent`; do not expose `safe_message`, response bodies, tokens, IDs, or arbitrary text. This changes diagnostics only, not API lanes, scheduler, storage contract, retry behavior, or frozen collection policy.
@@ -338,6 +344,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-078 | B quota 재개 gate | cooldown 이후 완료된 페이지의 safe usage 증거만 재개 허용 | 현 B에 증거 없음; 62/62 offline PASS; 미커밋 |
 | P6-077 | 진단/민감정보 | read-only 실패 진단에 숫자 오류 코드·사용률만 노출 | 문자열 원문/재시도 불가, 65/65 PASS |
 | P6-076 | lane/auth 진단 | A code 110/2207013; B usage proof missing; C usage 85%; local credential files structurally valid | A 4건 no-retry; B/C hold 유지; 운영 tick은 자동 검토 차단 |
 | P6-001 | 개발운영 | 병렬 작업·웹 채팅 사용량 소진·원복 어려움 | 격리 브랜치/워크트리·복원지점·인수인계 필요 |
