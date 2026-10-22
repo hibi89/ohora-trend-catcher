@@ -25,7 +25,7 @@
 - 최신 150/150페이지, 과거 135페이지; 전체 고유 게시물 1,140건.
 - 과거 365일 범위: **1계정 window_covered / 49계정 continuation_ready**. 전체 50계정 과거 수집 **미완료**.
 - 최종 출력: `{"status":"quota_hold","attempted_steps":136,"pages_committed":135,"last_lane":"A","last_account":null}`. 보호 종료 코드 경로와 일치하지만 **실제 레인 중단 사유와 마지막 프로세스 종료 코드는 로컬 미검증**.
-- 사용자 보고 백업: `C:\Users\haein\Downloads\OHORA_P50_BACKUP_20261022_173524`에 SQLite 5개와 `status.json`. 별도 RAW 파일 포함 여부, WAL/SHM 정합성, 원본 대비 해시·파일 수 검증은 대기.
+- 사용자 보고 백업: `%USERPROFILE%\Downloads\OHORA_P50_BACKUP_20261022_173524`에 SQLite 5개와 `status.json`. 별도 RAW 파일 포함 여부, WAL/SHM 정합성, 원본 대비 해시·파일 수 검증은 대기.
 - 외부 GitHub에서는 실제 Meta HTTP/토큰·운영 SQLite·RAW payload를 확인하거나 변경하지 않았다.
 
 ## 3. `quota_hold` 조건과 승인 전 안전 검증
