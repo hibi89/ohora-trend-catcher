@@ -6,6 +6,7 @@ The P50 live dispatch remains disabled here; this CLI is offline-only.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
@@ -59,8 +60,10 @@ def initialize_isolated_workspace(source, workspace):
         raise ValueError("Workspace must be a dedicated directory named p50")
     root = root.resolve()
     raw_path = root / "p50_raw.sqlite"
-    coordinator_path = root / "control" / "coordinator.sqlite"
-    if raw_path.is_symlink() or coordinator_path.is_symlink():
+    day_kst = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+    coordinator_path = root / day_kst / "coordinator.sqlite"
+    if (raw_path.is_symlink() or coordinator_path.is_symlink()
+            or coordinator_path.parent.is_symlink()):
         raise ValueError("Symlink database paths are forbidden")
     if raw_path.exists() or coordinator_path.exists():
         raise ValueError("P50 bootstrap is create-only; existing stores need explicit inspection")
@@ -69,6 +72,9 @@ def initialize_isolated_workspace(source, workspace):
         raw.close()
         coordinator = P50Coordinator(coordinator_path)
         try:
+            from three_api_manual_pilot import _inherit_latest_lane_gates
+            _inherit_latest_lane_gates(
+                coordinator, root, day_kst, now=datetime.now(timezone.utc))
             coordinator.seed()
         finally:
             coordinator.db.close()
