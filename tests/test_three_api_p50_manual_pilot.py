@@ -113,7 +113,7 @@ class P50ManualPilotTests(unittest.TestCase):
             env[f"P6_META_TOKEN_{lane}"] = "test-token-" + lane
             env[f"P6_META_IG_ID_{lane}"] = caller
             ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}",
-                                      f"P6_META_IG_ID_{lane})
+                                      f"P6_META_IG_ID_{lane}")
 
             def sender(request, timeout, *, lane=lane):
                 calls.append(lane)
