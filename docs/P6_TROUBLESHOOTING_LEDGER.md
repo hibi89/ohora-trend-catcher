@@ -1,5 +1,12 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
-> Index: [P6-074 scheduled no-progress recheck](docs/P6_TROUBLESHOOTING_LEDGER.md) · n8n 09:05 trigger success, no new page; A=0 eligible, B/C held.
+> Index: [P6-075 n8n runtime stopped — OPEN](docs/P6_TROUBLESHOOTING_LEDGER.md) · last trigger 09:05 KST; no matching n8n process at 10:36; cause unknown.
+
+### P6-075 — 2026-10-22 · OPEN / 원인 미확인 — n8n runtime process 부재
+- **증상/범위:** n8n SQLite runtime에는 동일명 P6 workflow 3행 중 active=1이 남아 있으나, 최신 trigger execution은 09:05:15 KST. 10:36 KST Windows process 목록에서 command line이 `OHORA_N8N_RUNTIME` 또는 n8n을 가리키는 Node process 0개, 기존 PID 20464 없음, n8n Windows service 미발견. 이로써 09:05 이후 scheduled trigger가 실행되지 않은 상태를 확인했으나, 더 늦은 다른 실행 경로 존재 여부는 확인하지 못함.
+- **근본 원인/가설:** 원인 미확인. 프로세스 종료, 호스트 재시작, 사용자 측 중단, runtime 오류 중 어느 것인지 증거가 없다. DB의 `active=1`은 프로세스 생존 증거가 아니다.
+- **영향/안전:** 이 agent는 scheduler를 시작/중지하지 않았고 Meta 요청·P6/RAW/Capture DB 변경도 하지 않았다. 최신 P6 snapshot은 321 receipts / 1284 observations / 1065 unique. A eligible=0; B 216 eligible, held `live_pending_usage`; C 74 eligible, held `usage_limit`, `ready_at` 경과 후에도 halt 유지. 전체 수집 중단 및 미완료.
+- **대안 판단/예방:** 새 AGENTS.md는 scheduler deployment/live calls를 승인하지 않았다고 명시한다. 승인 없는 n8n 재시작, lane reset, Meta 호출은 배제한다. 재개 전에 소유자가 runtime과 lane-safe usage evidence를 확인하고, 하나의 scheduler만 유지할 것.
+- **수정/검증/롤백:** runtime은 수정되지 않아 repair SHA 없음 (N/A; OPEN). 문서 기록은 HANDOFF.md, STATUS.md, 이 ledger만 변경. `$py -m unittest tests.test_p6_troubleshooting_handoff_guard -v` 4/4 PASS; `git diff --check` PASS. Meta/HTTP 0회. 문서 rollback은 이 P6-075 entry 및 두 current-state 요약의 해당 커밋만 되돌리면 되며 운영 데이터 영향 없음.
 
 ### P6-074 — 2026-10-22 · 09:05 예약 tick 무진척 재확인
 - **실행/데이터:** 기존 활성 n8n workflow의 09:05:15 KST trigger는 `success`; read-only pilot snapshot은 321 receipts / 1284 observations / 1065 unique로 09:00과 동일. A 146 done/4 leased/144 pending, B 0/294, C 72/222.
@@ -378,6 +385,7 @@
 | P6-072 | 교차 채팅 인수인계와 emergency 50 경계 | latest emergency history is separate from P6; quota-bucket independence unverified | Preserve separate stores; no simultaneous dispatch or gate reset without quota proof |
 | P6-073 | 예약 tick no-progress 재확인 | 09:00 wrapper success but no page commit; A eligible 0, B/C lanes held | C 85% usage stop/cooldown to 09:45 KST; no reset or live call |
 | P6-074 | 09:05 예약 tick no-progress 재확인 | wrapper success, pilot counters unchanged from 09:00 | A 0 eligible; B/C held; no assistant Meta call |
+| P6-075 | n8n runtime process 부재 — OPEN | active DB row but latest trigger 09:05; no matching process at 10:36 | Cause unknown; no restart/deploy/Meta call; collection halted |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
 | P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
