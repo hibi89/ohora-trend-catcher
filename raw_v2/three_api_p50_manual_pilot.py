@@ -109,6 +109,8 @@ def main(argv=None):
             args.source, args.workspace, live=args.live,
             approved=args.confirm_owner_approval,
             environment=env, max_pages=args.max_pages)
+    except KeyboardInterrupt:
+        parser.exit(130, "P50 interrupted; durable receipts and cursor state retained.\n")
     except (ValueError, TypeError, RuntimeError, OSError):
         parser.exit(2, "P50 stopped safely; inspect local configuration and logs.\n")
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
