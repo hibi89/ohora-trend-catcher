@@ -47,7 +47,7 @@ class OfflineHistoryBatchTests(unittest.TestCase):
         pages[1]["response"].request_id = "wrong"
         with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page") as ingest:
             with self.assertRaises(ValueError):
-                ingest_offline_history_batch(None, None, None, pages)
+                ingest_offline_history_batch(self.store(), None, None, pages)
             ingest.assert_not_called()
 
     def test_budget_and_duplicate_request_preflight(self):
