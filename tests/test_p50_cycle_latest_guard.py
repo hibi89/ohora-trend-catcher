@@ -28,5 +28,20 @@ class P50CycleSafetyTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["status"], "latest_incomplete")
 
 
+    def test_completed_latest_dispatches_history_without_recollecting(self):
+        with patch.object(cycle, "_needs_latest", return_value=False), \
+             patch.object(cycle, "run_p50") as latest, \
+             patch.object(cycle, "run_history", return_value={"status": "quota_hold"}) as history, \
+             patch.object(cycle, "load_three_api_environment", return_value={}), \
+             patch("sys.stdout", new_callable=io.StringIO) as out:
+            result = cycle.main(["history", "--live", "--confirm-owner-approval",
+                                 "--credentials-dir", "/synthetic",
+                                 "--workspace", "/synthetic/p50"])
+        self.assertEqual(result, 0)
+        latest.assert_not_called()
+        history.assert_called_once()
+        self.assertEqual(json.loads(out.getvalue())["status"], "quota_hold")
+
+
 if __name__ == "__main__":
     unittest.main()
