@@ -1,7 +1,16 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-081 n8n native import verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · fixed missing workflow ID; isolated n8n 2.40.7 import/export round trip: 2 workflows, both inactive; 23/23 focused PASS.
 > Index: [P6-080 n8n receipt readback](docs/P6_TROUBLESHOOTING_LEDGER.md) · approved tick compares the read-only before/after durable receipt counts to committed pages; mock tests 23/23 PASS; runtime store access pending.
 > Index: [P6-079 n8n result gate and alert wiring](docs/P6_TROUBLESHOOTING_LEDGER.md) · workflow export remains inactive; 20/20 focused PASS; live calls require `OHORA_P6_LIVE_APPROVED=YES`; alerts require an operator-configured webhook.
 > Index: [P6-078 B/C resume evidence gate](docs/P6_TROUBLESHOOTING_LEDGER.md) · The guarded B/C helper requires fresh usage below 85%, elapsed cooldown, explicit approval and (for C) a no-competing-C-traffic attestation; 69/69 focused PASS.
+
+### P6-081 — 2026-10-22 · n8n JSON import 실패 수정 및 격리 runtime 확인
+- **증상/원인:** Global n8n CLI 2.40.7은 `n8n --help`를 명령 도움말로 종료하지 않고 runtime을 시작했으며 scratch `.n8n/config`에 자동 생성 키를 기록했다. 세션을 중단하고 node/n8n 프로세스·5678 listener 종료를 확인했다. 별도 격리 DB import에서 error-alert workflow는 성공했지만 daily workflow는 `SQLITE_CONSTRAINT: NOT NULL constraint failed: workflow_entity.id`로 실패. 확정 원인은 daily JSON의 top-level workflow `id` 누락.
+- **최소 수정/검증:** daily export에 `id=p6-daily-collection-v1` 추가, error workflow ID 참조 회귀검사 추가. `N8N_USER_FOLDER`를 프로젝트 scratch로 고정하고 telemetry/personalization 비활성화 후 n8n 2.40.7에서 error-alert와 daily workflow 각각 import, 2개 export 확인. 두 workflow 모두 `active=false`, daily의 `errorWorkflow=p6-error-alert-v1` 유지. scratch DB/config 삭제, 프로세스와 listener 없음 확인.
+- **추가 관측:** 첫 import 과정에서 n8n telemetry hostname이 DNS `ENOTFOUND`를 반환했다. 자동 telemetry 장애이며 workflow import 실패 원인이 아니었다. 재시도에서는 diagnostic telemetry를 끄고 완료.
+- **문서 guard fixture 회귀:** P6-081 top summary를 추가한 뒤 handoff guard는 각 `HANDOFF.md`/`STATUS.md`의 첫 2000자 안에 `AGENTS.md` 링크를 기대했으나 못 찾았다. 원인은 새 요약이 기존 링크를 prefix 밖으로 밀어낸 것; 두 P6-081 요약에 직접 링크를 추가했다. 이전 23개 adapter tests는 PASS했지만 guard 2개 assertion은 FAIL이었으므로 이 수정 후 guard 재실행 결과만 PASS로 보고한다.
+- **안전/검증:** `tests.test_three_api_n8n_tick tests.test_p6_resume_b_guarded tests.test_p6_troubleshooting_handoff_guard`: 최종 23/23 PASS; Node classifier mocks 3/3 PASS; Python compile, PowerShell AST, JSON parse, `git diff --check` PASS. 비운영 scratch n8n DB에는 두 workflow를 import/export한 후 scratch DB/config를 삭제했다. 운영 n8n DB·P6 DB/RAW/Capture 쓰기 0, Meta HTTP 0. 실제 사용자 n8n import/activation/webhook/수집은 여전히 미검증. 작업 범위는 n8n 연동이며 P6 코어/동결 설계 불변. Repair commit SHA: `15a3b8393fe624a660946d8a6fd7a93f8147cb77`.
+- **재발 방지/롤백:** 글로벌 `n8n --help` 대신 격리 폴더가 설정된 구체적 subcommand만 사용; 테스트 import에는 top-level ID와 inactive 상태를 확인한다. 롤백은 daily JSON ID 및 연계 test/docs 변경만 revert. scratch 아티팩트는 이미 제거.
 
 ### P6-080 — 2026-10-22 · n8n 영수증 저장 readback 및 레인 상태 표시
 - **범위/결정:** 사용자 정정에 따라 n8n 연동만 보강했다. 승인된 tick 직전 기존 pilot receipt count를 기존 read-only status API로 읽고, tick 뒤 count 차이가 `committed_pages` 이상인지 확인한다. 신설 pilot은 0 receipt baseline으로 시작한다. 불완전/읽을 수 없는 기존 상태는 API dispatch 전에 `MANUAL_REVIEW`로 fail-closed한다. 확인 결과는 receipt delta, total durable receipts, A/B/C lane counts로 n8n execution/output에 전달한다. 저장 확인 실패·불일치는 alert/manual review이며, cursor/collector 내부와 동결 정책은 변경하지 않는다.
@@ -359,6 +368,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-081 | n8n export/import 호환성 | missing daily workflow ID 수정; n8n 2.40.7 isolated round-trip, both inactive | 23/23 focused PASS; operational activation pending |
 | P6-080 | n8n 저장 검증 | read-only receipt baseline/delta, 레인 count를 결과·알림으로 전달 | 23/23 focused PASS; actual pilot readback pending |
 | P6-079 | n8n 결과·승인·알림 연동 | live opt-in, structured progress/attention, redacted webhook; 16/16 PASS | inactive export; runtime import/webhook pending |
 | P6-078 | B/C quota 재개 gate | post-cooldown Capture evidence or explicit dashboard attestation; C also requires no-competing-traffic confirmation | B/C not resumed; 69/69 focused offline PASS |
