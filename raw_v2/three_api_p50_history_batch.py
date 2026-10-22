@@ -16,6 +16,7 @@ def ingest_offline_history_batch(store, capture, raw_writer, pages, *, max_pages
     if len(pages) > max_pages:
         raise ValueError("History fixture batch exceeds explicit budget")
     seen = set()
+    expected_cursors = {}
     for page in pages:
         if not isinstance(page, dict) or set(page) != {
                 "request", "response", "oldest_post_at", "terminal"}:
@@ -29,6 +30,12 @@ def ingest_offline_history_batch(store, capture, raw_writer, pages, *, max_pages
                 or response.request_id != request.request_id
                 or not 200 <= response.http_status < 300):
             raise ValueError("Invalid offline history fixture identity")
+        account_key = request.account_key
+        if account_key in expected_cursors and request.cursor != expected_cursors[account_key]:
+            raise ValueError("History fixture chain cursor mismatch")
+        if account_key in expected_cursors and expected_cursors[account_key] is None:
+            raise ValueError("History fixture follows terminal account page")
+        expected_cursors[account_key] = response.next_cursor
         if request.request_id in seen:
             raise ValueError("Duplicate history fixture request")
         seen.add(request.request_id)
@@ -42,6 +49,8 @@ def ingest_offline_history_batch(store, capture, raw_writer, pages, *, max_pages
             raise ValueError("Nonterminal page requires oldest timestamp")
         if page["terminal"] and response.next_cursor is not None:
             raise ValueError("Terminal fixture cannot have next cursor")
+        if not page["terminal"] and response.next_cursor is None:
+            raise ValueError("Nonterminal fixture requires continuation cursor")
     completed = []
     for page in pages:
         request = page["request"]
