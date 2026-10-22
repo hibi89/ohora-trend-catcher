@@ -1,3 +1,12 @@
+
+## P50 local credentials directory (2026-10-22)
+
+- Windows operator default: `C:\Users\haein\OneDrive\Desktop\ohora_env_a_b_c` (`$env:USERPROFILE\OneDrive\Desktop\ohora_env_a_b_c`).
+- Required local files: `.env.api_a`, `.env.api_b`, `.env.api_c`. Files and secret values MUST NOT be committed.
+- `p50.ps1` defaults to this directory; use `-CredentialsDir` only if moved.
+- Read-only check: `python raw_v2/three_api_env_loader.py --directory "$env:USERPROFILE\OneDrive\Desktop\ohora_env_a_b_c"`.
+- Prior `stage=load_credentials CredentialConfigurationError` was due to previous default pointing at parent Desktop.
+
 > **CURRENT · 2026-10-22 KST · P50 readiness:** The branch is `feature/p6-50-account-pilot-20261022`. The authoritative latest branch SHA and exact six-workflow matrix are maintained in the [central project-book P6 record](https://github.com/hibi89/project-book/blob/main/BOOK.md). Previous exact-SHA validation at [`f9a2e88`](https://github.com/hibi89/ohora-trend-catcher/commit/f9a2e88aa9637472e321e053c86d5ef506f475ab) passed all six workflows: Frozen [39769824404](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39769824404), Sheets [39769824368](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39769824368), C Contract [39769824601](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39769824601), P50 [39769824664](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39769824664), Three API [39769824372](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39769824372), Runtime [39769824565](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39769824565). Fresh read-only `p50.ps1 status` says `not_initialized`; backup-only lane A `usage_limit` and missing WAL/SHM mean current canonical state is unverified and P50 resume remains **NOT READY**. See [P50 closeout/safe resume](docs/P50_CLOSEOUT_AND_SAFE_RESUME_2026-10-22.md) and [P6-091](docs/P6_TROUBLESHOOTING_LEDGER.md).
 > Operating instructions: [AGENTS.md](AGENTS.md) · [Incident ledger](docs/P6_TROUBLESHOOTING_LEDGER.md).
 >
