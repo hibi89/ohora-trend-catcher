@@ -28,7 +28,7 @@ from three_api_usage import parse_usage
 
 FIELDS = ("id,caption,media_type,media_product_type,media_url,permalink,"
           "timestamp,like_count,comments_count,thumbnail_url,view_count")
-CURSOR = re.compile(r"^[A-Za-z0-9_=-]{1,512}$")
+CURSOR = re.compile(r"^[A-Za-z0-9_+=/\\-]{1,2048}$")
 
 
 def fetch(lane, username, cursor, caller, token, version, sender, limit=8):
@@ -61,13 +61,15 @@ def fetch(lane, username, cursor, caller, token, version, sender, limit=8):
     if len(posts)>limit or any(not isinstance(p,dict) or not isinstance(p.get("id"),str) for p in posts):
         raise RuntimeError("Invalid posts; reserved job retained")
     paging = media.get("paging") or {}
-    # A cursor alone does not prove there is another page. Graph may expose
-    # an after cursor even on the terminal page without a next link.
-    next_cursor = (paging.get("cursors") or {}).get("after") if paging.get("next") else None
-    if paging.get("next") and next_cursor is None:
-        raise RuntimeError("Next page indicated without after cursor; reserved job retained")
-    if next_cursor is not None and (not isinstance(next_cursor,str) or not CURSOR.fullmatch(next_cursor)):
+    # Nested Business Discovery sometimes omits paging.next despite returning
+    # a valid after cursor. Follow a valid cursor and let an empty terminal page
+    # establish exhaustion; never infer completion solely from missing next.
+    after = (paging.get("cursors") or {}).get("after")
+    if after is not None and (not isinstance(after,str) or not CURSOR.fullmatch(after)):
         raise RuntimeError("Invalid response cursor; reserved job retained")
+    if paging.get("next") and not after:
+        raise RuntimeError("Next page indicated without after cursor; reserved job retained")
+    next_cursor = after if posts else None
     if next_cursor is not None and next_cursor == cursor:
         raise RuntimeError("Pagination cursor did not advance; reserved job retained")
     if len({post["id"] for post in posts}) != len(posts):
@@ -130,6 +132,9 @@ def run(source,workspace,credentials_dir,*,max_requests=None,live,approved,verif
       like_count INTEGER, comments_count INTEGER, view_count INTEGER,
       permalink TEXT, PRIMARY KEY(receipt_id,post_id))""")
     recovered=planner.reconcile_saved_receipts(raw)
+    reopened=planner.reopen_false_exhausted_accounts(raw)
+    if reopened:
+        print(json.dumps({"event":"restored_after_cursor","accounts":reopened}),flush=True)
     if planner.summary()['reserved_requests']:
         raw.close(); planner.db.close()
         raise RuntimeError('Unreconciled HTTP attempt; manual review required')
