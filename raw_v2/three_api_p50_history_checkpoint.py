@@ -6,7 +6,7 @@ schedule HTTP, authorize retries, or alter the frozen 294-account engine.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 def history_checkpoint(*, account_key, current_cursor, next_cursor,
@@ -40,7 +40,7 @@ def history_checkpoint(*, account_key, current_cursor, next_cursor,
     if not (raw_receipt_verified and capture_verified):
         return {"state": "blocked_unverified_page", "next_cursor": current_cursor,
                 "eligible_to_dispatch": False}
-    if oldest_post_at is not None and oldest_post_at.astimezone(timezone.utc).date() < cutoff_day:
+    if oldest_post_at is not None and oldest_post_at.astimezone(timezone(timedelta(hours=9))).date() < cutoff_day:
         return {"state": "window_covered", "next_cursor": None,
                 "eligible_to_dispatch": False}
     if terminal:
