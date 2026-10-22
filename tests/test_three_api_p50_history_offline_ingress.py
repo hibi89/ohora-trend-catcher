@@ -148,6 +148,20 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                 self.assertEqual(reopened.read(keys[0])["pages_verified"], 1)
                 self.assertEqual(reopened.read(keys[1])["pages_verified"], 0)
 
+    def test_terminal_cursor_contradiction_never_writes_raw(self):
+        from three_api_p50_history_offline_ingress import (
+            ingest_and_commit_offline_history_page)
+        store = SimpleNamespace(read=lambda _: {
+            "state": "continuation_ready", "cursor": "tail"})
+        request = SimpleNamespace(
+            phase="history", history_offline_only=True,
+            account_key="P50_US_001", cursor="tail")
+        response = SimpleNamespace(next_cursor="unexpected-next")
+        with self.assertRaisesRegex(ValueError, "Terminal history"):
+            ingest_and_commit_offline_history_page(
+                store, object(), object(), request, response,
+                oldest_post_at=None, terminal=True)
+
     def test_wrong_response_identity_never_touches_capture(self):
         request = SimpleNamespace(
             phase="history", history_offline_only=True, request_id="req-1")
