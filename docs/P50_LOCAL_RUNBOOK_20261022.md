@@ -1,3 +1,5 @@
+> **2026-10-22 KST 최종 안전 기준:** [P50_CLOSEOUT_AND_SAFE_RESUME_2026-10-22.md](P50_CLOSEOUT_AND_SAFE_RESUME_2026-10-22.md) 참조. 사용자가 퇴근하므로 **오늘 Meta·로컬 PC·쿼터 해제 금지**. 수동 `p50.ps1 history -Live` 경로는 이미 구현되었고 사용자가 실제 135 history 페이지 수집을 보고했다. 아래 10절의 “history NOT IMPLEMENTED”는 **당시 기록일 뿐 현재 운용 지침이 아니다**. 10/21 164건과 10/22 1,140건의 양일 중복 제거는 미실시. 귀가 후 읽기 전용 `.\p50.ps1 status`부터 실시; 새로운 `-Live` 지시는 별도 승인 전 금지.
+
 ## CURRENT 2026-10-22 manual history command (operator only; Windows not yet tested)
 From repository root after checkout/pull of `feature/p6-50-account-pilot-20261022` and successful local offline tests:
 
@@ -80,7 +82,7 @@ Empty list/string RAW `post_field_status` containers (including nested per-post 
 
 The read-only export sets `has_more=true` for a blocking RAW receipt/post/account integrity gap, even if `rows=[]` and `next_after_id` does not advance. This preserves downstream awareness of unfinished work but **does not** authorize tight-loop retries. The n8n owner should back off, investigate RAW integrity, and replay the same checkpoint after reconciliation. A clean end returns `rows=[]`, `has_more=false` and the unchanged checkpoint. Added regression fixtures are **not yet verified by an executed Python test suite**.
 
-## 10. Emergency manual operation gate — 2026-10-22
+## 10. [SUPERSEDED historical checkpoint] Emergency manual operation gate — 2026-10-22
 
 **CURRENT STATE: NOT READY FOR 365-DAY HISTORY.** Existing `three_api_p50_manual_pilot.py` provides only a bounded daily 150-job latest/catchup serial runner; the history job queue, account-specific durable history cursor, and next-day history resume are not connected. Do not run an overnight backfill command or claim this feature is available. The batch API is deliberately untouched.
 

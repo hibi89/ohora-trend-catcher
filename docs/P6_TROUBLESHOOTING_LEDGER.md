@@ -1,4 +1,6 @@
 ### P6-089 — 2026-10-22 · P50 quota-hold review and Windows Sheets fixture locking
+- **10/22 최종 사용자 수집 교차확인:** 10/21 동일 50계정 `OHORA_RAW_v2/collection.sqlite`의 username 50/50 매치, 날짜별 164건; 당시 공식 294 전체는 960건. 10/22 `OHORA_P50`의 날짜별 1,140건(최신 600+과거 540; 150+135페이지); 1계정 window_covered·49 continuation_ready. **양일 게시물 ID 교집합·합집합은 계산하지 않았다.** 164+1,140=1,304는 통합 고유값 아님. 실제 로컬 DB는 GitHub 작업 환경에서 미조회. [현재 최종 인수인계](docs/P50_CLOSEOUT_AND_SAFE_RESUME_2026-10-22.md).
+- **Runtime CI 정정:** [`e579451` run 39750398082](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39750398082)은 Linux 1,164 테스트/Windows remaining 1,004 테스트 각각 *P6-089 세부기록의 빠른색인 행 누락* **1 실패**, 기존 Windows SQLite WinError32 재발은 아니었다. 아래 장부 색인에 누락된 P6-089만 추가하고 추적한다. 기능 코드나 테스트의 검증 성공과 문서 CI를 구별한다.
 - **Observed:** Operator-supplied `status=quota_hold`, 135 committed history pages/136 steps, 49 continuation_ready/1 window_covered; latest 150/150, 1,140 unique posts. User-local records were NOT directly inspected. In `three_api_p50_history_live_runner.py` a halted lane yields `quota_hold` and breaks loop; `three_api_p50_cycle.py` handles Ctrl+C separately as exit 130. A normal quota-hold JSON is consistent with intentional safety return, but does not rule out a distinct earlier interruption. Without lane `reason`/usage, reaching exactly 85% is NOT independently established.
 - **Confirmed unrelated CI failure:** On commit `cc5f031dfa1d08fb7f8d68e596626e1103aa4493`, [Runtime Integration #39744672467](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39744672467) FAILED only on Windows `offline-windows (remaining)`, job `119710565765`, 17 `PermissionError [WinError 32]` during `raw.sqlite` temporary teardown in `tests/test_three_api_sheets_export.py`. Python `with sqlite3.connect(...) as db` does not close the handle; on Windows an open file cannot be unlinked. Not evidence of live-data loss.
 - **Minimal fix:** [commit `b6f7346`](https://github.com/hibi89/ohora-trend-catcher/commit/b6f734667b40dec6511c8ed8248bbd3ff0556ea2) replaces 14 fixture connection managers with `with closing(sqlite3.connect(self.path)) as db, db:` and adds `contextlib.closing`. Transaction semantics retained, OS handle always closed. No production collection, schema, limit=4, lanes, quota policy, original RAW or frozen design modified.
@@ -415,6 +417,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-089 | P50 21·22일 종료·quota/CI | 별도 원본·일별 164/1,140, 쿼터 안전 경계, P6-089 색인 누락 | 보류 유지·읽기 전용 점검 대기 |
 | P6-088 | P50 수동 3가지 인수검증 | Windows PowerShell, RAW 재시작, 85%·커서·HTTP 불명 안전 정지 | Windows 141/141 PASS; synthetic only |
 | P6-087 | P50 수동 history | PowerShell 원클릭, Capture/RAW 복구, 50계정 공정 순환, 실 Meta 미호출 | 합성 CI PASS; Windows·실 HTTP 미검증 |
 | P6-086 | P50 history 커서 | 앵커 없는 NULL cursor 발행 금지 | 안전 차단 |
