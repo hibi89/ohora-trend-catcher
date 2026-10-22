@@ -20,6 +20,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
     # An account's captured page index must be keyed by its immutable
     # (account_key, cursor) pair; malformed keys cannot be silently skipped.
     valid_accounts = set(account_keys)
+    if len(valid_accounts) != 50 or len(tuple(account_keys)) != 50:
+        raise ValueError("Exactly 50 pilot accounts required")
     for key in captured_pages:
         if (not isinstance(key, tuple) or len(key) != 2
                 or key[0] not in valid_accounts
