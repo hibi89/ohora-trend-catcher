@@ -31,6 +31,10 @@ def commit_persisted_history_page(store, journal, raw_writer, *,
         raise ValueError("Page evidence mismatch")
     if record.cursor_state.next_cursor == request.cursor:
         raise ValueError("Persisted history Capture repeats its input cursor")
+    if (record.cursor_state.next_cursor is not None and
+            (not isinstance(record.cursor_state.next_cursor, str) or
+             not record.cursor_state.next_cursor)):
+        raise ValueError("Invalid persisted history continuation cursor")
     # Never trust caller-supplied completion dates over persisted Capture evidence.
     timestamps = []
     for post in record.normalized_posts:
