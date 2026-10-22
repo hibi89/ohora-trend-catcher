@@ -89,6 +89,12 @@ class SheetsExportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             export_observations(link)
 
+    def test_clean_end_has_more_false(self):
+        result = export_observations(self.path, after_id=2)
+        self.assertEqual(result["rows"], [])
+        self.assertFalse(result["has_more"])
+        self.assertEqual(result["next_after_id"], 2)
+
     def test_unverified_capture_is_not_exported(self):
         with sqlite3.connect(self.path) as db:
             db.execute(
