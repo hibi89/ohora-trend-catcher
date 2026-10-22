@@ -20,6 +20,7 @@ from three_api_env_loader import load_three_api_environment
 from three_api_manual_pilot import _credentials
 from three_api_graph_http import make_strict_sender
 from three_api_p50_roster import load_p50_roster
+from three_api_p50_quota_recovery import probe_lane, quota_from_caller_headers
 
 FIELDS = ("id,caption,media_type,media_product_type,media_url,permalink,"
           "timestamp,like_count,comments_count,thumbnail_url,view_count")
@@ -85,7 +86,7 @@ def fetch(lane, username, cursor, caller, token, version, sender):
         if isinstance(post.get("timestamp"),str):
             dates.append(datetime.fromisoformat(post["timestamp"].replace("Z","+00:00")))
     oldest = min(dates) if dates else None
-    return posts,next_cursor,oldest,usage_percent(headers),bd
+    return posts,next_cursor,oldest,quota_from_caller_headers(headers,caller),bd
 
 
 def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_usage=None):
@@ -136,7 +137,14 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                 seconds=max(0,(until-datetime.now(timezone.utc)).total_seconds())
                 print(json.dumps({'status':'cooldown','wait_seconds':round(seconds),'committed':done}),flush=True)
                 time.sleep(seconds)
-                planner.resume_cooled_lanes()
+                # Probe all three callers after the full cooldown; no blind restart.
+                for candidate in ('A','B','C'):
+                    observation=probe_lane(candidate,env,sender=sender)
+                    planner.set_usage(candidate,observation['usage_percent'] if observation['quota_verified'] else None)
+                    print(json.dumps({'event':'quota_probe','lane':candidate,'http_status':observation['http_status'],'usage':observation['usage_percent'],'verified':observation['quota_verified']}),flush=True)
+                if not any(row['halted']==0 for row in planner.summary()['lanes']):
+                    print(json.dumps({'status':'safely_stopped','reason':'no_verified_lane_after_cooldown'}),flush=True)
+                    break
                 continue
             lane=job["lane"]
             ordinal=job["ordinal"]
