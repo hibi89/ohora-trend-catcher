@@ -426,7 +426,9 @@ def run_history(source, workspace, *, environment, max_pages=5000,
                         break
                 counts = dict(store.db.execute(
                     "SELECT state,COUNT(*) FROM history_accounts GROUP BY state").fetchall())
-                final_status, finished = _history_completion_status(\n                    events, coordinator, counts, len(accounts))\n                return {"status": final_status,
+                final_status, finished = _history_completion_status(
+                    events, coordinator, counts, len(accounts))
+                return {"status": final_status,
                         "collection_complete": finished == len(accounts),
                         "completed_accounts": finished,
                         "remaining_accounts": len(accounts) - finished,
