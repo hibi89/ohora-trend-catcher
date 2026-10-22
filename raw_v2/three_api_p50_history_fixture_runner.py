@@ -16,9 +16,11 @@ from three_api_request_spec import build_request_spec
 
 def run_offline_history_fixture_dispatch(
         store, journal, raw_writer, account_keys, usernames, *,
-        latest_complete_keys, fixture_pages, max_pages=50, lane="A"):
+        latest_complete_keys, fixture_pages, max_pages=50, lane="A",
+        lanes_by_account=None):
     """Dispatch up to 50 durable, independent page commits in serial order.
 
+    Each account can use its own fixed A/B/C API lane.
     Index fixtures by (account_key, expected_persisted_cursor). Restarting with
     the same fixture index skips pages whose history cursor already advanced.
     A missing fixture defers its account, not every other runnable account.
@@ -32,6 +34,13 @@ def run_offline_history_fixture_dispatch(
         raise ValueError("Exactly 50 P50 accounts required")
     if lane not in ("A", "B", "C"):
         raise ValueError("Unknown P50 API lane")
+    if lanes_by_account is None:
+        lanes_by_account = {key: lane for key in keys}
+    if (not isinstance(lanes_by_account, dict)
+            or set(lanes_by_account) != set(keys)
+            or any(value not in ("A", "B", "C")
+                   for value in lanes_by_account.values())):
+        raise ValueError("Explicit valid A/B/C lane assignment required")
     if not isinstance(usernames, dict):
         raise ValueError("Verified account usernames mapping required")
     complete = frozenset(latest_complete_keys)
@@ -53,7 +62,7 @@ def run_offline_history_fixture_dispatch(
         request = page["request"]
         if (getattr(request, "account_key", None) != entry[0]
                 or getattr(request, "cursor", None) != entry[1]
-                or getattr(request, "lane", None) != lane):
+                or getattr(request, "lane", None) != lanes_by_account[entry[0]]):
             raise ValueError("History fixture index differs from request")
         # Validate every supplied fixture before any page is durably written;
         # a bad later account must not cause partial success in earlier ones.
@@ -63,7 +72,8 @@ def run_offline_history_fixture_dispatch(
                 or getattr(request, "history_offline_only", None) is not True
                 or getattr(request, "username", None) != usernames[entry[0]]
                 or getattr(request, "request_spec", None) != build_request_spec(
-                    lane, usernames[entry[0]], after=entry[1], limit=4)):
+                    lanes_by_account[entry[0]], usernames[entry[0]],
+                    after=entry[1], limit=4)):
             raise ValueError("History fixture differs from approved request spec")
         response = page["response"]
         request_id = getattr(request, "request_id", None)
@@ -89,11 +99,16 @@ def run_offline_history_fixture_dispatch(
     completed = []
     deferred = []
     while len(completed) < max_pages:
-        job = prepare_history_request(
-            store, keys, usernames, latest_complete_keys=available, lane=lane)
-        if job is None:
+        plan = plan_next_history_page(
+            store, keys, latest_complete_keys=available, max_pages=1)
+        if not plan["jobs"]:
             break
-        key = job["account_key"]
+        key = plan["jobs"][0]["account_key"]
+        job = prepare_history_request(
+            store, keys, usernames, latest_complete_keys={key},
+            lane=lanes_by_account[key])
+        if job is None or job["account_key"] != key:
+            raise RuntimeError("History lane dispatch differs from persisted plan")
         page = fixture_pages.get((key, job["cursor"]))
         if page is None:
             available.remove(key)
