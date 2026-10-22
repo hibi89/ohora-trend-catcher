@@ -30,6 +30,34 @@ class HistoryCommitTests(unittest.TestCase):
                     capture_id="absent", oldest_post_at=None)
             self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
 
+    def test_repeated_capture_cursor_rejected_before_raw_lookup(self):
+        account = self.keys[0]
+        with P50HistoryStore(self.path) as store:
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            request = SimpleNamespace(
+                account_key=account, phase="history", history_offline_only=True,
+                cursor="tail", request_id="history-request", page=4)
+            cursor_state = SimpleNamespace(
+                request_id="history-request", current_cursor="tail",
+                next_cursor="tail", page=4)
+            record = SimpleNamespace(
+                capture_id="cap-repeated", request=request,
+                cursor_state=cursor_state, normalized_posts=[])
+            journal = SimpleNamespace(get_capture=lambda _: record)
+            def forbidden_raw(_):
+                raise AssertionError("RAW must not be read for repeated cursor")
+            raw = SimpleNamespace(get_raw_receipt=forbidden_raw)
+            with self.assertRaisesRegex(ValueError, "repeats its input cursor"):
+                commit_persisted_history_page(
+                    store, journal, raw, account_key=account,
+                    capture_id="cap-repeated", oldest_post_at=None,
+                    terminal=True)
+            self.assertEqual(store.read(account)["cursor"], "tail")
+            self.assertEqual(store.read(account)["pages_verified"], 0)
+
     def test_wrong_phase_rejected_before_raw_lookup(self):
         record = SimpleNamespace(capture_id="cap",
             request=SimpleNamespace(account_key=self.keys[0], phase="front"))
