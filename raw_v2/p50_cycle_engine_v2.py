@@ -219,7 +219,7 @@ class CyclePlanner:
             raise
 
     def acknowledge(self, job, *, receipt_id, posts, next_cursor,
-                    exhausted=False, oldest_published_at=None):
+                    exhausted=False, oldest_published_at=None, now=None):
         """Advance only after caller confirms a durable, unique RAW receipt."""
         if not isinstance(receipt_id, str) or not receipt_id.strip():
             raise ValueError("Durable RAW receipt required")
@@ -279,7 +279,7 @@ class CyclePlanner:
                         self.db.execute("""UPDATE schedule_state SET
                             round_no=round_no+1,lane_index=0,ordinal=1,slot_count=0,
                             ready_at=? WHERE id=1""",
-                            (iso(datetime.now(timezone.utc)+timedelta(minutes=COOLDOWN_MINUTES)),))
+                            (iso((now or datetime.now(timezone.utc))+timedelta(minutes=COOLDOWN_MINUTES)),))
                 else:
                     self.db.execute("UPDATE schedule_state SET slot_count=slot_count+? WHERE id=1",
                                     (page_size,))
