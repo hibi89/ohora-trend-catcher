@@ -134,6 +134,10 @@ def main(argv=None):
                         "status": latest_result["status"],
                         "committed_pages": latest_result["committed_pages"]}
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        if args.mode != "status" and result.get("status") in (
+                "quota_hold", "manual_review", "blocked_unknown_http",
+                "needs_verified_latest", "latest_incomplete"):
+            return 2
         return 0
     except KeyboardInterrupt:
         parser.exit(130, "P50 interrupted; existing receipts and cursors preserved.\n")
