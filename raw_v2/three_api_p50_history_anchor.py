@@ -63,6 +63,8 @@ def anchor_latest_tail(store, journal, raw_writer, *, account_key, capture_id,
         raise ValueError("Missing latest-tail oldest timestamp")
     if actual_oldest is None and not terminal:
         raise ValueError("Nonterminal latest-tail Capture has no dated posts")
+    if actual_oldest is not None:
+        oldest_post_at = actual_oldest
     return store.anchor_verified_latest_tail(
         account_key=account_key, next_cursor=record.cursor_state.next_cursor,
         capture_id=capture_id, raw_receipt_id=raw_receipt.raw_receipt_id,
