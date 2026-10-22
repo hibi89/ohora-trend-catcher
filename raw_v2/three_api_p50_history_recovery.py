@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from three_api_p50_history_commit import commit_persisted_history_page
 from three_api_p50_history_request import prepare_history_request
+from three_api_p50_history_backlog import scan_history_backlog
 
 
 def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *,
@@ -17,13 +18,17 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
     if not isinstance(captured_pages, dict):
         raise ValueError("Explicit persisted page index required")
     completed = []
+    backlog = scan_history_backlog(store, account_keys,
+        latest_complete_keys=latest_complete_keys, captured_pages=captured_pages)
+    available = {j['account_key'] for j in backlog['ready']}
+    deferred = [j['account_key'] for j in backlog['awaiting_persisted_page']]
     for _ in range(max_steps):
         job = prepare_history_request(
             store, account_keys, usernames,
-            latest_complete_keys=latest_complete_keys, lane=lane)
+            latest_complete_keys=available, lane=lane)
         if job is None:
             return {"status": "no_eligible_cursor", "completed": completed,
-                    "network_requests": 0}
+                    "network_requests": 0, "deferred_accounts": deferred}
         key = (job["account_key"], job["cursor"])
         evidence = captured_pages.get(key)
         if evidence is None:
