@@ -1,5 +1,17 @@
 # OHORA Trend Catcher — GPT 현재 상황 보고서
 
+## Latest recheck / n8n environment decision — 2026-10-22
+
+**2026-10-22 KST · 최신 재확인:** P50 소유 브랜치 tip `f56fa5e9b2fd07a36f51f0a0c6fa7b7965fee921`. P50 history CLI·recover dispatch는 여전히 pilot entrypoint에 연결되지 않았고 n8n pin은 `10ebaf8` 유지. P50 History Tests `39736349875` 및 P50 offline validation `39736349882`/`39736355949` SUCCESS; Three API `39736356033` IN_PROGRESS, P6 Runtime `39736355948` PENDING, C Contract `39736355952` SUCCESS. 로컬 Windows n8n CLI 2.40.7 설치, n8n 프로세스/5678·5680·5681 listener 없음. 원격 학원 n8n host는 자료가 없어 미확인. P50 첫 연동 목표는 Windows 로컬 n8n + 기존 PowerShell runner(A안)로 정하되 운영 instance/schedule은 비활성 유지; 별도 instance 격리와 가동승인은 미완료. Meta 실호출·운영 DB 변경·P294 활성화·main 병합 없음.
+
+### A/B host comparison (planning assessment, not production activation)
+
+- **A — Windows local n8n + local P50 runner:** `[F]` `n8n` CLI 2.40.7 is installed; this check found no local n8n/Node process and no listener on 5678/5680/5681. The checked-in workflow invokes `powershell.exe` and `raw_v2/p50_n8n_tick.ps1`, which uses a local `%LOCALAPPDATA%\OHORA_P50\p50` workspace. This keeps runner/storage and orchestration on one host and avoids a new bridge. Setup effort/cost is the lower option (estimate `[H]`: hours to create and validate a dedicated isolated profile); availability depends on the Windows PC staying awake and connected. Do not reuse a profile with unresolved active duplicate schedules.
+- **B — remote n8n + authenticated Windows agent:** could keep orchestration on a continuously available remote host, but the repository has no academy n8n address or access evidence. A secure command/lease bridge, authentication, deduplication, monitoring, and local-agent lifecycle would need design and verification; cost and time are `[U]` until the host and existing capabilities are known. It adds a cross-host security boundary.
+- **Working choice:** A is the least-work P50 integration target using existing local components. It is not a production deployment decision. Keep all schedules inactive; before any instance start/import, isolate its user folder and ensure no existing Meta workflow can fire. B remains unverified, not rejected.
+
+The P50 owner tip advanced after the prior `04df381` report. At `88c3611`, `raw_v2/three_api_p50_manual_pilot.py` still exposes only the bounded latest pilot; status is a separate reader, and history/recover are not n8n-callable. The n8n pin remains `10ebaf8`. Current owner-branch checks are mixed/incomplete as stated above; pending/in-progress is not PASS.
+
 **작성 기준:** 2026-10-22 KST
 **저장소:** `hibi89/ohora-trend-catcher`
 **로컬 작업 루트:** `C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher`
