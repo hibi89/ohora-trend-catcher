@@ -1,0 +1,170 @@
+"""Synthetic GraphHTTP integration for P50 manual history: never uses sockets."""
+from contextlib import closing
+from datetime import date, datetime, timezone
+import csv
+from pathlib import Path
+import tempfile
+import unittest
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
+
+from collector import connect
+from three_api_capture import CaptureJournal
+from three_api_credentials import CredentialReference
+from three_api_graph_http import GraphHTTPClient
+from three_api_live_lane_router import ThreeLaneMetaTransport
+from three_api_p50_coordinator import P50Coordinator
+from three_api_p50_history_store import P50HistoryStore
+from three_api_p50_history_live_runner import history_step, _setup_bindings, _reserve
+from three_api_p50_roster import load_p50_roster
+from three_api_raw_writer import ContractRawWriter
+from three_api_transport import MetaTransport
+from test_three_api_serial_bootstrap import MockResponse
+
+
+class HistoryHTTPIntegration(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        csvfile = self.root / "p50.csv"
+        with csvfile.open("w", encoding="utf-8", newline="") as fp:
+            writer = csv.DictWriter(fp, fieldnames=("account_key", "username", "country"))
+            writer.writeheader()
+            for country, count in (("US", 18), ("KR", 16), ("JP", 16)):
+                for n in range(1, count + 1):
+                    writer.writerow({"account_key": f"P50_{country}_{n:03d}",
+                                     "username": f"nail_{country.lower()}_{n}",
+                                     "country": country})
+        self.accounts, self.digest = load_p50_roster(csvfile)
+        home = self.root / "p50"
+        home.mkdir()
+        raw_db = connect(home / "p50_raw.sqlite", self.accounts, self.digest)
+        raw_db.isolation_level = None
+        self.addCleanup(raw_db.close)
+        self.raw = ContractRawWriter(raw_db)
+        self.coordinator = P50Coordinator(home / "2026-10-22" / "coordinator.sqlite")
+        self.addCleanup(self.coordinator.db.close)
+        self.coordinator.seed()
+        self.capture = CaptureJournal(str(home / "history_capture.sqlite"))
+        self.addCleanup(self.capture.close)
+        self.store = P50HistoryStore(home / "history.sqlite")
+        self.addCleanup(self.store.close)
+        self.store.initialize([a["key"] for a in self.accounts], date(2025, 10, 22))
+        _setup_bindings(self.store)
+        self.now = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
+        self.calls = 0
+        self.names = []
+        self.next_cursors = []
+
+        def sender(prepared, timeout):
+            self.calls += 1
+            if self.names:
+                username = self.names.pop(0)
+            else:
+                username = self.accounts[self.calls - 1]["username"]
+            next_cursor = self.next_cursors.pop(0) if self.next_cursors else "cursor" + str(self.calls)
+            response = MockResponse()
+            response.payload["business_discovery"]["username"] = username
+            post = response.payload["business_discovery"]["media"]["data"][0]
+            post["username"] = username
+            post["id"] = str(1000000000 + self.calls)
+            if next_cursor is not None:
+                response.payload["business_discovery"]["media"]["paging"] = {
+                    "cursors": {"after": next_cursor}}
+            return response
+
+        lanes = {}
+        self.caller_ids = {}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            self.caller_ids[lane] = caller
+            client = GraphHTTPClient(sender=sender, approved=True)
+            lanes[lane] = MetaTransport(
+                client=client,
+                credentials=CredentialReference(lane, "TOKEN_" + lane, "ID_" + lane),
+                caller_ig_id=caller, token="synthetic-" + lane, clock=lambda: self.now)
+        self.transport = ThreeLaneMetaTransport(lanes)
+
+    def anchor(self, n):
+        account = self.accounts[n - 1]
+        self.store.anchor_verified_latest_tail(
+            account_key=account["key"], next_cursor="tail" + str(n),
+            capture_id="latest-cap-" + str(n),
+            raw_receipt_id="latest-raw-" + str(n),
+            raw_receipt_verified=True, capture_verified=True)
+
+    def step(self):
+        return history_step(
+            self.store, self.coordinator, self.capture, self.raw, self.transport,
+            self.accounts, self.digest, self.caller_ids, "v26.0", now=self.now)
+
+    def test_first_page_writes_raw_then_history_cursor(self):
+        self.anchor(1)
+        self.names = ["nail_us_1"]
+        result = self.step()
+        self.assertEqual(result["status"], "recovered")
+        self.assertEqual(self.calls, 1)
+        row = self.store.read(self.accounts[0]["key"])
+        self.assertEqual(row["state"], "continuation_ready")
+        self.assertEqual(row["cursor"], "cursor1")
+        self.assertEqual(row["pages_verified"], 1)
+        self.assertEqual(self.raw._db.execute(
+            "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
+
+    def test_two_accounts_have_independent_cursors(self):
+        self.anchor(1)
+        self.anchor(2)
+        self.names = ["nail_us_1", "nail_us_2", "nail_us_1"]
+        for _ in range(3):
+            self.assertEqual(self.step()["status"], "recovered")
+        self.assertEqual(self.calls, 3)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 2)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 1)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["cursor"], "cursor2")
+
+    def test_terminal_page_is_excluded(self):
+        self.anchor(1)
+        self.names = ["nail_us_1"]
+        self.next_cursors = [None]
+        self.assertEqual(self.step()["state"], "terminal_verified")
+        self.assertEqual(self.step()["status"], "no_ready_work")
+        self.assertEqual(self.calls, 1)
+
+    def test_raw_before_checkpoint_crash_recovers_without_http(self):
+        self.anchor(1)
+        self.names = ["nail_us_1"]
+        original = self.store.commit_verified_page
+        def crash_once(**kw):
+            self.store.commit_verified_page = original
+            raise RuntimeError("synthetic crash after RAW")
+        self.store.commit_verified_page = crash_once
+        self.assertEqual(self.step()["status"], "manual_review")
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 0)
+        result = self.step()
+        self.assertEqual(result["status"], "recovered")
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 1)
+
+    def test_bound_missing_capture_blocks_without_resend(self):
+        self.anchor(1)
+        account = self.accounts[0]
+        row = self.store.read(account["key"])
+        _reserve(self.store, account, row, "A", "req-missing", 4)
+        self.assertEqual(self.step()["status"], "blocked_unknown_http")
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(self.store.read(account["key"])["state"], "blocked_unknown_http")
+
+    def test_fair_round_of_fifty_pages(self):
+        for ordinal in range(1, 51):
+            self.anchor(ordinal)
+        results = [self.step() for _ in range(50)]
+        self.assertEqual([r["status"] for r in results], ["recovered"] * 50)
+        self.assertEqual(self.calls, 50)
+        self.assertTrue(all(self.store.read(a["key"])["pages_verified"] >= 1
+                            for a in self.accounts))
+
+
+if __name__ == "__main__":
+    unittest.main()
