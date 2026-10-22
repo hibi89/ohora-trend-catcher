@@ -14,6 +14,10 @@ def anchor_latest_tail(store, journal, raw_writer, *, account_key, capture_id,
         raise ValueError("Missing durable Capture record")
     if record.request.account_key != account_key:
         raise ValueError("Capture belongs to a different account")
+    if (getattr(record.request, "account_ordinal", None) is None
+            or type(record.request.account_ordinal) is not int
+            or not 1 <= record.request.account_ordinal <= 50):
+        raise ValueError("Latest-tail Capture is outside P50 roster")
     if record.request.phase != "catchup" or record.request.page != 3:
         raise ValueError("Only verified third latest page may anchor history")
     raw_receipt = raw_writer.get_raw_receipt(capture_id)
