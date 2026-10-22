@@ -70,7 +70,8 @@ def export_observations(db_path, *, after_id=0, limit=500):
                ORDER BY o.id LIMIT 1""",
             (after_id,),
         ).fetchone()
-        if first_unverified is not None:
+        blocked_on_gap = first_unverified is not None
+        if blocked_on_gap:
             rows = [row for row in rows
                     if row["observation_id"] < first_unverified["id"]]
         output = []
@@ -131,7 +132,7 @@ def export_observations(db_path, *, after_id=0, limit=500):
             "schema_version": "p6-sheets-export-v1",
             "after_id": after_id,
             "next_after_id": output[-1]["observation_id"] if output else after_id,
-            "has_more": len(rows) == limit,
+            "has_more": blocked_on_gap or len(rows) == limit,
             "rows": output,
         }
     finally:
