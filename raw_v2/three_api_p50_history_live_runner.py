@@ -253,14 +253,36 @@ def history_step(store, coordinator, journal, raw, transport, accounts,
             outcome = _recover(store, journal, raw, account, pending)
         except Exception:
             # Crash between Capture and RAW is still recoverable next launch.
-            # No automatic resend even if Capture is missing.
+            # A failed account may be isolated ONLY with verified below-85%
+            # usage evidence. Unknown HTTP/RAW/storage failures stop globally.
             if journal.get_capture_for_request(request_id) is None:
+                failure = journal.get_failure(request_id)
+                evidence = journal.get_response_evidence(request_id)
+                usage = (evidence.get("safe_usage", {}).get("max_usage_percent")
+                         if evidence and evidence.get("classification") == "safe" else None)
+                if failure is not None and type(usage) is not int:
+                    match = re.search(r"\\busage_pct=(\\d{1,3})\\b", failure.safe_message)
+                    if match is not None:
+                        usage = int(match.group(1))
+                isolated = (failure is not None and failure.scope == "account"
+                            and failure.category in (
+                                "http_error", "cursor_invalid",
+                                "permission", "invalid_response")
+                            and type(usage) is int and 0 <= usage < 85)
                 store.db.execute(
-                    "UPDATE history_accounts SET state='blocked_unknown_http' WHERE account_key=?",
-                    (account["key"],))
+                    "UPDATE history_accounts SET state=? WHERE account_key=?",
+                    ("blocked_unverified_page" if isolated
+                     else "blocked_unknown_http", account["key"]))
                 store.db.execute(
                     "UPDATE history_requests SET status='blocked' WHERE request_id=?",
                     (request_id,))
+                if isolated:
+                    coordinator.db.execute(
+                        "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
+                        "WHERE lane=? AND reason=?",
+                        (stamp(now), lane, hold_reason))
+                    return {"status": "account_blocked", "account_key": account["key"],
+                            "lane": lane}
             return {"status": "manual_review", "account_key": account["key"], "lane": lane}
         evidence = journal.get_response_evidence(request_id)
         usage = (evidence.get("safe_usage", {}).get("max_usage_percent")
