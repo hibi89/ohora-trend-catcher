@@ -284,7 +284,7 @@ class HistoryHTTPIntegration(unittest.TestCase):
         row = self.store.read(account["key"])
         _reserve(self.store, account, row, "A", "req-uncertain", 4)
         self.coordinator.db.execute(
-            "UPDATE lanes SET halted=1,reason='usage_limit' WHERE lane='B'")
+            "UPDATE lanes SET halted=1,reason='missing_usage' WHERE lane='B'")
         self.assertEqual(self.step()["status"], "blocked_unknown_http")
         self.assertEqual(self.calls, 0)
         self.assertEqual(self.step()["status"], "quota_hold")
@@ -292,7 +292,27 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 0)
         lane = self.coordinator.db.execute(
             "SELECT halted,reason FROM lanes WHERE lane='B'").fetchone()
-        self.assertEqual((lane["halted"], lane["reason"]), (1, "usage_limit"))
+        self.assertEqual((lane["halted"], lane["reason"]), (1, "missing_usage"))
+
+    def test_independent_app_failover_uses_b_when_a_usage_limited(self):
+        self.anchor(1)
+        self.names = ["nail_us_1"]
+        self.coordinator.db.execute(
+            "UPDATE lanes SET halted=1,reason='usage_limit' WHERE lane='A'")
+        result = self.step()
+        self.assertEqual(result["status"], "recovered")
+        self.assertEqual(result["lane"], "B")
+        self.assertEqual(self.calls, 1)
+        held = self.coordinator.db.execute(
+            "SELECT halted,reason FROM lanes WHERE lane='A'").fetchone()
+        self.assertEqual((held["halted"], held["reason"]), (1, "usage_limit"))
+
+    def test_all_independent_apps_usage_limited_stops(self):
+        self.anchor(1)
+        self.coordinator.db.execute(
+            "UPDATE lanes SET halted=1,reason='usage_limit'")
+        self.assertEqual(self.step()["status"], "quota_hold")
+        self.assertEqual(self.calls, 0)
 
     def test_crossing_365_day_window_stops_without_more_http(self):
         self.anchor(1)
