@@ -23,8 +23,9 @@ class P50HandoffTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.db.row_factory = sqlite3.Row
         self.db.execute("CREATE TABLE jobs (account_ordinal INTEGER, page INTEGER, phase TEXT, state TEXT)")
+        self.db.execute("CREATE TABLE history_receipts (account_key TEXT, capture_id TEXT, committed_at TEXT)")
         self.key = self.accounts[0]["key"]
-        self.history = SimpleNamespace(read=lambda key: {
+        self.history = SimpleNamespace(db=self.db, read=lambda key: {
             "account_key": key, "state": "ready" if key == self.key else "terminal_verified"})
         self.coordinator = SimpleNamespace(db=self.db)
         self.record = SimpleNamespace(
@@ -61,6 +62,32 @@ class P50HandoffTests(unittest.TestCase):
         self.assertEqual(anchor.call_args.kwargs["oldest_post_at"],
                          datetime(2026, 10, 21, tzinfo=timezone.utc))
         self.assertFalse(anchor.call_args.kwargs["terminal"])
+
+    def test_resume_same_capture_is_idempotent(self):
+        self.db.execute("INSERT INTO history_receipts VALUES (?,?,?)",
+                        (self.key, "capture-3", "2026-10-21T00:00:00Z"))
+        self.history.read = lambda key: {
+            "account_key": key, "state": "continuation_ready"
+            if key == self.key else "terminal_verified"}
+        with patch("three_api_p50_history_handoff.anchor_latest_tail") as anchor:
+            result = handoff_completed_latest_accounts(
+                self.coordinator, self.history, self.journal, object(),
+                self.accounts, {self.key: "capture-3"})
+        anchor.assert_not_called()
+        self.assertIn(self.key, result["already_anchored"])
+
+    def test_resume_conflicting_capture_fails_closed(self):
+        self.db.execute("INSERT INTO history_receipts VALUES (?,?,?)",
+                        (self.key, "capture-3", "2026-10-21T00:00:00Z"))
+        self.history.read = lambda key: {
+            "account_key": key, "state": "continuation_ready"
+            if key == self.key else "terminal_verified"}
+        with patch("three_api_p50_history_handoff.anchor_latest_tail") as anchor:
+            with self.assertRaisesRegex(ValueError, "Conflicting latest-tail"):
+                handoff_completed_latest_accounts(
+                    self.coordinator, self.history, self.journal, object(),
+                    self.accounts, {self.key: "different-capture"})
+        anchor.assert_not_called()
 
     def test_wrong_ordinal_fails_closed(self):
         self.seed()
