@@ -24,7 +24,7 @@ class P50N8nExportTests(unittest.TestCase):
         self.assertIn('three_api_p50_n8n_tick', launcher)
         self.assertIn('OHORA_P50_ENGINE_ROOT', launcher)
         self.assertIn('$expectedEngineCommit', launcher)
-        self.assertIn('8548ecb650bb17a7f671829b740609f6a72cac5a', launcher)
+        self.assertIn('10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb', launcher)
         self.assertIn('OHORA_P50_LIVE_APPROVED', launcher)
         self.assertIn("-ceq 'YES'", launcher)
         self.assertNotIn('OHORA_P6_PILOT', launcher)
