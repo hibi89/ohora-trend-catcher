@@ -5,7 +5,7 @@ Run from raw_v2 with --source, --workspace, --credentials-dir, --live,
 --confirm-owner-approval and --max-requests.
 """
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 from pathlib import Path
 import re
@@ -156,7 +156,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                     caller,token,version,sender,limit=job['limit'])
                 # Missing usage means halt this lane after the committed page.
                 receipt=f"p50v2-{job['cycle']}-{lane}-{ordinal}"
-                observed_at=datetime.now(timezone.utc).isoformat()
+                observed_at=datetime.now(timezone(timedelta(hours=9))).isoformat()
                 raw.execute("BEGIN IMMEDIATE")
                 raw.execute("INSERT INTO pages VALUES (?,?,?,?,?,?)",
                     (job["cycle"],lane,ordinal,receipt,
