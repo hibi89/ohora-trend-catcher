@@ -5,6 +5,9 @@ on:
       - 'raw_v2/three_api_runtime_contract.py'
       - 'tests/test_three_api_runtime_contract.py'
       - '.github/workflows/p6-c-contract-offline.yml'
+      - 'HANDOFF.md'
+      - 'STATUS.md'
+      - 'docs/P6_TROUBLESHOOTING_LEDGER.md'
   push:
     branches:
       - feature/p6-c-runtime-20261019

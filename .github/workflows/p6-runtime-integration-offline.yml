@@ -64,6 +64,10 @@ on:
       - 'tests/run_offline.py'
       - 'tests/test_offline_shards.py'
       - 'tests/test_offline_shard_inventory.py'
+      - 'tests/test_three_api_p50_manual_pilot.py'
+      - 'HANDOFF.md'
+      - 'STATUS.md'
+      - 'docs/P6_TROUBLESHOOTING_LEDGER.md'
       - '.github/workflows/p6-runtime-integration-offline.yml'
   push:
     paths:
@@ -128,6 +132,10 @@ on:
       - 'tests/run_offline.py'
       - 'tests/test_offline_shards.py'
       - 'tests/test_offline_shard_inventory.py'
+      - 'tests/test_three_api_p50_manual_pilot.py'
+      - 'HANDOFF.md'
+      - 'STATUS.md'
+      - 'docs/P6_TROUBLESHOOTING_LEDGER.md'
       - '.github/workflows/p6-runtime-integration-offline.yml'
   workflow_dispatch:
 

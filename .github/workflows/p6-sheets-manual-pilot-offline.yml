@@ -8,6 +8,9 @@ on:
       - 'tests/test_three_api_sheets_export.py'
       - 'raw_v2/three_api_sheets_export.py'
       - '.github/workflows/p6-sheets-manual-pilot-offline.yml'
+      - 'HANDOFF.md'
+      - 'STATUS.md'
+      - 'docs/P6_TROUBLESHOOTING_LEDGER.md'
   pull_request:
     paths:
       - 'kq3_294_collection/n8n_p6_sheets_manual_pilot.json'
@@ -15,6 +18,9 @@ on:
       - 'tests/test_three_api_sheets_export.py'
       - 'raw_v2/three_api_sheets_export.py'
       - '.github/workflows/p6-sheets-manual-pilot-offline.yml'
+      - 'HANDOFF.md'
+      - 'STATUS.md'
+      - 'docs/P6_TROUBLESHOOTING_LEDGER.md'
   workflow_dispatch:
 permissions:
   contents: read

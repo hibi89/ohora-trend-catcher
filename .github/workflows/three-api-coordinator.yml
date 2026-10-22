@@ -76,6 +76,10 @@ on:
       - 'tests/test_three_api_raw_mirror.py'
       - 'tests/test_three_api_raw_projection.py'
       - '.github/workflows/three-api-coordinator.yml'
+      - 'tests/test_three_api_p50_manual_pilot.py'
+      - 'HANDOFF.md'
+      - 'STATUS.md'
+      - 'docs/P6_TROUBLESHOOTING_LEDGER.md'
   pull_request:
     paths:
       - 'raw_v2/three_api_p2_clone_migration.py'
@@ -151,6 +155,10 @@ on:
       - 'tests/test_three_api_raw_mirror.py'
       - 'tests/test_three_api_raw_projection.py'
       - '.github/workflows/three-api-coordinator.yml'
+      - 'tests/test_three_api_p50_manual_pilot.py'
+      - 'HANDOFF.md'
+      - 'STATUS.md'
+      - 'docs/P6_TROUBLESHOOTING_LEDGER.md'
   workflow_dispatch:
 
 permissions:

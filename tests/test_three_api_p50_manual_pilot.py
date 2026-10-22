@@ -166,6 +166,111 @@ class P50ManualPilotTests(unittest.TestCase):
                 "SELECT lane,COUNT(*) FROM jobs WHERE state='done' GROUP BY lane"
             ).fetchall()), {"A": 1, "B": 1, "C": 1})
 
+    def test_next_day_latest_preserves_existing_history_state(self):
+        """A next-day latest tick must leave the 365-day history ledger intact."""
+        import hashlib
+        import sqlite3
+        from datetime import date, datetime, timedelta, timezone
+        from unittest.mock import patch
+        from three_api_capture import CaptureJournal
+        from three_api_credentials import CredentialReference
+        from three_api_graph_http import GraphHTTPClient
+        from three_api_live_lane_router import ThreeLaneMetaTransport
+        from three_api_p50_history_store import P50HistoryStore
+        from three_api_p50_roster import load_p50_roster
+        from three_api_transport import MetaTransport
+        from test_three_api_serial_bootstrap import MockResponse
+
+        accounts, _ = load_p50_roster(self.source)
+        self.workspace.mkdir()
+        history_path = self.workspace / "history.sqlite"
+        history_capture_path = self.workspace / "history_capture.sqlite"
+        cutoff = date(2025, 10, 23)
+        kst = timezone(timedelta(hours=9))
+        with P50HistoryStore(history_path) as store:
+            store.initialize([a["key"] for a in accounts], cutoff)
+            for index, account in enumerate(accounts):
+                covered = index == 49
+                store.anchor_verified_latest_tail(
+                    account_key=account["key"],
+                    next_cursor=None if covered else f"history-cursor-{index}",
+                    capture_id=f"history-capture-{index}",
+                    raw_receipt_id=f"history-raw-{index}",
+                    raw_receipt_verified=True,
+                    capture_verified=True,
+                    terminal=covered,
+                    oldest_post_at=datetime(
+                        2025, 10, 22 if covered else 24, 12, tzinfo=kst),
+                )
+            before_accounts = [tuple(row) for row in store.db.execute(
+                "SELECT account_key,cutoff_day,cursor,state,pages_verified,"
+                "last_capture_id,last_raw_receipt_id FROM history_accounts "
+                "ORDER BY account_key").fetchall()]
+            before_receipts = [tuple(row) for row in store.db.execute(
+                "SELECT capture_id,account_key,raw_receipt_id,state,next_cursor,committed_at "
+                "FROM history_receipts ORDER BY capture_id").fetchall()]
+        history_capture = CaptureJournal(str(history_capture_path))
+        try:
+            pass
+        finally:
+            history_capture.close()
+        history_capture_digest = hashlib.sha256(history_capture_path.read_bytes()).digest()
+
+        calls = []
+        env = {"P6_META_GRAPH_VERSION": "v26.0"}
+        lanes = {}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            env[f"P6_META_TOKEN_{lane}"] = f"synthetic-token-{lane}"
+            env[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}",
+                                      f"P6_META_IG_ID_{lane}")
+
+            def sender(request, timeout, *, lane=lane):
+                calls.append(lane)
+                response = MockResponse()
+                response.payload["business_discovery"]["username"] = "nail_us_1"
+                response.payload["business_discovery"]["media"]["data"][0]["username"] = "nail_us_1"
+                return response
+
+            lanes[lane] = MetaTransport(
+                client=GraphHTTPClient(sender=sender, approved=True),
+                credentials=ref, caller_ig_id=caller,
+                token=env[f"P6_META_TOKEN_{lane}"])
+
+        real_datetime = datetime
+
+        class NextDay(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = real_datetime(2026, 10, 22, 15, tzinfo=timezone.utc)
+                return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
+
+        with patch("three_api_p50_manual_pilot.datetime", NextDay), patch(
+                "three_api_p50_manual_pilot._transports",
+                return_value=ThreeLaneMetaTransport(lanes)):
+            result = run_p50(self.source, self.workspace, live=True,
+                             approved=True, environment=env, max_pages=1)
+
+        self.assertEqual(result["status"], "page_committed")
+        self.assertEqual(calls, ["A"])
+        with P50HistoryStore(history_path) as store:
+            after_accounts = [tuple(row) for row in store.db.execute(
+                "SELECT account_key,cutoff_day,cursor,state,pages_verified,"
+                "last_capture_id,last_raw_receipt_id FROM history_accounts "
+                "ORDER BY account_key").fetchall()]
+            after_receipts = [tuple(row) for row in store.db.execute(
+                "SELECT capture_id,account_key,raw_receipt_id,state,next_cursor,committed_at "
+                "FROM history_receipts ORDER BY capture_id").fetchall()]
+        self.assertEqual(after_accounts, before_accounts)
+        self.assertEqual(after_receipts, before_receipts)
+        self.assertEqual(
+            hashlib.sha256(history_capture_path.read_bytes()).digest(),
+            history_capture_digest)
+        with closing(sqlite3.connect(
+                self.workspace / "2026-10-23" / "coordinator.sqlite")) as control:
+            self.assertEqual(control.execute(
+                "SELECT COUNT(*) FROM jobs WHERE state='done'").fetchone()[0], 1)
+
     def test_ctrl_c_exits_130_without_reporting_success(self):
         from unittest.mock import patch
         from three_api_p50_manual_pilot import main
