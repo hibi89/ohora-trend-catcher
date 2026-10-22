@@ -111,8 +111,44 @@ class N8nTickTests(unittest.TestCase):
         self.assertTrue(command.isascii())
         launcher = (Path(__file__).parents[1] / "raw_v2" /
                     "p6_n8n_tick.ps1").read_text(encoding="utf-8")
-        self.assertRegex(launcher, r"--max-pages\s+3")
+        self.assertRegex(launcher, r"'--max-pages',\s*'3'")
+        self.assertIn("OHORA_P6_LIVE_APPROVED", launcher)
+        self.assertNotRegex(launcher, r"--live\s+--confirm-owner-approval\s*$")
         self.assertNotRegex(command, re.compile(r"EA[A-Za-z0-9]{35,}"))
+
+    def test_workflow_validates_result_and_accepts_external_cursor_states(self):
+        workflow = json.loads((Path(__file__).parents[1] /
+                               "kq3_294_collection" /
+                               "n8n_p6_daily_collection.json").read_text(encoding="utf-8"))
+        nodes = {node["name"]: node for node in workflow["nodes"]}
+        validate = nodes["Validate P6 result and classify progress"]
+        self.assertEqual(validate["type"], "n8n-nodes-base.code")
+        code = validate["parameters"]["jsCode"]
+        for state in ("resume_required", "coverage_gap", "resume_ready"):
+            self.assertIn(state, code)
+        self.assertIn("committed_pages", code)
+        self.assertIn("alert_required", code)
+        self.assertNotIn("stdout,", code)
+        edges = workflow["connections"]["P6 read gates and run at most three pages"]["main"][0]
+        self.assertEqual(edges[0]["node"], "Validate P6 result and classify progress")
+        self.assertEqual(workflow["settings"]["errorWorkflow"], "p6-error-alert-v1")
+        alert_edges = workflow["connections"]["Alert required?"]["main"]
+        self.assertEqual(alert_edges[0][0]["node"], "Send redacted P6 alert")
+        self.assertEqual(alert_edges[1][0]["node"], "Keep result in n8n execution")
+
+    def test_failure_alert_redacts_exception_text_and_uses_configured_webhook(self):
+        path = Path(__file__).parents[1] / "kq3_294_collection" / "n8n_p6_error_alert.json"
+        workflow = json.loads(path.read_text(encoding="utf-8"))
+        self.assertFalse(workflow["active"])
+        nodes = {node["name"]: node for node in workflow["nodes"]}
+        self.assertEqual(nodes["P6 workflow failed"]["type"],
+                         "n8n-nodes-base.errorTrigger")
+        redact = nodes["Redact failure details"]["parameters"]["jsCode"]
+        self.assertNotIn("error.message", redact)
+        self.assertNotIn("stack", redact)
+        webhook = nodes["Send redacted failure alert"]["parameters"]
+        self.assertEqual(webhook["url"], "={{ $env.OHORA_P6_ALERT_WEBHOOK }}")
+        self.assertIn("Send redacted failure alert", workflow["connections"]["Redact failure details"]["main"][0][0]["node"])
 
 
 if __name__ == "__main__":
