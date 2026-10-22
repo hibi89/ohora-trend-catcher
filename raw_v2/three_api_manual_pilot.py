@@ -309,6 +309,24 @@ def read_pilot_status(workspace, *, day=None):
 
 
 
+def _safe_failure_numeric_fields(safe_message):
+    """Expose only bounded Meta error/usage integers from sanitized text."""
+    if not isinstance(safe_message, str):
+        return {}
+    fields = {}
+    for label, pattern, maximum in (
+        ("meta_error_code", r"\bcode=(\d{1,9})\b", 999_999_999),
+        ("meta_error_subcode", r"\bsubcode=(\d{1,9})\b", 999_999_999),
+        ("safe_usage_percent", r"\busage_pct=(\d{1,3})\b", 100),
+    ):
+        match = re.search(pattern, safe_message)
+        if match is not None:
+            number = int(match.group(1))
+            if 0 <= number <= maximum:
+                fields[label] = number
+    return fields
+
+
 def read_pilot_failures(workspace, *, day=None):
     """Read-only, credential-free blocked-job diagnostics.
 
@@ -356,6 +374,8 @@ def read_pilot_failures(workspace, *, day=None):
                 category = data.get("category")
                 scope = data.get("scope")
                 status = data.get("http_status")
+                numeric_detail = _safe_failure_numeric_fields(
+                    data.get("safe_message"))
                 result.append({
                     "job_id": job_id, "lane": lane, "state": state,
                     "account_ordinal": ordinal, "page": page,
@@ -369,6 +389,7 @@ def read_pilot_failures(workspace, *, day=None):
                     "has_capture": bool(capture_count),
                     "has_response_evidence": bool(response_count),
                     "automatic_retry_allowed": False,
+                    **numeric_detail,
                     "recovery_status": ("resume_required" if category == "cursor_invalid"
                                         and intent and intent[0] == "failed_no_retry"
                                         else "operator_review" if intent and intent[0] == "failed_no_retry"

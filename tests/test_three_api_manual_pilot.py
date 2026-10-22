@@ -22,6 +22,7 @@ from three_api_coordinator import Coordinator
 from three_api_manual_pilot import (
     PilotConfigurationError, run_manual_pilot, read_pilot_status,
     read_pilot_failures, main, _inherit_latest_lane_gates,
+    _safe_failure_numeric_fields,
 )
 from three_api_transport import MetaTransport
 from test_three_api_serial_bootstrap import MockResponse
@@ -190,6 +191,18 @@ class ManualPilotTests(unittest.TestCase):
             read_pilot_failures(self.workspace, day="2026-10-21")
         self.assertFalse(self.workspace.exists())
 
+    def test_failure_diagnostic_numeric_allowlist_never_returns_text(self):
+        detail = _safe_failure_numeric_fields(
+            "Target account unavailable code=110 subcode=2207013 "
+            "usage_pct=26 TOKEN_SHOULD_NOT_APPEAR")
+        self.assertEqual(detail, {
+            "meta_error_code": 110,
+            "meta_error_subcode": 2207013,
+            "safe_usage_percent": 26,
+        })
+        self.assertEqual(_safe_failure_numeric_fields(
+            "HTTP rejected code=9999999999 usage_pct=101"), {})
+
     def test_confirmed_cursor_error_is_persisted_as_resume_required_without_retry(self):
         from email.message import Message
         from io import BytesIO
@@ -228,6 +241,7 @@ class ManualPilotTests(unittest.TestCase):
         self.assertEqual(len(diagnostic["blocked_jobs"]), 1)
         failure = diagnostic["blocked_jobs"][0]
         self.assertEqual(failure["failure_category"], "cursor_invalid")
+        self.assertNotIn("safe_message", failure)
         self.assertEqual(failure["recovery_status"], "resume_required")
         self.assertFalse(failure["automatic_retry_allowed"])
 
