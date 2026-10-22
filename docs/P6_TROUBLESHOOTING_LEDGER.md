@@ -8,6 +8,16 @@
 > Index: [P6-099 P50 upstream Windows/offline-runtime integration gates (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · At upstream `c4944f1`, Actions run `39727639343` failed the 927-test Windows `remaining` shard with 3 handoff-guard failures and 17 `WinError 32` teardown errors; Ubuntu `offline-runtime` failed 3 handoff-guard cases. P50 source/CI is another worker's ownership; n8n pin remains `10ebaf8` pending contract and clean CI evidence.
 > Index: [P6-098 n8n P50 review result falsely ended as success (RESOLVED)](docs/P6_TROUBLESHOOTING_LEDGER.md) · The inactive workflow sent `manual_review` and partial-failure `attention` states directly to NoOp. Added a redacted review gate to StopAndError in `0278cae`; 19 focused tests + 2 guard subtests, eight pinned serial-lock tests and five Node classifier scenarios PASS. `serial_busy` is preserved as a no-call wait. No external alert route configured.
 
+### P6-106 — 2026-10-22 · P50 owner branch incident-index mismatch (OPEN)
+
+- **Observed symptoms:** On P50 owner tip `ff7eeb4974f6d7af46e33922d9c89cad53951c8b`, GitHub Actions `OHORA RAW v2 Offline Tests` run `39739590508` failed `test_incident_index_matches_unique_detailed_records`. The job log reports three failures and 1,148 tests executed; incident IDs `P6-081` through `P6-086` appear in detailed records but not in the quick index table.
+- **Reproduction scope / cause:** The same CI job log identifies the exact set difference. The P50 branch copy of `docs/P6_TROUBLESHOOTING_LEDGER.md` contains those detailed entries but no matching index rows. This is a confirmed handoff/documentation guard failure; it is not evidence of a P50 collector/runtime defect.
+- **Affected scope:** P50 owner branch `feature/p6-50-account-pilot-20261022`, ledger quick index. This n8n branch does not own or modify the P50 source/docs.
+- **Repair / alternatives:** No P50 branch repair made here. P50 owner should add index rows for all missing detailed incidents and rerun the same RAW/guard CI. Do not delete detailed history to make the sets match.
+- **Other same-tip checks:** P50 offline runs `39739596046` and `39739590503`, Three API `39739596033`, C Contract `39739596053`, and Frozen Design Guard `39739596039` succeeded. Runtime `39739596181` was IN_PROGRESS. RAW run `39739590508` failed as above. A same-tip History run was not found; last History success `39739469191` belongs to prior tip `d82a90b`.
+- **Data safety:** The failing suite is offline; no Meta call, operational DB/RAW/Capture mutation, schedule activation, P294 run, or main merge occurred.
+- **Commit / rollback:** This n8n branch adds only this incident report and handoff status. Roll back only the local docs record if evidence is superseded; preserve all detailed incident history and P50 files.
+- **Prevention:** For every P50 owner branch update, require incident-index/detail equality in CI. Distinguish documentation guard failures from engine failures and require same-SHA complete CI before considering a pin change.
 ### P6-105 — 2026-10-22 · P50 offline test fixture/receipt contract mismatch (RESOLVED)
 
 - **Observed symptoms:** At P50 owner branch tip `d322ae345197d827aa0ac81553281b78a2590662`, P50 offline validation run `39738595564` and P50 Offline History Tests run `39738587930` failed. The P50 offline run executed 102 tests and errored in `test_invalid_tail_timestamp_rejected_before_store_write`.
@@ -587,6 +597,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-106 | P50 owner incident-index mismatch (OPEN) | `ff7eeb4` RAW run `39739590508` fails because P6-081–086 detail rows lack index entries; engine not implicated | P50 owner repairs quick index; rerun guard before calling full CI green |
 | P6-105 | P50 offline test fixture/receipt contract mismatch (RESOLVED) | `e67788a` isolates timestamp unit test; latest P50 offline jobs on `ff7eeb4` pass; history last passed on prior `d82a90b`; broader same-tip CI pending | Keep n8n pin `10ebaf8` until all owner CI and n8n history contract are verified |
 | P6-104 | n8n execution host target | Local n8n CLI exists; no runtime; remote academy host unknown | Choose A as P50 pilot target; isolate profile and keep schedules inactive; B requires a new authenticated agent bridge |
 | P6-103 | P50 recovery result / n8n classifier | `recovered` meant prior Capture reconciliation without HTTP but was counted as Meta call; recovered-only verified result became `manual_review` | RESOLVED by `2a09fb3`; 20 tests +6 subtests PASS locally; all 6 Actions PASS |
