@@ -41,7 +41,8 @@ class HistoryFixtureDispatcherTests(unittest.TestCase):
                                             after=cursor, limit=4),
             request_id=f"req-{i}-{cursor}")
         return {"request": request,
-                "response": SimpleNamespace(next_cursor=f"next-{i}",\n                                         request_id=request.request_id, http_status=200),
+                "response": SimpleNamespace(next_cursor=f"next-{i}",
+                                         request_id=request.request_id, http_status=200),
                 "oldest_post_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
                 "terminal": False}
 
