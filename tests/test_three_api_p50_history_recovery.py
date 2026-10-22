@@ -186,6 +186,19 @@ class HistoryRecoveryTests(unittest.TestCase):
                         latest_complete_keys={account}, captured_pages=captured)
                 commit.assert_not_called()
 
+    def test_ready_account_without_page_is_deferred_not_budget_exhausted(self):
+        with P50HistoryStore(self.path) as store:
+            account = self.keys[0]
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            result = recover_history_pages(
+                store, None, None, self.keys, self.names,
+                latest_complete_keys={account}, captured_pages={}, max_steps=1)
+            self.assertEqual(result["status"], "awaiting_persisted_page")
+            self.assertEqual(result["network_requests"], 0)
+
     def test_invalid_step_budget_rejected(self):
         with P50HistoryStore(self.path) as store:
             with self.assertRaises(ValueError):
