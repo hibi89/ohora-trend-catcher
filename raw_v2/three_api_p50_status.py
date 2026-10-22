@@ -11,8 +11,8 @@ def _count(db, query):
 
 def inspect_p50(workspace):
     root = Path(workspace).expanduser()
-    if root.name.lower() != "p50":
-        raise ValueError("Dedicated p50 workspace required")
+    if root.name.lower() != "p50" or root.is_symlink():
+        raise ValueError("Dedicated non-symlink p50 workspace required")
     raw_path = root / "p50_raw.sqlite"
     if not raw_path.is_file() or raw_path.is_symlink():
         return {"status": "not_initialized", "raw_exists": False,
