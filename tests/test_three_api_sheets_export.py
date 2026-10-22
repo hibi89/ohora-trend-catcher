@@ -1,4 +1,5 @@
 """Offline read-only n8n export contract; no Google credentials or HTTP."""
+from contextlib import closing
 import json
 import sqlite3
 import sys
@@ -15,7 +16,7 @@ class SheetsExportTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "raw.sqlite"
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript("""
                 CREATE TABLE accounts(account_key TEXT, country TEXT, ig_id TEXT);
                 CREATE TABLE posts(post_id TEXT,account_key TEXT,timestamp TEXT,
@@ -71,7 +72,7 @@ class SheetsExportTests(unittest.TestCase):
             export_observations(Path(self.tmp.name) / "missing.sqlite")
 
     def test_duplicate_observation_key_rejected_across_pages(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO post_observations VALUES "
                 "(3,'p1','2026-10-22T03:00:00Z','batch-3','req-1',60,5,1,1)"
@@ -82,7 +83,7 @@ class SheetsExportTests(unittest.TestCase):
             export_observations(self.path, after_id=2, limit=1)
 
     def test_duplicate_raw_receipt_fails_closed(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("""INSERT INTO three_api_raw_receipts
                           SELECT 'duplicate', account_key, payload_json
                           FROM three_api_raw_receipts WHERE capture_id='cap-1'""")
@@ -107,7 +108,7 @@ class SheetsExportTests(unittest.TestCase):
         self.assertEqual(result["next_after_id"], 2)
 
     def test_unverified_capture_is_not_exported(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO post_observations VALUES (3,'p1',"
                 "'2026-10-22T03:00:00Z','batch-3','unverified',"
@@ -119,7 +120,7 @@ class SheetsExportTests(unittest.TestCase):
 
 
     def test_unverified_gap_then_verified_row_preserves_incremental_order(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO post_observations VALUES (3,'p1',"
                 "'2026-10-22T03:00:00Z','batch-3','unverified',60,5,1,1)"
@@ -142,7 +143,7 @@ class SheetsExportTests(unittest.TestCase):
             self.path, after_id=4, limit=1)["rows"], [])
 
     def test_orphan_post_blocks_cursor(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO post_observations VALUES "
                 "(3,'missing-post','2026-10-22T03:00:00Z','batch-3','req-3',60,5,1,1)"
@@ -160,7 +161,7 @@ class SheetsExportTests(unittest.TestCase):
         self.assertTrue(result["has_more"])
 
     def test_orphan_account_blocks_cursor(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO posts VALUES "
                 "('p-orphan','missing-account','2026-10-22T00:00:00Z',"
@@ -183,7 +184,7 @@ class SheetsExportTests(unittest.TestCase):
         self.assertTrue(result["has_more"])
 
     def test_late_receipt_restores_ordered_export(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO post_observations VALUES "
                 "(3,'p1','2026-10-22T03:00:00Z','batch-3','req-3',60,5,1,1)"
@@ -197,7 +198,7 @@ class SheetsExportTests(unittest.TestCase):
                            "request_id": "req-4", "posts": [{"id": "p1"}]})))
         self.assertEqual(export_observations(
             self.path, after_id=2)["next_after_id"], 2)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
                        ("cap-3", "P50_US_001", json.dumps({
                            "request_id": "req-3", "posts": [{"id": "p1"}]})))
@@ -208,7 +209,7 @@ class SheetsExportTests(unittest.TestCase):
     def test_malformed_raw_field_status_fails_closed(self):
         for status in ([], "", "returned", {"p1": []}, {"p1": ""}, {"p1": ["returned"]}):
             with self.subTest(status=status):
-                with sqlite3.connect(self.path) as db:
+                with closing(sqlite3.connect(self.path)) as db, db:
                     db.execute(
                         "UPDATE three_api_raw_receipts SET payload_json=? "
                         "WHERE capture_id='cap-1'",
@@ -222,7 +223,7 @@ class SheetsExportTests(unittest.TestCase):
     def test_malformed_raw_posts_fail_closed(self):
         for posts in (None, {}, ["invalid"]):
             with self.subTest(posts=posts):
-                with sqlite3.connect(self.path) as db:
+                with closing(sqlite3.connect(self.path)) as db, db:
                     db.execute(
                         "UPDATE three_api_raw_receipts SET payload_json=? "
                         "WHERE capture_id='cap-1'",
@@ -232,7 +233,7 @@ class SheetsExportTests(unittest.TestCase):
                     export_observations(self.path, limit=1)
 
     def test_returned_view_status_requires_a_value(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute(
                 "UPDATE three_api_raw_receipts SET payload_json=? "
                 "WHERE capture_id='cap-2'",
@@ -247,7 +248,7 @@ class SheetsExportTests(unittest.TestCase):
     def test_returned_views_reject_invalid_numeric_values(self):
         for views in (-1, True, "123", 1.5):
             with self.subTest(views=views):
-                with sqlite3.connect(self.path) as db:
+                with closing(sqlite3.connect(self.path)) as db, db:
                     db.execute(
                         "UPDATE three_api_raw_receipts SET payload_json=? "
                         "WHERE capture_id='cap-2'",
@@ -260,7 +261,7 @@ class SheetsExportTests(unittest.TestCase):
                     export_observations(self.path, after_id=1)
 
     def test_explicit_zero_is_not_missing(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             payload = json.dumps({
                 "request_id": "req-2",
                 "posts": [{"id": "p1", "view_count": 0}],
