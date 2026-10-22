@@ -71,7 +71,12 @@ def export_observations(db_path, *, after_id=0, limit=500):
             if len(matches) != 1:
                 raise ValueError("RAW receipt post identity mismatch")
             post = matches[0]
-            statuses = capture.get("post_field_status", {}).get(row["post_id"], {})
+            field_statuses = capture.get("post_field_status") or {}
+            if not isinstance(field_statuses, dict):
+                raise ValueError("Invalid RAW field status structure")
+            statuses = field_statuses.get(row["post_id"]) or {}
+            if not isinstance(statuses, dict):
+                raise ValueError("Invalid RAW post field status")
             view_status = statuses.get("view_count")
             if view_status is None:
                 view_status = ("absent" if "view_count" not in post else
