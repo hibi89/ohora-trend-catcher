@@ -94,8 +94,9 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
             available.discard(key[0])
             if key[0] not in deferred:
                 deferred.append(key[0])
-    # Only count still-eligible persisted work, not accounts already completed.
-    budget_exhausted = bool(available)
+    # A ready account without a persisted next page is deferred, not runnable.
+    runnable = {key for key in available if (key, store.read(key)["cursor"]) in captured_pages}
+    budget_exhausted = bool(runnable)
     return {"status": "step_budget_exhausted" if budget_exhausted else
             ("awaiting_persisted_page" if deferred else
              ("completed" if completed else "no_eligible_cursor")),
