@@ -85,9 +85,10 @@ class MetaTransport:
         version, response_type, _ = _contract()
         # Defence in depth: offline HISTORY records must never gain Graph
         # transport authorization by constructing a valid RequestEnvelope.
-        if getattr(request, "phase", None) == "history":
+        if (getattr(request, "phase", None) == "history"
+                and getattr(request, "history_live_approved", False) is not True):
             _fail(request.request_id, "approval_denied", "global",
-                  "History Graph transport is not authorized")
+                  "Offline history cannot use Graph transport")
         if self._halt_reason is not None:
             _fail(request.request_id, self._halt_reason, "global",
                   "Further transport requests are halted")
