@@ -57,3 +57,7 @@ The read-only Sheets exporter rejects malformed RAW `posts` containers, non-obje
 ## 7. Incremental export cursor integrity
 
 When observation ID 3 has no matching RAW receipt but ID 4 does, the Sheets exporter must not advance `next_after_id` past ID 3. It returns no rows after checkpoint 2 until the missing receipt is reconciled; once the receipt arrives, the same checkpoint exports IDs 3 and 4 in order. This is intentionally fail-closed and can pause downstream Sheets sync on legacy gaps. Never manually skip IDs or alter the authoritative RAW SQLite to make the dashboard advance. See `docs/P6_N8N_SHEETS_EXPORT_CONTRACT.md` for n8n consumer requirements. **Regression tests committed; execution still unverified.**
+
+## 8. Strict RAW metric and status validation (2026-10-22)
+
+Empty list/string RAW `post_field_status` containers (including nested per-post values) are malformed and now rejected instead of being treated as absent. A Reels `view_count` marked `returned` must be a nonnegative JSON integer: `0` remains valid, but `true`, negative numbers, numeric strings and fractional values are rejected. Focused regression fixtures cover these cases. The implementation and tests are committed, **not yet confirmed PASS by the full Python suite**. The GitHub checkout attempt from this runtime returned `Could not resolve host: github.com`; use a reachable local checkout for actual unit execution.
