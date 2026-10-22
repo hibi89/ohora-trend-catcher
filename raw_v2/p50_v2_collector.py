@@ -1,4 +1,4 @@
-"""Standalone P50 live collector: 50 accounts, 8 posts per lane, 20 cycles.
+"""Standalone P50 live collector: manual start/stop, unlimited A/B/C rounds.
 
 Explicit opt-in; never touches old P50 stores. Fail-closed on ambiguous HTTP.
 Run from raw_v2 with --source, --workspace, --credentials-dir, --live,
@@ -79,8 +79,8 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
     accounts,digest = load_p50_roster(source)
     if not live or not approved:
         return {"status":"offline","accounts":len(accounts),"meta_calls":0}
-    if not 1<=max_requests<=3000:
-        raise ValueError("max_requests must be 1..3000")
+    if max_requests is not None and not 1<=max_requests<=3000:
+        raise ValueError("max_requests must be 1..3000 when provided")
     env=load_three_api_environment(credentials_dir, base_environment=__import__("os").environ)
     credentials=_credentials(env)
     version=env.get("P6_META_GRAPH_VERSION","v26.0")
@@ -111,41 +111,43 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
         raw.close(); planner.db.close()
         raise RuntimeError('Unreconciled HTTP attempt; manual review required')
     sender=make_strict_sender()
-    # Missing usage evidence is not proof of available quota. Start conservatively.
-    # The operator must verify quotas for all three lanes before a live run.
-    verified_usage = verified_usage or {}
-    for lane in ("A","B","C"):
-        state=planner.db.execute("SELECT usage FROM lanes WHERE lane=?", (lane,)).fetchone()
-        # Persisted API response usage outranks operator-provided startup hints.
-        if state["usage"] is None:
-            planner.set_usage(lane,verified_usage.get(lane))
     done=0
     try:
-        # Check every lane against its own current Meta quota before dispatch.
-        # Previously measured >=85 lanes remain blocked; never override with a hint.
+        # Verify all three independent API quotas on every manual start.
+        # A quota hold does not permit jumping ahead to B or C.
         for candidate in ("A","B","C"):
-            row=planner.db.execute("SELECT usage,halted FROM lanes WHERE lane=?",(candidate,)).fetchone()
-            if row["usage"] is None or row["halted"] == 0:
-                observation=probe_lane(candidate,env,sender=sender)
-                planner.set_usage(candidate,observation["usage_percent"] if observation["quota_verified"] else None)
-                print(json.dumps({"event":"quota_probe","lane":candidate,"usage":observation["usage_percent"],"verified":observation["quota_verified"]}),flush=True)
-        while done < max_requests:
+            observation=probe_lane(candidate,env,sender=sender)
+            planner.set_usage(candidate,observation["usage_percent"]
+                              if observation["quota_verified"] else None)
+            print(json.dumps({"event":"quota_probe","lane":candidate,
+                              "usage":observation["usage_percent"],
+                              "verified":observation["quota_verified"]}),flush=True)
+        while max_requests is None or done < max_requests:
             job=planner.next_job()
             if job is None:
-                until=planner.cooldown_until()
-                if until is None:
-                    break
+                pause=planner.pause()
+                reason=pause["reason"]
+                if reason == "complete":
+                    return {"status":"all_accounts_exhausted",
+                            "recovered_requests":recovered,"committed_requests":done,
+                            "summary":planner.summary()}
+                if reason not in ("round_wait","quota_hold") or not pause.get("until"):
+                    raise RuntimeError(f"Scheduler cannot safely proceed: {reason}")
+                until=datetime.fromisoformat(pause["until"])
                 seconds=max(0,(until-datetime.now(timezone.utc)).total_seconds())
-                print(json.dumps({'status':'cooldown','wait_seconds':round(seconds),'committed':done}),flush=True)
+                print(json.dumps({"status":reason,"wait_seconds":round(seconds),
+                                  "committed":done}),flush=True)
                 time.sleep(seconds)
-                # Probe all three callers after the full cooldown; no blind restart.
-                for candidate in ('A','B','C'):
+                # 63m barrier: refresh all lanes before starting the next A pass.
+                # Quota stop: refresh only the blocked lane, then resume its slot.
+                candidates=("A","B","C") if reason=="round_wait" else (pause["lane"],)
+                for candidate in candidates:
                     observation=probe_lane(candidate,env,sender=sender)
-                    planner.set_usage(candidate,observation['usage_percent'] if observation['quota_verified'] else None)
-                    print(json.dumps({'event':'quota_probe','lane':candidate,'http_status':observation['http_status'],'usage':observation['usage_percent'],'verified':observation['quota_verified']}),flush=True)
-                if not any(row['halted']==0 for row in planner.summary()['lanes']):
-                    print(json.dumps({'status':'safely_stopped','reason':'no_verified_lane_after_cooldown'}),flush=True)
-                    break
+                    planner.set_usage(candidate,observation["usage_percent"]
+                                      if observation["quota_verified"] else None)
+                    print(json.dumps({"event":"quota_probe","lane":candidate,
+                                      "usage":observation["usage_percent"],
+                                      "verified":observation["quota_verified"]}),flush=True)
                 continue
             lane=job["lane"]
             ordinal=job["ordinal"]
@@ -188,12 +190,12 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                     print(json.dumps({"event":"quota_after_page","lane":lane,"header_presence":header_presence,"verified":observation["quota_verified"],"usage":usage}),flush=True)
                 planner.set_usage(lane,usage)
                 done+=1
-                print(json.dumps({"event":"page_saved","lane":lane,"cycle":job["cycle"],"ordinal":ordinal,"posts":len(posts),"usage":usage,"receipt":receipt}),flush=True)
+                print(json.dumps({"event":"page_saved","lane":lane,"round":job["round"],"cycle":job["cycle"],"ordinal":ordinal,"posts":len(posts),"usage":usage,"receipt":receipt}),flush=True)
             except BaseException:
                 # Keep the reservation: unknown HTTP outcomes must never resend.
                 planner.set_usage(lane,None)
                 raise
-        return {"status":"stopped","recovered_requests":recovered,"committed_requests":done,
+        return {"status":"request_limit_reached","recovered_requests":recovered,"committed_requests":done,
                 "summary":planner.summary()}
     finally:
         raw.close()
@@ -205,7 +207,7 @@ def main():
     p.add_argument("--source",required=True)
     p.add_argument("--workspace",required=True)
     p.add_argument("--credentials-dir",required=True)
-    p.add_argument("--max-requests",type=int,default=1)
+    p.add_argument("--max-requests",type=int,default=None)
     p.add_argument("--verified-usage-a",type=int)
     p.add_argument("--verified-usage-b",type=int)
     p.add_argument("--verified-usage-c",type=int)
