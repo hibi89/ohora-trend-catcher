@@ -1,5 +1,6 @@
 """Offline regression for per-lane P50 usage recovery; never calls Meta."""
 from datetime import datetime, timedelta, timezone
+from contextlib import closing
 from pathlib import Path
 import json
 import sqlite3
@@ -19,7 +20,7 @@ class QuotaRecoveryTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.db = Path(self.tmp.name) / "coordinator.sqlite"
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("CREATE TABLE lanes(lane TEXT PRIMARY KEY, halted INTEGER, reason TEXT, ready_at TEXT)")
             for lane in "ABC":
                 db.execute("INSERT INTO lanes VALUES(?,?,?,?)",
@@ -52,17 +53,17 @@ class QuotaRecoveryTests(unittest.TestCase):
 
     def test_only_selected_lane_released(self):
         self.assertTrue(release_verified_lane(self.db, "B", self.ok, now=self.now))
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             self.assertEqual(db.execute("SELECT lane,halted FROM lanes ORDER BY lane").fetchall(),
                              [("A", 1), ("B", 0), ("C", 1)])
         self.assertFalse(release_verified_lane(self.db, "B", self.ok, now=self.now))
 
     def test_cooldown_and_hold_reason_preserved(self):
         later = (self.now + timedelta(hours=1)).isoformat()
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("UPDATE lanes SET ready_at=? WHERE lane='B'", (later,))
         self.assertFalse(release_verified_lane(self.db, "B", self.ok, now=self.now))
-        with sqlite3.connect(self.db) as db:
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("UPDATE lanes SET reason='missing_usage',ready_at=? WHERE lane='B'",
                        ("2026-10-22T00:00:00+00:00",))
         self.assertFalse(release_verified_lane(self.db, "B", self.ok, now=self.now))
