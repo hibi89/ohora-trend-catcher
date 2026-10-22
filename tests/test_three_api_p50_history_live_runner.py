@@ -223,6 +223,23 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.calls, 0)
         self.assertEqual(self.store.read(account["key"])["state"], "blocked_unknown_http")
 
+    def test_pending_unknown_request_does_not_bypass_held_other_lane(self):
+        self.anchor(1)
+        self.anchor(2)
+        account = self.accounts[0]
+        row = self.store.read(account["key"])
+        _reserve(self.store, account, row, "A", "req-uncertain", 4)
+        self.coordinator.db.execute(
+            "UPDATE lanes SET halted=1,reason='usage_limit' WHERE lane='B'")
+        self.assertEqual(self.step()["status"], "blocked_unknown_http")
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(self.step()["status"], "quota_hold")
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 0)
+        lane = self.coordinator.db.execute(
+            "SELECT halted,reason FROM lanes WHERE lane='B'").fetchone()
+        self.assertEqual((lane["halted"], lane["reason"]), (1, "usage_limit"))
+
     def test_crossing_365_day_window_stops_without_more_http(self):
         self.anchor(1)
         self.names = ["nail_us_1"]
