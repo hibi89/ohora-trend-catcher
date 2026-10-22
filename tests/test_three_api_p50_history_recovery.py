@@ -89,7 +89,7 @@ class HistoryRecoveryTests(unittest.TestCase):
                 raw_receipt_verified=True, capture_verified=True)
             captured = {
                 (account, "tail"): {
-                    "capture_id": "cap-1", "oldest_post_at": None, "terminal": False},
+                    "capture_id": "cap-1", "oldest_post_at": datetime(2026, 1, 1, tzinfo=timezone.utc), "terminal": False},
                 (account, "next"): {
                     "capture_id": "cap-2", "oldest_post_at": None, "terminal": True},
             }
