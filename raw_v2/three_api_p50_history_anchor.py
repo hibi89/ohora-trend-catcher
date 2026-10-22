@@ -20,6 +20,12 @@ def anchor_latest_tail(store, journal, raw_writer, *, account_key, capture_id,
     validate_raw_receipt(record, raw_receipt)
     if not isinstance(raw_receipt.raw_receipt_id, str) or not raw_receipt.raw_receipt_id:
         raise ValueError("Invalid RAW receipt identity")
+    if record.cursor_state.request_id != record.request.request_id:
+        raise ValueError("Capture cursor source mismatch")
+    if record.cursor_state.current_cursor != record.request.cursor:
+        raise ValueError("Capture cursor does not match request")
+    if record.cursor_state.page != record.request.page:
+        raise ValueError("Capture page does not match request")
     if terminal is not True and not record.cursor_state.next_cursor:
         raise ValueError("Missing verified continuation cursor")
     return store.anchor_verified_latest_tail(
