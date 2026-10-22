@@ -1,5 +1,6 @@
 """P50 bounded entrypoint regression: offline must never request credentials/HTTP."""
 import csv
+from contextlib import closing
 import sys
 import tempfile
 import unittest
@@ -78,17 +79,17 @@ class P50ManualPilotTests(unittest.TestCase):
         self.assertEqual(result["attempted_steps"], 1)
         self.assertEqual(calls, ["A"])
         day_kst = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
-        with sqlite3.connect(self.workspace / "p50_raw.sqlite") as raw:
+        with closing(sqlite3.connect(self.workspace / "p50_raw.sqlite")) as raw:
             self.assertEqual(raw.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 50)
             self.assertEqual(raw.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 1)
             self.assertEqual(raw.execute(
                 "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
-        with sqlite3.connect(self.workspace / day_kst / "coordinator.sqlite") as control:
+        with closing(sqlite3.connect(self.workspace / day_kst / "coordinator.sqlite")) as control:
             self.assertEqual(control.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 150)
             self.assertEqual(control.execute(
                 "SELECT state FROM jobs WHERE account_ordinal=1 AND page=1"
             ).fetchone()[0], "done")
-        with sqlite3.connect(self.workspace / day_kst / "capture.sqlite") as capture:
+        with closing(sqlite3.connect(self.workspace / day_kst / "capture.sqlite")) as capture:
             self.assertEqual(capture.execute("SELECT COUNT(*) FROM intents").fetchone()[0], 1)
         self.assertNotIn("synthetic-token", str(result))
         # Cross-component contract: the actual P50 RAW schema must be readable
@@ -160,7 +161,7 @@ class P50ManualPilotTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 3)
             self.assertEqual(raw.execute(
                 "SELECT COUNT(*) FROM post_observations").fetchone()[0], 3)
-        with sqlite3.connect(self.workspace / kst_day / "coordinator.sqlite") as db:
+        with closing(sqlite3.connect(self.workspace / kst_day / "coordinator.sqlite")) as db:
             self.assertEqual(dict(db.execute(
                 "SELECT lane,COUNT(*) FROM jobs WHERE state='done' GROUP BY lane"
             ).fetchall()), {"A": 1, "B": 1, "C": 1})
