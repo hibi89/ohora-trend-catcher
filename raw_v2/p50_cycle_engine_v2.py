@@ -70,9 +70,9 @@ class CyclePlanner:
                         (usage, int(halted), until, lane))
 
     def resume_cooled_lanes(self, *, now=None):
-        current = iso(now or datetime.now(timezone.utc))
-        # Time expiry allows a guarded probe request; it is NOT proof of recovered quota.
-        self.db.execute("UPDATE lanes SET halted=0 WHERE halted=1 AND ready_at<=?", (current,))
+        # Cooldown expiry is not evidence of quota recovery.
+        # Only a verified probe may call set_usage() to release a lane.
+        return 0
 
     def cooldown_until(self):
         rows = self.db.execute('SELECT halted,ready_at FROM lanes').fetchall()
