@@ -1,4 +1,7 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+### P6-086 — 2026-10-22 · Prevent NULL-cursor P50 history planning
+- **Static vulnerability:** initial history state `ready` had `cursor=NULL`; previous planner produced eligible history jobs solely on caller-provided latest-complete keys. This could restart from front rather than verified page-three tail. `390899c` makes planner skip unanchored states, and `cb760f4` updates offline tests. Only durable `continuation_ready` with nonempty cursor may be planned; actual trusted tail-anchoring still P0 OPEN. Tests not run, CI unverified. No Meta/DB operational writes. Rollback both commits only after verified anchoring design supersedes gate.
+
 ### P6-085 — 2026-10-22 · P50 v3 P1 safety fixes and KST cutoff decision
 - **Owner decision:** begin implementing goal-driven P50 manual latest/history cycle v3 on isolated feature branch; frozen P294 design, limit=4, 85% stop, 65-minute/unknown-HTTP protections remain unchanged. No live Meta, operational DB, scheduler, main merge authorization.
 - **Confirmed fixture defect:** `tests/test_three_api_p50_manual_pilot.py::test_three_independent_lanes_commit_three_distinct_accounts` used `with sqlite3.connect(...)` which commits a transaction but does not close Windows DB handle. Fixed with `contextlib.closing` in commit `ba3a27c`. Postfix suite not run; Windows WinError 32 risk addressed at source, outcome still unverified.
