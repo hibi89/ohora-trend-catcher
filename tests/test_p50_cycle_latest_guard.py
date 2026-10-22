@@ -43,5 +43,15 @@ class P50CycleSafetyTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["status"], "quota_hold")
 
 
+    def test_latest_gate_rejects_wrong_workspace_before_db_open(self):
+        with self.assertRaisesRegex(ValueError, "P50 workspace"):
+            cycle._needs_latest("/synthetic/not-p50")
+
+    def test_latest_gate_rejects_symlink_root_before_db_open(self):
+        with patch.object(cycle.Path, "is_symlink", return_value=True):
+            with self.assertRaisesRegex(ValueError, "P50 workspace"):
+                cycle._needs_latest("/synthetic/p50")
+
+
 if __name__ == "__main__":
     unittest.main()
