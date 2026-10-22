@@ -17,8 +17,8 @@ def plan_next_history_page(store, account_keys, *, latest_complete_keys, max_pag
     complete = set(latest_complete_keys)
     if not complete.issubset(set(keys)):
         raise ValueError("Unknown latest-complete account")
-    jobs = []
-    for key in keys:
+    candidates = []
+    for ordinal, key in enumerate(keys):
         if key not in complete:
             continue
         row = store.read(key)
@@ -32,11 +32,10 @@ def plan_next_history_page(store, account_keys, *, latest_complete_keys, max_pag
             continue
         if not row["cursor"]:
             raise ValueError("Persisted continuation missing cursor")
-        jobs.append({"account_key": key, "cursor": row["cursor"],
+        candidates.append((row["pages_verified"], ordinal, {"account_key": key, "cursor": row["cursor"],
                      "verified_pages": row["pages_verified"],
                      "cutoff_day": date.fromisoformat(row["cutoff_day"]).isoformat(),
-                     "requires_explicit_live_approval": True})
-        if len(jobs) == max_pages:
-            break
+                     "requires_explicit_live_approval": True}))
+    jobs = [job for _, _, job in sorted(candidates)[:max_pages]]
     return {"mode": "P50_HISTORY_OFFLINE_PLAN", "jobs": jobs,
             "network_requests": 0, "database_writes": 0}
