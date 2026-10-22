@@ -37,8 +37,8 @@ class HistoryRecoveryTests(unittest.TestCase):
             result = recover_history_pages(
                 store, None, None, self.keys, self.names,
                 latest_complete_keys={self.keys[0]}, captured_pages={})
-            self.assertEqual(result["status"], "awaiting_persisted_page")
-            self.assertEqual(result["next_cursor"], "tail")
+            self.assertEqual(result["status"], "no_eligible_cursor")
+            self.assertEqual(result["deferred_accounts"], [self.keys[0]])
             self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
 
     def test_invalid_step_budget_rejected(self):
