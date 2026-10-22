@@ -68,13 +68,13 @@ class P50HistoryCheckpointTests(unittest.TestCase):
                 terminal=True, next_cursor="unexpected",
                 oldest_post_at=datetime(2025, 1, 1, tzinfo=timezone.utc))
 
-    def test_terminal_conflict_rejected_even_with_missing_receipt(self):
-        with self.assertRaisesRegex(ValueError, "Terminal page"):
-            self.check(terminal=True, raw_receipt_verified=False)
+    def test_missing_receipt_blocks_before_terminal_conflict(self):
+        self.assertEqual(self.check(terminal=True, raw_receipt_verified=False)["state"],
+                         "blocked_unverified_page")
 
-    def test_terminal_conflict_rejected_even_with_unknown_http(self):
-        with self.assertRaisesRegex(ValueError, "Terminal page"):
-            self.check(terminal=True, uncertain_http=True)
+    def test_unknown_http_blocks_before_terminal_conflict(self):
+        self.assertEqual(self.check(terminal=True, uncertain_http=True)["state"],
+                         "blocked_unknown_http")
 
     def test_missing_cursor_blocks(self):
         self.assertEqual(self.check(next_cursor=None)["state"],
