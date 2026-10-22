@@ -1,5 +1,12 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
 > Index: [P6-073 scheduled no-progress recheck](docs/P6_TROUBLESHOOTING_LEDGER.md) · n8n 09:00 trigger success, no new page; A=0 eligible, B/C held.
+
+### P6-072 — 2026-10-22 · 교차 채팅 인수인계 / 독립 emergency 50과 P6 운영 경계 명시
+- **자료 근거:** 사용자 제공 Windows 로그(긴급 V8~V10)와 P6-071의 2026-10-22 08:36 KST 읽기 전용 P6/n8n 스냅샷. 최신 50계정 수집 50/50, 관측 200, 실패 0은 실제 Meta 응답 로그로 검증. 긴급 역사 수집기는 사용률 85%에서 `quota_85_pause` 후 09:38:30 KST 대기까지 관측. 재개 성공/최종 완료는 미검증.
+- **P6 분리:** 318 receipts / 1260 observations / 1041 unique, A 146+4 failed bound / B 0 of 294 held / C 69 done; 08:35 n8n 예약 tick 성공. 이 수치와 긴급 저장소를 합치지 않는다. P6 4개 A 400은 no-retry, B safe usage hold 미해결. Cursor re-anchor는 오프라인-only.
+- **설계 판단/위험:** emergency 수집기와 P6 C lane은 서로 다른 coordinator/데이터 저장소를 가지지만 물리 Meta rate bucket 독립성은 입증되지 않음. 동시 운영 중 quota 중복 점유 위험이 있으므로 새 live dispatch 또는 gate reset/중복 tick을 허가하지 않는다. 긴급 수집기의 85%/쿨타임 정책을 동결 P6 85%/65분 정책 변경 승인으로 읽지 않는다.
+- **범위:** 문서 인수인계만 수행. Meta 0회, 로컬 운영 DB/RAW/Capture 0회 변경, main 병합 없음, 동결 설계 변경 없음. GitHub 직접 확인·수정한 파일만 기록하며 로컬 Windows 상태는 사용자 로그 관측치로 분리한다. 상세: [CHAT_HANDOFF_2026-10-22_P6_AND_EMERGENCY50.md](CHAT_HANDOFF_2026-10-22_P6_AND_EMERGENCY50.md).
+
 > Index: [P6-071 n8n verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · 08:35 trigger success; C=69 pages. A/B blockers and duplicate workflow records remain.
 > Index: [P6-070 overnight progress](docs/P6_TROUBLESHOOTING_LEDGER.md) · Read-only P6 snapshot: C=60 done; B held, A four failed_no_retry. Full collection incomplete.
 > Index: [P6-069 cursor recovery verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · [planner](raw_v2/three_api_paging_recovery.py) · Offline only; no live re-anchor.
@@ -363,6 +370,7 @@
 | P6-069 | 커서 무효화 재연결 인수검증 | 신규 요구가 기존 planner/runtime 구현과 오프라인 사례로 충족되는지 확인 | 60 targeted + 4 handoff PASS; full suite 987 PASS / 1 SKIP / 0 FAIL; live recovery 미실행 |
 | P6-070 | 야간 예약 수집 진척 | read-only snapshot confirms C +30 pages since 07:31; B held and four A failures remain no-retry | 309 receipts / 1236 observations / 1017 unique; no Meta call or DB write by status check |
 | P6-071 | n8n 예약 경로 검증 | active P6 workflow의 08:35 trigger success가 C +3 page / +12 observations와 일치 | 1 active + 2 same-name inactive; full collection incomplete; no assistant Meta call |
+| P6-072 | 교차 채팅 인수인계와 emergency 50 경계 | latest emergency history is separate from P6; quota-bucket independence unverified | Preserve separate stores; no simultaneous dispatch or gate reset without quota proof |
 | P6-073 | 예약 tick no-progress 재확인 | 09:00 wrapper success but no page commit; A eligible 0, B/C lanes held | C 85% usage stop/cooldown to 09:45 KST; no reset or live call |
 | P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
 | P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
