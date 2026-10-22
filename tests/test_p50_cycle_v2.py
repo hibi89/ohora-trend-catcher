@@ -1,69 +1,129 @@
-"""Offline contract tests for standalone P50 cycle planner."""
+"""P50 deterministic offline tests: manual continuous A/B/C rounds."""
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
 import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"raw_v2"))
 from p50_cycle_engine_v2 import CyclePlanner
 
+T = datetime(2026,10,23,1,0,tzinfo=timezone.utc)
+
+def new_planner(directory):
+    p = CyclePlanner(Path(directory)/"planner.sqlite")
+    for lane in ("A","B","C"):
+        p.set_usage(lane,1,now=T)
+    return p
+
+def posts(n):
+    return [{"id":str(i)} for i in range(n)]
 
 class CycleTests(unittest.TestCase):
-    def test_fractional_quota_and_immediate_b_switch(self):
+    def test_strict_a_b_c_order_then_63_minute_wait(self):
         with tempfile.TemporaryDirectory() as d:
-            p=CyclePlanner(Path(d)/'planner.sqlite')
-            p.set_usage('A',86.0)
-            p.set_usage('B',1.0)
-            p.set_usage('C',1.0)
-            j=p.next_job()
-            self.assertEqual((j['lane'],j['ordinal']),('B',1))
-            self.assertEqual(p.summary()['lanes'][0]['halted'],1)
-            p.db.close()
-
-
-    def test_account_one_until_exhaustion_then_two(self):
-        with tempfile.TemporaryDirectory() as d:
-            p=CyclePlanner(Path(d)/"planner.sqlite")
+            p=new_planner(d)
+            previous={}
             for lane in ("A","B","C"):
-                p.set_usage(lane,1)
-            for i in range(25):
-                j=p.next_job()
-                self.assertEqual((j["ordinal"],j["lane"],j["limit"]),(1,"A",8))
-                self.assertEqual(j["cursor"],None if i==0 else f"c{i-1}")
-                p.acknowledge(j,receipt_id=f"r{i}",posts=[{"id":str(i)}],
-                              next_cursor=f"c{i}")
-            p.set_usage("A",86)
-            j=p.next_job()
-            self.assertEqual((j["ordinal"],j["lane"],j["cursor"]),(1,"B","c24"))
-            p.acknowledge(j,receipt_id="last",posts=[{"id":"last"}],
-                          next_cursor=None,exhausted=True)
-            j=p.next_job()
-            self.assertEqual((j["ordinal"],j["lane"],j["cursor"]),(2,"B",None))
+                for ordinal in range(1,51):
+                    j=p.next_job(now=T)
+                    self.assertIsNotNone(j)
+                    self.assertEqual((j["lane"],j["ordinal"],j["round"],j["limit"]),
+                                     (lane,ordinal,1,8))
+                    self.assertEqual(j["cursor"],previous.get(ordinal))
+                    next_cursor=f"{lane}{ordinal}"
+                    p.acknowledge(j,receipt_id=f"r-{lane}-{ordinal}",
+                                  posts=posts(8),next_cursor=next_cursor,now=T)
+                    previous[ordinal]=next_cursor
+            self.assertEqual(p.pause(now=T)["reason"],"round_wait")
+            self.assertEqual(datetime.fromisoformat(p.pause(now=T)["until"]),
+                             T+timedelta(minutes=63))
+            self.assertIsNone(p.next_job(now=T+timedelta(minutes=62)))
+            j=p.next_job(now=T+timedelta(minutes=63))
+            self.assertEqual((j["round"],j["lane"],j["ordinal"],j["cursor"]),
+                             (2,"A",1,"C1"))
             p.db.close()
 
-    def test_no_year_cutoff(self):
+    def test_short_page_fills_exactly_eight_before_next_account(self):
         with tempfile.TemporaryDirectory() as d:
-            p=CyclePlanner(Path(d)/"planner.sqlite",
-                           start_at=datetime(2026,10,23,tzinfo=timezone.utc))
-            p.set_usage("A",1)
-            j=p.next_job()
-            p.acknowledge(j,receipt_id="old",posts=[{"id":"old"}],
-                          next_cursor="next",
-                          oldest_published_at=datetime(2020,1,1,tzinfo=timezone.utc))
-            j=p.next_job()
-            self.assertEqual((j["ordinal"],j["cursor"]),(1,"next"))
+            p=new_planner(d)
+            j=p.next_job(now=T)
+            self.assertEqual(j["limit"],8)
+            p.acknowledge(j,receipt_id="one",posts=posts(3),next_cursor="cursor3",now=T)
+            j=p.next_job(now=T)
+            self.assertEqual((j["lane"],j["ordinal"],j["limit"],j["cursor"]),
+                             ("A",1,5,"cursor3"))
+            self.assertEqual(j["cycle"],2)
+            p.acknowledge(j,receipt_id="two",posts=posts(5),next_cursor="cursor8",now=T)
+            j=p.next_job(now=T)
+            self.assertEqual((j["lane"],j["ordinal"],j["limit"]),
+                             ("A",2,8))
             p.db.close()
 
-    def test_reserved_request_not_resent(self):
+    def test_halted_lane_does_not_jump_to_another_lane(self):
         with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            j=p.next_job(now=T)
+            p.acknowledge(j,receipt_id="one",posts=posts(8),next_cursor="next",now=T)
+            p.set_usage("A",86,now=T)
+            self.assertIsNone(p.next_job(now=T))
+            self.assertEqual(p.pause(now=T)["reason"],"quota_hold")
+            self.assertEqual(p.pause(now=T)["lane"],"A")
+            p.set_usage("A",1,now=T+timedelta(minutes=63))
+            j=p.next_job(now=T+timedelta(minutes=63))
+            self.assertEqual((j["lane"],j["ordinal"]),("A",2))
+            p.db.close()
+
+    def test_restart_retains_partial_slot(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            j=p.next_job(now=T)
+            p.acknowledge(j,receipt_id="one",posts=posts(3),next_cursor="c3",now=T)
+            p.db.close()
             p=CyclePlanner(Path(d)/"planner.sqlite")
-            p.set_usage("A",1)
-            j=p.next_job()
-            self.assertIsNone(p.next_job())
+            j=p.next_job(now=T+timedelta(minutes=1))
+            self.assertEqual((j["lane"],j["ordinal"],j["limit"],j["cursor"]),
+                             ("A",1,5,"c3"))
+            p.db.close()
+
+    def test_no_year_cutoff_and_finished_accounts_skipped(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            j=p.next_job(now=T)
+            p.acknowledge(j,receipt_id="old",posts=posts(8),next_cursor="next",
+                          oldest_published_at=datetime(2018,1,1,tzinfo=timezone.utc),
+                          now=T)
+            self.assertEqual(p.db.execute("SELECT finished FROM accounts WHERE ordinal=1").fetchone()[0],0)
+            j=p.next_job(now=T)
+            self.assertEqual(j["ordinal"],2)
+            p.acknowledge(j,receipt_id="done",posts=posts(2),next_cursor=None,
+                          exhausted=True,now=T)
+            j=p.next_job(now=T)
+            self.assertEqual(j["ordinal"],3)
+            p.db.close()
+
+    def test_all_accounts_exhausted_stops(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            for ordinal in range(1,51):
+                j=p.next_job(now=T)
+                self.assertEqual((j["lane"],j["ordinal"]),("A",ordinal))
+                p.acknowledge(j,receipt_id=str(ordinal),posts=posts(1),
+                              next_cursor=None,exhausted=True,now=T)
+            self.assertIsNone(p.next_job(now=T))
+            self.assertEqual(p.pause(now=T)["reason"],"complete")
+            self.assertEqual(p.summary()["finished_accounts"],50)
+            p.db.close()
+
+    def test_reserved_job_is_not_duplicated(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            j=p.next_job(now=T)
+            self.assertIsNone(p.next_job(now=T))
+            self.assertEqual(p.pause(now=T)["reason"],"reserved")
             self.assertEqual(p.summary()["reserved_requests"],1)
             p.db.close()
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     unittest.main()
