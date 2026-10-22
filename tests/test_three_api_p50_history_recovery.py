@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 from three_api_p50_history_recovery import recover_history_pages
@@ -40,6 +41,43 @@ class HistoryRecoveryTests(unittest.TestCase):
             self.assertEqual(result["status"], "awaiting_persisted_page")
             self.assertEqual(result["deferred_accounts"], [self.keys[0]])
             self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
+
+    def test_recovers_two_consecutive_persisted_pages(self):
+        with P50HistoryStore(self.path) as store:
+            account = self.keys[0]
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            captured = {
+                (account, "tail"): {
+                    "capture_id": "cap-1", "oldest_post_at": None, "terminal": False},
+                (account, "next"): {
+                    "capture_id": "cap-2", "oldest_post_at": None, "terminal": True},
+            }
+            calls = []
+            def verified_commit(store_arg, journal, raw_writer, *,
+                                account_key, capture_id, oldest_post_at, terminal):
+                calls.append(capture_id)
+                if capture_id == "cap-1":
+                    store_arg.db.execute(
+                        "UPDATE history_accounts SET cursor='next',pages_verified=1 "
+                        "WHERE account_key=?", (account_key,))
+                    return {"state": "continuation_ready"}
+                store_arg.db.execute(
+                    "UPDATE history_accounts SET cursor=NULL,state='terminal_verified',"
+                    "pages_verified=2 WHERE account_key=?", (account_key,))
+                return {"state": "terminal_verified"}
+            with patch("three_api_p50_history_recovery.commit_persisted_history_page",
+                       side_effect=verified_commit):
+                result = recover_history_pages(
+                    store, None, None, self.keys, self.names,
+                    latest_complete_keys={account}, captured_pages=captured,
+                    max_steps=2)
+            self.assertEqual(calls, ["cap-1", "cap-2"])
+            self.assertEqual(len(result["completed"]), 2)
+            self.assertEqual(store.read(account)["state"], "terminal_verified")
+            self.assertEqual(result["network_requests"], 0)
 
     def test_invalid_step_budget_rejected(self):
         with P50HistoryStore(self.path) as store:
