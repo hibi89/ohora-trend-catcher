@@ -413,7 +413,7 @@ def run_history(source, workspace, *, environment, max_pages=5000,
                 final_status = _final_history_status(events, coordinator)
                 # Only an entirely verified 50-account window may report complete.
                 # Do not overwrite a safety hold or explicit failure with success.
-                if finished == len(accounts) and final_status == "no_ready_work":
+                if finished == len(accounts) and final_status in ("no_ready_work", "recovered", "already_committed"):
                     final_status = "completed"
                 # A run can make progress on healthy accounts after an isolated
                 # failure; its final no_ready_work must not hide blocked accounts.
