@@ -22,58 +22,37 @@ class CycleTests(unittest.TestCase):
             p.db.close()
 
 
-    def test_full_50_account_sweep_then_switch(self):
+    def test_account_one_until_exhaustion_then_two(self):
         with tempfile.TemporaryDirectory() as d:
             p=CyclePlanner(Path(d)/"planner.sqlite")
             for lane in ("A","B","C"):
                 p.set_usage(lane,1)
-            for ordinal in range(1,51):
+            for i in range(25):
                 j=p.next_job()
-                self.assertEqual((j["lane"],j["ordinal"],j["cursor"]),
-                                 ("A",ordinal,None))
-                p.acknowledge(j,receipt_id=f"a{ordinal}",posts=[{"id":str(ordinal)}],
-                              next_cursor=f"after{ordinal}")
+                self.assertEqual((j["ordinal"],j["lane"],j["limit"]),(1,"A",8))
+                self.assertEqual(j["cursor"],None if i==0 else f"c{i-1}")
+                p.acknowledge(j,receipt_id=f"r{i}",posts=[{"id":str(i)}],
+                              next_cursor=f"c{i}")
             p.set_usage("A",86)
             j=p.next_job()
-            self.assertEqual((j["lane"],j["ordinal"],j["cursor"]),
-                             ("B",1,"after1"))
-            p.acknowledge(j,receipt_id="b1",posts=[{"id":"b1"}],next_cursor="after-b1")
+            self.assertEqual((j["ordinal"],j["lane"],j["cursor"]),(1,"B","c24"))
+            p.acknowledge(j,receipt_id="last",posts=[{"id":"last"}],
+                          next_cursor=None,exhausted=True)
             j=p.next_job()
-            self.assertEqual((j["lane"],j["ordinal"],j["cursor"]),
-                             ("B",2,"after2"))
+            self.assertEqual((j["ordinal"],j["lane"],j["cursor"]),(2,"B",None))
             p.db.close()
 
-    def test_legacy_uneven_progress_balances_accounts(self):
+    def test_no_year_cutoff(self):
         with tempfile.TemporaryDirectory() as d:
-            p=CyclePlanner(Path(d)/"planner.sqlite")
-            for lane in ("A","B","C"):
-                p.set_usage(lane,1)
-            for ordinal in range(1,51):
-                j=p.next_job()
-                p.acknowledge(j,receipt_id=f"a{ordinal}",posts=[{"id":str(ordinal)}],
-                              next_cursor=f"after{ordinal}")
-            for ordinal in range(1,51):
-                j=p.next_job()
-                p.acknowledge(j,receipt_id=f"a2-{ordinal}",posts=[{"id":str(ordinal)}],
-                              next_cursor=f"after2-{ordinal}")
-            for _ in range(3):
-                j=p.next_job()
-                self.assertEqual(j["ordinal"],1 if _==0 else _+1)
-                p.acknowledge(j,receipt_id=f"extra-{_}",posts=[{"id":str(_)}],
-                              next_cursor=f"extra-{_}")
-            j=p.next_job()
-            self.assertEqual(j["ordinal"],4)
-            p.db.close()
-
-    def test_one_year_cutoff_skips_account(self):
-        with tempfile.TemporaryDirectory() as d:
-            p=CyclePlanner(Path(d)/"planner.sqlite",start_at=datetime(2026,10,23,tzinfo=timezone.utc))
+            p=CyclePlanner(Path(d)/"planner.sqlite",
+                           start_at=datetime(2026,10,23,tzinfo=timezone.utc))
             p.set_usage("A",1)
             j=p.next_job()
-            p.acknowledge(j,receipt_id="first",posts=[{"id":"x"}],
-                next_cursor="next",oldest_published_at=datetime(2025,1,1,tzinfo=timezone.utc))
-            j2=p.next_job()
-            self.assertEqual((j2["lane"],j2["ordinal"]),("A",2))
+            p.acknowledge(j,receipt_id="old",posts=[{"id":"old"}],
+                          next_cursor="next",
+                          oldest_published_at=datetime(2020,1,1,tzinfo=timezone.utc))
+            j=p.next_job()
+            self.assertEqual((j["ordinal"],j["cursor"]),(1,"next"))
             p.db.close()
 
     def test_reserved_request_not_resent(self):
