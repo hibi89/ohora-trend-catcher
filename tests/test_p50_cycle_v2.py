@@ -10,6 +10,18 @@ from p50_cycle_engine_v2 import CyclePlanner
 
 
 class CycleTests(unittest.TestCase):
+    def test_fractional_quota_and_immediate_b_switch(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=CyclePlanner(Path(d)/'planner.sqlite')
+            p.set_usage('A',86.0)
+            p.set_usage('B',1.0)
+            p.set_usage('C',1.0)
+            j=p.next_job()
+            self.assertEqual((j['lane'],j['ordinal']),('B',1))
+            self.assertEqual(p.summary()['lanes'][0]['halted'],1)
+            p.db.close()
+
+
     def test_a_then_b_then_c_with_cursor(self):
         with tempfile.TemporaryDirectory() as d:
             p=CyclePlanner(Path(d)/"planner.sqlite")
