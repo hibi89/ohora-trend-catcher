@@ -53,3 +53,7 @@ The two focused test commands in section 1 are required before an operational ap
 ## 6. Fail-closed malformed RAW receipt checks
 
 The read-only Sheets exporter rejects malformed RAW `posts` containers, non-object post entries, and invalid `post_field_status` mappings. The focused Sheets export test suite includes parameterized fixtures for these cases, as well as duplicate receipt pagination and Reels view status/value mismatches. These are defensive read-path changes only; they do not repair, discard, or rewrite RAW evidence. Execute the focused suite locally before claiming PASS; GitHub commit existence is not a test result.
+
+## 7. Incremental export cursor integrity
+
+When observation ID 3 has no matching RAW receipt but ID 4 does, the Sheets exporter must not advance `next_after_id` past ID 3. It returns no rows after checkpoint 2 until the missing receipt is reconciled; once the receipt arrives, the same checkpoint exports IDs 3 and 4 in order. This is intentionally fail-closed and can pause downstream Sheets sync on legacy gaps. Never manually skip IDs or alter the authoritative RAW SQLite to make the dashboard advance. See `docs/P6_N8N_SHEETS_EXPORT_CONTRACT.md` for n8n consumer requirements. **Regression tests committed; execution still unverified.**
