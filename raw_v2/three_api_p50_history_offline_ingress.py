@@ -61,6 +61,8 @@ def ingest_and_commit_offline_history_page(
     if oldest_post_at is not None and (not isinstance(oldest_post_at, datetime)
             or oldest_post_at.utcoffset() is None):
         raise ValueError("Timezone-aware oldest timestamp required")
+    if terminal and getattr(response, "next_cursor", None) is not None:
+        raise ValueError("Terminal history page cannot contain next cursor")
     receipt = ingest_offline_history_response(
         capture, raw_writer, request, response)
     from three_api_p50_history_commit import commit_persisted_history_page
