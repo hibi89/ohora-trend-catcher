@@ -41,7 +41,7 @@ class HistoryFixtureDispatcherTests(unittest.TestCase):
                                             after=cursor, limit=4),
             request_id=f"req-{i}-{cursor}")
         return {"request": request,
-                "response": SimpleNamespace(next_cursor=f"next-{i}"),
+                "response": SimpleNamespace(next_cursor=f"next-{i}",\n                                         request_id=request.request_id, http_status=200),
                 "oldest_post_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
                 "terminal": False}
 
@@ -111,6 +111,23 @@ class HistoryFixtureDispatcherTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "index differs"):
                     self.dispatch(store, pages)
                 self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
+                ingress.assert_not_called()
+
+    def test_bad_later_fixture_preflight_prevents_earlier_writes(self):
+        first = self.fixture(0)
+        second = self.fixture(1)
+        second["response"].http_status = 400
+        pages = {
+            (self.keys[0], "tail-0"): first,
+            (self.keys[1], "tail-1"): second,
+        }
+        with patch("three_api_p50_history_fixture_runner.ingest_offline_history_batch"
+                   ) as ingress:
+            with P50HistoryStore(self.path) as store:
+                with self.assertRaisesRegex(ValueError, "fixture response"):
+                    self.dispatch(store, pages)
+                self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
+                self.assertEqual(store.read(self.keys[1])["pages_verified"], 0)
                 ingress.assert_not_called()
 
     def test_invalid_page_budget_rejected_without_store(self):
