@@ -26,6 +26,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
                 or not isinstance(key[1], str) or not key[1]):
             raise ValueError("Invalid persisted history page index key")
     completed = []
+    if not set(latest_complete_keys).issubset(set(account_keys)):
+        raise ValueError("Unknown latest-complete history account")
     backlog = scan_history_backlog(store, account_keys,
         latest_complete_keys=latest_complete_keys, captured_pages=captured_pages)
     available = {j['account_key'] for j in backlog['ready']}
