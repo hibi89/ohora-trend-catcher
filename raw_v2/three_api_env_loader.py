@@ -6,7 +6,6 @@ process environment names in memory and never makes HTTP requests.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 import sys
 from pathlib import Path
@@ -119,28 +118,28 @@ def load_three_api_environment(directory, *, base_environment=None) -> dict[str,
     return environment
 
 
-def print_local_token_fingerprints(directory) -> None:
-    """Offline lane comparison; never prints tokens, caller IDs or app secrets.
+def print_local_caller_matches(directory, caller_id: str) -> None:
+    """Offline comparison of a known Instagram caller ID to A/B/C.
 
-    Fingerprints are local diagnostics only, NOT evidence of Meta app identity,
-    quota recovery, or permissions. Do not share them publicly.
+    This does not identify a Meta APP ID. No credential or caller ID is printed.
     """
+    if not re.fullmatch(r"[0-9]{1,64}", caller_id):
+        raise CredentialConfigurationError("Expected numeric Instagram caller ID.")
     root = Path(directory)
     for lane in LANES:
         values = _read_lane(root / f".env.api_{lane.lower()}", lane)
-        digest = hashlib.sha256(values["META_ACCESS_TOKEN"].encode("ascii")).hexdigest()[:12]
-        print(f"{lane}: token_fingerprint={digest} (not app ID)")
+        print(f"{lane}: caller_match={values['META_IG_USER_ID'] == caller_id}")
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--fingerprints", action="store_true", help="Print local token fingerprints only; never app IDs")
+    parser.add_argument("--match-ig-caller", metavar="IG_USER_ID", help="Compare known Instagram caller ID offline; NOT a Meta app ID")
     options = parser.parse_args(argv)
     try:
         load_three_api_environment(options.directory)
-        if options.fingerprints:
-            print_local_token_fingerprints(options.directory)
+        if options.match_ig_caller is not None:
+            print_local_caller_matches(options.directory, options.match_ig_caller)
     except CredentialConfigurationError as exc:
         print(f"INVALID: {exc}")
         return 2
