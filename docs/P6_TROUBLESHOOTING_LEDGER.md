@@ -1,4 +1,14 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+
+### P6-900 — 2026-10-22 · [설계 결정] P50 목표 역산 simulation v2.0 → architecture v3.0
+- **변경 이유**: 사고 주입 중심 기존 v1 simulation/v2 설계만으로는 정상 코드도 quota/budget/시간 병목 때문에 365일 history 목표에 도달하지 못하는 경우를 계산하지 못함. 특히 `Q_t≤L_t+C_t+R_t`가 지속되면 과거 수집 처리량 0이라는 조건이 누락되었음.
+- **결정**: [P50 goal-first v3](P50_GOAL_DRIVEN_SIMULATION_ARCHITECTURE_V3_2026-10-22.md) 및 [simulation skill v2.0](../.agents/skills/simulation/SKILL.md) 문서 공시. 명시적 목표 KPI, 분포/상관관계 미확인 상태, quota group, 시간축 이산 사건 모델, 민감도/임계값, P50 10개 위험 및 T01~T18+CAP-01~CAP-10 테스트 계약 도입.
+- **비교 대안**: (a) 실패 시나리오만 추가: 목표달성 불능의 수량·임계값 미해결; (b) 바로 Batch POST 도입: quota·영수증 호환 불명이며 오늘 수동 사용 지연; (c) 본 설계(선택): 기존 직렬·Capture/RAW 기반 구조에 목표·용량·재개 계약을 추가하고 Batch 최적화 유예.
+- **예상 효과/제약**: 구현자가 조건부 목표 가능성과 치명적 안전 위험을 별도 평가. 가상의 1950페이지/일일 용량 150,200,300 계산은 실측 성공이나 Meta 쿼터 약속이 아님. 3레인의 실제 용량/게시 빈도/Windows 시간·실제 live 호출은 미확인.
+- **검증 상태**: THOUGHT-ONLY; GitHub 새 문서/스킬 저장과 일치 여부 확인; 소스 변경·offline 테스트·Meta live·운영 DB·n8n 활성화 **없음**. PR [#16](https://github.com/hibi89/ohora-trend-catcher/pull/16), 공지 [#15](https://github.com/hibi89/ohora-trend-catcher/issues/15). 구현/운영 검증 **OPEN**.
+- **복구/롤백**: 별도 design 브랜치 문서 변경뿐이므로 원본 시스템의 rollback 불필요. old v2 문서 보존, `main` 병합/운영 이행 별도 승인. 실제 작업자는 자신 브랜치에 구현+실측 증거를 기록한다.
+
+
 ### P6-084 — 2026-10-22 · P50 365-day history checkpoint foundation
 - Added `raw_v2/three_api_p50_history_checkpoint.py`: pure offline cursor decision. Requires RAW and Capture verification before advancement; uncertain HTTP blocks; missing/repeated cursor blocks; explicit terminal or timestamp older than cutoff stops. Cursor remains opaque, not reconstructed from paging URL.
 - Added `tests/test_three_api_p50_history_checkpoint.py` with 11 unit cases. **Tests not executed in assistant environment; no success claim.**
