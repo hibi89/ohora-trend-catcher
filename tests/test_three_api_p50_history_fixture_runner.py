@@ -131,6 +131,21 @@ class HistoryFixtureDispatcherTests(unittest.TestCase):
                 self.assertEqual(store.read(self.keys[1])["pages_verified"], 0)
                 ingress.assert_not_called()
 
+    def test_repeated_cursor_rejected_before_any_account_commits(self):
+        first = self.fixture(0)
+        second = self.fixture(1)
+        second["response"].next_cursor = "tail-1"
+        pages = {(self.keys[0], "tail-0"): first,
+                 (self.keys[1], "tail-1"): second}
+        with patch("three_api_p50_history_fixture_runner.ingest_offline_history_batch"
+                   ) as ingress:
+            with P50HistoryStore(self.path) as store:
+                with self.assertRaisesRegex(ValueError, "fixture boundary"):
+                    self.dispatch(store, pages)
+                self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
+                self.assertEqual(store.read(self.keys[1])["pages_verified"], 0)
+                ingress.assert_not_called()
+
     def test_invalid_page_budget_rejected_without_store(self):
         for limit in (0, 51, True, "10"):
             with self.subTest(limit=limit), self.assertRaisesRegex(
