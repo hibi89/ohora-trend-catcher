@@ -122,7 +122,8 @@ def write_capture(db: sqlite3.Connection, capture: dict, *, contract_record=None
         if (phase != "history" or
                 not isinstance(contract_record, CaptureRecord) or
                 contract_record.request.phase != "history" or
-                contract_record.request.history_offline_only is not True):
+                not (contract_record.request.history_offline_only is True or
+                     contract_record.request.history_live_approved is True)):
             raise RawWriteError("Unsupported capture phase")
     if api_version is not None and (not isinstance(api_version, str) or not api_version):
         raise RawWriteError("Invalid API version")
