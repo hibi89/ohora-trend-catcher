@@ -58,8 +58,15 @@ def history_status(workspace):
         state = dict(db.execute(
             "SELECT state, COUNT(*) FROM history_accounts GROUP BY state").fetchall())
         verified = db.execute("SELECT COALESCE(SUM(pages_verified),0) FROM history_accounts").fetchone()[0]
+        accounts = [
+            {"account_key": key, "state": status,
+             "pages_verified": pages, "cursor_present": cursor is not None}
+            for key, status, pages, cursor in db.execute(
+                "SELECT account_key,state,pages_verified,cursor "
+                "FROM history_accounts ORDER BY account_key")
+        ]
         return {"history": "initialized", "states": state,
-                "history_pages_verified": verified}
+                "history_pages_verified": verified, "accounts": accounts}
 
 
 def main(argv=None):
