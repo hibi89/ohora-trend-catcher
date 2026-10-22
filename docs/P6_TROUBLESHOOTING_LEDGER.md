@@ -1,6 +1,13 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-080 n8n receipt readback](docs/P6_TROUBLESHOOTING_LEDGER.md) · approved tick compares the read-only before/after durable receipt counts to committed pages; mock tests 23/23 PASS; runtime store access pending.
 > Index: [P6-079 n8n result gate and alert wiring](docs/P6_TROUBLESHOOTING_LEDGER.md) · workflow export remains inactive; 20/20 focused PASS; live calls require `OHORA_P6_LIVE_APPROVED=YES`; alerts require an operator-configured webhook.
 > Index: [P6-078 B/C resume evidence gate](docs/P6_TROUBLESHOOTING_LEDGER.md) · The guarded B/C helper requires fresh usage below 85%, elapsed cooldown, explicit approval and (for C) a no-competing-C-traffic attestation; 69/69 focused PASS.
+
+### P6-080 — 2026-10-22 · n8n 영수증 저장 readback 및 레인 상태 표시
+- **범위/결정:** 사용자 정정에 따라 n8n 연동만 보강했다. 승인된 tick 직전 기존 pilot receipt count를 기존 read-only status API로 읽고, tick 뒤 count 차이가 `committed_pages` 이상인지 확인한다. 신설 pilot은 0 receipt baseline으로 시작한다. 불완전/읽을 수 없는 기존 상태는 API dispatch 전에 `MANUAL_REVIEW`로 fail-closed한다. 확인 결과는 receipt delta, total durable receipts, A/B/C lane counts로 n8n execution/output에 전달한다. 저장 확인 실패·불일치는 alert/manual review이며, cursor/collector 내부와 동결 정책은 변경하지 않는다.
+- **시험 중 실패와 원인:** 첫 Node mock은 n8n Code node body를 최상위 JavaScript로 실행해 `Illegal return statement`를 냈다. 기대는 n8n 함수 실행형 mock의 3개 판정 결과였고 실제는 syntax error; 원인은 test harness에서 Code node body를 함수 wrapper로 감싸지 않은 fixture 오류였다. 별도 Python mismatch test는 기대 `receipt_delta_mismatch`, 실제 `readback_unavailable`; 원인은 mocked `run_manual_pilot`이 구조화된 반환값 대신 기본 `MagicMock`을 반환해 숫자 비교에서 예외가 난 fixture 오류였다. 두 fixture를 바로잡았고 제품 코드 결함으로 오인하지 않았다.
+- **검증:** `tests.test_three_api_n8n_tick tests.test_p6_resume_b_guarded tests.test_p6_troubleshooting_handoff_guard`: **23/23 PASS**. Node workflow classifier mocks: **3/3 PASS** (`verified`, delta mismatch, readback unavailable). Python compile, PowerShell AST, workflow JSON parse, `git diff --check`: PASS. 이 테스트는 mock 기반이며 실제 운영 pilot SQLite의 Windows read-only 접근 가능성과 n8n execution을 검증하지 않는다.
+- **안전/미완료/롤백:** Meta HTTP 0, 운영 DB/RAW/Capture 쓰기 0, credential 출력 0. 실제 read-only status 호출도 이번 작업에서는 하지 않았다. 운영 n8n import/activation/webhook은 별도 승인/설정 전까지 pending. Rollback: 이 항목과 `HANDOFF.md`/`STATUS.md` top summary를 되돌리고 아래 adapter/workflow/test changes를 revert하면 된다. Repair commit SHA: `932eb33`.
 
 ### P6-079 — 2026-10-22 · n8n 실행 결과 검증·승인 게이트·실패 알림 계약
 - **범위/판단:** 사용자 정정에 따라 P6 cursor algorithm/collector는 변경하지 않고 n8n integration만 수정. Export workflow stays inactive. `p6_n8n_tick.ps1` now passes live/owner-confirm flags only when the operator sets `OHORA_P6_LIVE_APPROVED=YES`; max page count remains 3. The workflow classifies committed progress separately from waiting and accepts external `resume_required`, `coverage_gap`, and `resume_ready` statuses as attention events. Failure and attention notifications use only redacted fields and require `OHORA_P6_ALERT_WEBHOOK`; no webhook or credential is embedded.
@@ -352,6 +359,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-080 | n8n 저장 검증 | read-only receipt baseline/delta, 레인 count를 결과·알림으로 전달 | 23/23 focused PASS; actual pilot readback pending |
 | P6-079 | n8n 결과·승인·알림 연동 | live opt-in, structured progress/attention, redacted webhook; 16/16 PASS | inactive export; runtime import/webhook pending |
 | P6-078 | B/C quota 재개 gate | post-cooldown Capture evidence or explicit dashboard attestation; C also requires no-competing-traffic confirmation | B/C not resumed; 69/69 focused offline PASS |
 | P6-077 | 진단/민감정보 | read-only 실패 진단에 숫자 오류 코드·사용률만 노출 | 문자열 원문/재시도 불가, 65/65 PASS |
