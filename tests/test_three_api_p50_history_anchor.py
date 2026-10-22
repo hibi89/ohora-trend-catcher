@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 from three_api_p50_history_anchor import anchor_latest_tail
@@ -59,13 +60,15 @@ class HistoryAnchorTests(unittest.TestCase):
         journal = SimpleNamespace(get_capture=lambda _: record)
         receipt = SimpleNamespace(raw_receipt_id="receipt-3")
         raw = SimpleNamespace(get_raw_receipt=lambda _: receipt)
-        with P50HistoryStore(self.path) as store:
-            # The caller cannot manufacture an older cutoff date.
-            with self.assertRaises(ValueError):
-                anchor_latest_tail(store, journal, raw, account_key=self.keys[0],
-                                   capture_id=capture_id, terminal=False,
-                                   oldest_post_at=datetime(2025, 1, 1, tzinfo=timezone.utc))
-            self.assertEqual(store.read(self.keys[0])["state"], "ready")
+        # This unit test isolates timestamp validation; durable receipt
+        # validation is exercised by the separate real-port integration tests.
+        with patch("three_api_p50_history_anchor.validate_raw_receipt", return_value=None):
+            with P50HistoryStore(self.path) as store:
+                with self.assertRaises(ValueError):
+                    anchor_latest_tail(store, journal, raw, account_key=self.keys[0],
+                                       capture_id=capture_id, terminal=False,
+                                       oldest_post_at=datetime(2025, 1, 1, tzinfo=timezone.utc))
+                self.assertEqual(store.read(self.keys[0])["state"], "ready")
 
     def test_repeated_latest_tail_cursor_rejected_without_raw_lookup(self):
         record = SimpleNamespace(
