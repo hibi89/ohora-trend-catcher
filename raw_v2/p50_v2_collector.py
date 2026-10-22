@@ -87,7 +87,7 @@ def fetch(lane, username, cursor, caller, token, version, sender):
     return posts,next_cursor,oldest,usage_percent(headers),bd
 
 
-def run(source,workspace,credentials_dir,*,max_requests,live,approved):
+def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_usage=None):
     accounts,digest = load_p50_roster(source)
     if not live or not approved:
         return {"status":"offline","accounts":len(accounts),"meta_calls":0}
@@ -119,10 +119,14 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved):
     sender=make_strict_sender()
     # Missing usage evidence is not proof of available quota. Start conservatively.
     # The operator must verify quotas for all three lanes before a live run.
+    verified_usage = verified_usage or {}
     for lane in ("A","B","C"):
-        state=planner.db.execute("SELECT usage FROM lanes WHERE lane=?", (lane,)).fetchone()
-        if state["usage"] is None:
-            planner.set_usage(lane,None)
+        if lane in verified_usage:
+            planner.set_usage(lane, verified_usage[lane])
+        else:
+            state=planner.db.execute("SELECT usage FROM lanes WHERE lane=?", (lane,)).fetchone()
+            if state["usage"] is None:
+                planner.set_usage(lane,None)
     done=0
     try:
         for _ in range(max_requests):
@@ -172,13 +176,19 @@ def main():
     p.add_argument("--workspace",required=True)
     p.add_argument("--credentials-dir",required=True)
     p.add_argument("--max-requests",type=int,default=1)
+    p.add_argument("--verified-usage-a",type=int)
+    p.add_argument("--verified-usage-b",type=int)
+    p.add_argument("--verified-usage-c",type=int)
     p.add_argument("--live",action="store_true")
     p.add_argument("--confirm-owner-approval",action="store_true")
     a=p.parse_args()
     try:
         result=run(a.source,a.workspace,a.credentials_dir,
                    max_requests=a.max_requests,live=a.live,
-                   approved=a.confirm_owner_approval)
+                   approved=a.confirm_owner_approval,
+                   verified_usage={lane:value for lane,value in (
+                       ("A",a.verified_usage_a),("B",a.verified_usage_b),
+                       ("C",a.verified_usage_c)) if value is not None})
         print(json.dumps(result,ensure_ascii=False))
     except Exception as exc:
         print(json.dumps({"status":"safely_stopped","error_type":type(exc).__name__,
