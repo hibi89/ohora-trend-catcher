@@ -99,6 +99,13 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
       post_id TEXT PRIMARY KEY, first_cycle INTEGER NOT NULL,
       first_lane TEXT NOT NULL, first_ordinal INTEGER NOT NULL,
       published_at TEXT)""")
+    raw.execute("""CREATE TABLE IF NOT EXISTS post_observations(
+      receipt_id TEXT NOT NULL, post_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL, lane TEXT NOT NULL,
+      observed_at TEXT NOT NULL, published_at TEXT,
+      media_type TEXT, media_product_type TEXT,
+      like_count INTEGER, comments_count INTEGER, view_count INTEGER,
+      permalink TEXT, PRIMARY KEY(receipt_id,post_id))""")
     recovered=planner.reconcile_saved_receipts(raw)
     if planner.summary()['reserved_requests']:
         raw.close(); planner.db.close()
@@ -149,6 +156,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                     caller,token,version,sender,limit=job['limit'])
                 # Missing usage means halt this lane after the committed page.
                 receipt=f"p50v2-{job['cycle']}-{lane}-{ordinal}"
+                observed_at=datetime.now(timezone.utc).isoformat()
                 raw.execute("BEGIN IMMEDIATE")
                 raw.execute("INSERT INTO pages VALUES (?,?,?,?,?,?)",
                     (job["cycle"],lane,ordinal,receipt,
@@ -156,6 +164,14 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                      datetime.now(timezone.utc).isoformat()))
                 for post in posts:
                     published = post.get("timestamp")
+                    raw.execute("""INSERT OR IGNORE INTO post_observations
+                        (receipt_id,post_id,ordinal,lane,observed_at,published_at,
+                         media_type,media_product_type,like_count,comments_count,
+                         view_count,permalink) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (receipt,post["id"],ordinal,lane,observed_at,published,
+                         post.get("media_type"),post.get("media_product_type"),
+                         post.get("like_count"),post.get("comments_count"),
+                         post.get("view_count"),post.get("permalink")))
                     raw.execute("""INSERT OR IGNORE INTO post_ids
                         (post_id,first_cycle,first_lane,first_ordinal,published_at)
                         VALUES (?,?,?,?,?)""",
