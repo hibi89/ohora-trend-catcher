@@ -17,6 +17,10 @@ def commit_persisted_history_page(store, journal, raw_writer, *,
     request = record.request
     if request.account_key != account_key or request.phase != "history":
         raise ValueError("Wrong account or non-history Capture")
+    current = store.read(account_key)
+    if (current is None or current["state"] != "continuation_ready"
+            or current["cursor"] != request.cursor):
+        raise ValueError("History Capture does not match active account cursor")
     if record.cursor_state.request_id != request.request_id:
         raise ValueError("Cursor source mismatch")
     if record.cursor_state.current_cursor != request.cursor:
