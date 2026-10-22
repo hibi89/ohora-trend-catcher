@@ -9,3 +9,6 @@
 - `rows=[]` 및 `has_more=true`는 RAW 무결성 gap이므로 실패·보류. `rows=[]` 및 `has_more=false`는 할 일 없음. `reels_view_count=0`과 `null`을 구분한다.
 - **금지:** 자동 활성화, 294계정 확장, 운영 DB 변경, Meta API 호출, 검증 전 커서 전진, 구형 `n8n_meta_collection.json` 활성화.
 - **남은 단계:** 실제 n8n 버전/호스트 명령 호환성 확인 → Sheets 노드 필드 매핑 확인 → 샘플 1~2건 수동 E2E → 부분 실패 복구 검증 → 별도 승인 후 자동 체크포인트와 스케줄링 설계.
+
+## 2026-10-22 보정
+Sheets로 보내는 행에서 배치 커서 보조 필드를 제거했다. 동기화 커서는 Execute Command 노드의 JSON 출력에서 별도로 확인하고 전체 저장 검증 후에만 수동 갱신한다.
