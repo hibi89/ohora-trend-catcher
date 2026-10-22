@@ -251,7 +251,7 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                           "terminal": True}])
                     self.assertEqual(result2["pages_committed"], 1)
                     self.assertEqual(reopened.read(keys[0])["pages_verified"], 2)
-                    self.assertEqual(reopened.read(keys[0])["state"], "terminal_verified")
+                    self.assertEqual(reopened.read(keys[0])["state"], "window_covered")
                     self.assertEqual(raw_db2.execute(
                         "SELECT COUNT(*) FROM three_api_contract_receipts"
                     ).fetchone()[0], 2)
