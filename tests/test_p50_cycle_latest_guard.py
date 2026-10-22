@@ -43,6 +43,23 @@ class P50CycleSafetyTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["status"], "quota_hold")
 
 
+    def test_latest_recovery_then_history(self):
+        latest_result = {"status": "completed", "committed_pages": 1}
+        with patch.object(cycle, "_needs_latest", side_effect=[True, False]), \
+             patch.object(cycle, "run_p50", return_value=latest_result) as latest, \
+             patch.object(cycle, "run_history", return_value={"status": "completed"}) as history, \
+             patch.object(cycle, "serial_tick_lock") as lock, \
+             patch.object(cycle, "load_three_api_environment", return_value={}), \
+             patch("sys.stdout", new_callable=io.StringIO) as output:
+            lock.return_value.__enter__.return_value = None
+            code = cycle.main(["history", "--live", "--confirm-owner-approval",
+                               "--credentials-dir", "/synthetic",
+                               "--workspace", "/synthetic/p50"])
+        self.assertEqual(code, 0)
+        latest.assert_called_once()
+        history.assert_called_once()
+        self.assertEqual(json.loads(output.getvalue())["latest_preparation"]["committed_pages"], 1)
+
     def test_missing_coordinator_refuses_implicit_history_bootstrap(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
