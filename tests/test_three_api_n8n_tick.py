@@ -163,6 +163,11 @@ class N8nTickTests(unittest.TestCase):
                                "kq3_294_collection" /
                                "n8n_p6_daily_collection.json").read_text(encoding="utf-8"))
         self.assertFalse(workflow["active"])
+        self.assertEqual(workflow["id"], "p6-daily-collection-v1")
+        error_workflow = json.loads((Path(__file__).parents[1] /
+                                     "kq3_294_collection" /
+                                     "n8n_p6_error_alert.json").read_text(encoding="utf-8"))
+        self.assertEqual(workflow["settings"]["errorWorkflow"], error_workflow["id"])
         types = {node["type"] for node in workflow["nodes"]}
         self.assertIn("n8n-nodes-base.scheduleTrigger", types)
         self.assertIn("n8n-nodes-base.executeWorkflowTrigger", types)

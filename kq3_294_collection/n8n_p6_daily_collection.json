@@ -1,5 +1,6 @@
 {
   "name": "OHORA P6 bounded daily collection",
+  "id": "p6-daily-collection-v1",
   "nodes": [
     {
       "parameters": {
