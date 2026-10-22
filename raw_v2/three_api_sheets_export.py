@@ -63,6 +63,10 @@ def export_observations(db_path, *, after_id=0, limit=500):
                 raise ValueError("Ambiguous RAW receipts for observation")
             seen_observation_ids.add(row["observation_id"])
             capture = json.loads(row["payload_json"])
+            if not isinstance(capture, dict) or not isinstance(capture.get("posts"), list):
+                raise ValueError("Invalid RAW receipt posts structure")
+            if any(not isinstance(p, dict) for p in capture["posts"]):
+                raise ValueError("Invalid RAW receipt post entry")
             matches = [p for p in capture["posts"] if p.get("id") == row["post_id"]]
             if len(matches) != 1:
                 raise ValueError("RAW receipt post identity mismatch")
