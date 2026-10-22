@@ -13,6 +13,12 @@ import unittest
 import zlib
 from unittest.mock import patch
 
+# "python tests/run_offline.py" places tests/ (not repo root) on sys.path.
+# Keep src.collection_schedule and other root packages importable in CI.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 
 # Split slow Windows SQLite orchestrator tests into stable, independent shards.
 # Assignment uses the full unittest ID: deterministic across OS, enumeration and
