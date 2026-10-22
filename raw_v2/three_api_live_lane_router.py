@@ -35,7 +35,8 @@ class ThreeLaneMetaTransport:
         from three_api_runtime_contract import RequestEnvelope
         if not isinstance(request, RequestEnvelope):
             raise LaneTransportConfigurationError("Validated request required")
-        if request.phase not in ("front", "catchup"):
+        if request.phase not in ("front", "catchup") and not (
+                request.phase == "history" and request.history_live_approved is True):
             raise LaneTransportConfigurationError("History transport is not authorized")
         transport = self._lanes.get(request.lane)
         if transport is None or request.target_ig_user_id != transport._caller_ig_id:
