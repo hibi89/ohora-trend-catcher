@@ -41,7 +41,8 @@ class HistorySessionTests(unittest.TestCase):
                 latest_complete_keys={self.keys[0]}, captured_pages={})
             self.assertEqual(result["before"]["next_job"]["cursor"], "cursor123")
             self.assertEqual(result["after"]["next_job"]["cursor"], "cursor123")
-            self.assertEqual(result["recovery"]["status"], "awaiting_persisted_page")
+            self.assertEqual(result["recovery"]["status"], "no_eligible_cursor")
+            self.assertEqual(result["recovery"]["deferred_accounts"], [self.keys[0]])
             self.assertEqual(result["history_pages_added"], 0)
 
 if __name__ == "__main__":
