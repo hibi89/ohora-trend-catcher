@@ -19,12 +19,14 @@ def run_offline_history_session(store, journal, raw_writer, account_keys,
         captured_pages=captured_pages, max_steps=max_steps, lane=lane)
     after = history_status(
         store, account_keys, latest_complete_keys=latest_complete_keys)
+    pages_added = after["verified_pages"] - before["verified_pages"]
+    if pages_added != len(recovery["completed"]):
+        raise RuntimeError("History session receipt count differs from durable pages")
     return {
         "mode": "P50_HISTORY_OFFLINE_SESSION",
         "before": before,
         "recovery": recovery,
         "after": after,
         "network_requests": 0,
-        "history_pages_added": (
-            after["verified_pages"] - before["verified_pages"]),
+        "history_pages_added": pages_added,
     }
