@@ -98,7 +98,7 @@ class OfflineHistoryBatchTests(unittest.TestCase):
         with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page",
                    side_effect=OSError("disk full")) as ingest:
             with self.assertRaises(OSError):
-                ingest_offline_history_batch(None, None, None, pages)
+                ingest_offline_history_batch(self.store(), None, None, pages)
             self.assertEqual(ingest.call_count, 1)
 
 
