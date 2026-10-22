@@ -31,6 +31,29 @@ FIELDS = ("id,caption,media_type,media_product_type,media_url,permalink,"
 CURSOR = re.compile(r"^[A-Za-z0-9_+=/\\-]{1,2048}$")
 
 
+KST = timezone(timedelta(hours=9))
+
+
+def next_check_kst(until):
+    """Display the planner's next check (not a guaranteed Meta quota reset)."""
+    if until.tzinfo is None:
+        raise ValueError("Aware deadline required")
+    return until.astimezone(KST).isoformat(timespec="seconds")
+
+
+def wait_until_or_stopped(until, stop_event):
+    """Poll bounded waits so Ctrl+C signal handlers run on Windows."""
+    if until.tzinfo is None:
+        raise ValueError("Aware deadline required")
+    while not stop_event.is_set():
+        remaining = (until - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            return False
+        if stop_event.wait(min(1.0, remaining)):
+            return True
+    return True
+
+
 def fetch(lane, username, cursor, caller, token, version, sender, limit=8):
     if not 1 <= limit <= 8:
         raise ValueError('Invalid limit')
@@ -165,8 +188,10 @@ def run(source,workspace,credentials_dir,*,max_requests=None,live,approved,verif
                 until=datetime.fromisoformat(pause["until"])
                 seconds=max(0,(until-datetime.now(timezone.utc)).total_seconds())
                 print(json.dumps({"status":reason,"wait_seconds":round(seconds),
+                                  "next_check_at_kst":next_check_kst(until),
+                                  "next_action":"quota_probe" if reason=="quota_hold" else "round_start_quota_probe",
                                   "committed":done}),flush=True)
-                if stop_event.wait(seconds):
+                if wait_until_or_stopped(until, stop_event):
                     break
                 # 63m barrier: refresh all lanes before starting the next A pass.
                 # Quota stop: refresh only the blocked lane, then resume its slot.
