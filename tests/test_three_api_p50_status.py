@@ -1,5 +1,6 @@
 """P50 read-only progress checks without live credentials."""
 import sqlite3
+from contextlib import closing
 import sys
 import tempfile
 import unittest
@@ -36,7 +37,7 @@ class P50StatusTests(unittest.TestCase):
     def test_counts_raw_and_daily_jobs_without_writes(self):
         self.root.mkdir()
         raw = self.root / "p50_raw.sqlite"
-        with sqlite3.connect(raw) as db:
+        with closing(sqlite3.connect(raw)) as db:
             db.executescript("""
                 CREATE TABLE accounts(account_key TEXT);
                 CREATE TABLE posts(post_id TEXT);
@@ -50,7 +51,7 @@ class P50StatusTests(unittest.TestCase):
             db.execute("INSERT INTO three_api_contract_receipts VALUES ('c1')")
         day = self.root / "2026-10-22"
         day.mkdir()
-        with sqlite3.connect(day / "coordinator.sqlite") as db:
+        with closing(sqlite3.connect(day / "coordinator.sqlite")) as db:
             db.executescript("""
                 CREATE TABLE jobs(state TEXT,lane TEXT);
                 INSERT INTO jobs VALUES ('done','A');
