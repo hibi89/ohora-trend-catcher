@@ -136,7 +136,9 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         if args.mode != "status" and result.get("status") in (
                 "quota_hold", "manual_review", "blocked_unknown_http",
-                "needs_verified_latest", "latest_incomplete"):
+                "needs_verified_latest", "latest_incomplete", "account_blocked",
+                "blocked_missing_cursor", "blocked_unverified_page",
+                "missing_usage", "usage_limit"):
             return 2
         return 0
     except KeyboardInterrupt:
