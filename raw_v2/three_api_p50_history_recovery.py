@@ -45,5 +45,7 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
             terminal=evidence["terminal"])
         completed.append({"account_key": key[0], "state": decision["state"]})
         available.discard(key[0])
-    return {"status": "step_budget_exhausted", "completed": completed,
-            "network_requests": 0, "deferred_accounts": deferred}
+    return {"status": "step_budget_exhausted" if available else
+            ("awaiting_persisted_page" if deferred else "no_eligible_cursor"),
+            "completed": completed, "network_requests": 0,
+            "deferred_accounts": deferred}
