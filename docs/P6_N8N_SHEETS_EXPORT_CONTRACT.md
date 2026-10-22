@@ -70,3 +70,7 @@ An observation with no matching RAW receipt is not exportable. The exporter now 
 ## Orphan observation checkpoint guard (2026-10-22)
 
 An observation whose post identity has no matching `posts` row, or whose post has no matching `accounts` row, is treated as a blocking integrity gap just like an absent RAW receipt. The read-only exporter must not advance `next_after_id` across the gap to later valid observations. Do not manually skip the gap or mutate RAW as a workaround. A standalone SQLite predicate check passed 4/4 scenarios; full repository tests remain unverified.
+
+## Observation key uniqueness (2026-10-22)
+
+The read-only exporter now fails closed when multiple RAW observation rows share the same `(request_id, post_id)` key, including collisions with already acknowledged earlier pages. Such collisions would overwrite distinct observation histories in downstream Sheets. Do not advance the n8n checkpoint on this error; investigate source identity and use a separately approved reconciliation procedure. The detection scans existing observations and can be expensive on large historical databases; profile before expanding to the 294-account source. Regression tests committed but not executed in this environment.
