@@ -18,7 +18,7 @@ from three_api_graph_http import GraphHTTPClient
 from three_api_live_lane_router import ThreeLaneMetaTransport
 from three_api_p50_coordinator import P50Coordinator
 from three_api_p50_history_store import P50HistoryStore
-from three_api_p50_history_live_runner import history_step, _setup_bindings, _reserve, _final_history_status
+from three_api_p50_history_live_runner import history_step, _setup_bindings, _reserve, _final_history_status, _history_completion_status
 from three_api_p50_roster import load_p50_roster
 from three_api_raw_writer import ContractRawWriter
 from three_api_transport import MetaTransport
@@ -42,6 +42,30 @@ class HistoryFinalStatusTests(unittest.TestCase):
                             "blocked_unknown_http", "account_blocked"):
                 self.assertEqual(_final_history_status([{"status": blocked}],
                                                        coordinator), blocked)
+
+    def test_completion_requires_fifty_verified_accounts(self):
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER)")
+            db.executemany("INSERT INTO lanes VALUES (?,?)",
+                           [("A", 0), ("B", 0), ("C", 0)])
+            coordinator = SimpleNamespace(db=db)
+            counts = {"window_covered": 1, "continuation_ready": 49}
+            self.assertEqual(_history_completion_status(
+                [{"status": "recovered"}], coordinator, counts, 50),
+                ("recovered", 1))
+            self.assertEqual(_history_completion_status(
+                [{"status": "no_ready_work"}], coordinator,
+                {"window_covered": 1, "blocked_missing_cursor": 49}, 50),
+                ("manual_review", 1))
+            self.assertEqual(_history_completion_status(
+                [{"status": "recovered"}], coordinator,
+                {"window_covered": 49, "terminal_verified": 1}, 50),
+                ("completed", 50))
+            db.execute("UPDATE lanes SET halted=1 WHERE lane='A'")
+            self.assertEqual(_history_completion_status(
+                [{"status": "recovered"}], coordinator,
+                {"window_covered": 50}, 50),
+                ("quota_hold", 50))
 
     def test_unheld_lane_does_not_invent_quota_hold(self):
         with closing(sqlite3.connect(":memory:")) as db:
