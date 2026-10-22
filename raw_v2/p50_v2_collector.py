@@ -166,6 +166,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                     oldest_published_at=oldest)
                 planner.set_usage(lane,usage)
                 done+=1
+                print(json.dumps({"event":"page_saved","lane":lane,"cycle":job["cycle"],"ordinal":ordinal,"posts":len(posts),"usage":usage,"receipt":receipt}),flush=True)
             except BaseException:
                 # Keep the reservation: unknown HTTP outcomes must never resend.
                 planner.set_usage(lane,None)
