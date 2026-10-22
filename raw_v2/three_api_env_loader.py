@@ -6,6 +6,7 @@ process environment names in memory and never makes HTTP requests.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -118,12 +119,28 @@ def load_three_api_environment(directory, *, base_environment=None) -> dict[str,
     return environment
 
 
+def print_local_token_fingerprints(directory) -> None:
+    """Offline lane comparison; never prints tokens, caller IDs or app secrets.
+
+    Fingerprints are local diagnostics only, NOT evidence of Meta app identity,
+    quota recovery, or permissions. Do not share them publicly.
+    """
+    root = Path(directory)
+    for lane in LANES:
+        values = _read_lane(root / f".env.api_{lane.lower()}", lane)
+        digest = hashlib.sha256(values["META_ACCESS_TOKEN"].encode("ascii")).hexdigest()[:12]
+        print(f"{lane}: token_fingerprint={digest} (not app ID)")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--fingerprints", action="store_true", help="Print local token fingerprints only; never app IDs")
     options = parser.parse_args(argv)
     try:
         load_three_api_environment(options.directory)
+        if options.fingerprints:
+            print_local_token_fingerprints(options.directory)
     except CredentialConfigurationError as exc:
         print(f"INVALID: {exc}")
         return 2
