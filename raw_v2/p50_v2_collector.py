@@ -21,6 +21,7 @@ from three_api_manual_pilot import _credentials
 from three_api_graph_http import make_strict_sender
 from three_api_p50_roster import load_p50_roster
 from three_api_p50_quota_recovery import probe_lane, quota_from_caller_headers
+from three_api_usage import parse_usage
 
 FIELDS = ("id,caption,media_type,media_product_type,media_url,permalink,"
           "timestamp,like_count,comments_count,thumbnail_url,view_count")
@@ -86,7 +87,12 @@ def fetch(lane, username, cursor, caller, token, version, sender):
         if isinstance(post.get("timestamp"),str):
             dates.append(datetime.fromisoformat(post["timestamp"].replace("Z","+00:00")))
     oldest = min(dates) if dates else None
-    return posts,next_cursor,oldest,quota_from_caller_headers(headers,caller),bd
+    scoped=quota_from_caller_headers(headers,caller)
+    # Some successful Business Discovery responses carry only app-level usage.
+    # Preserve the stricter observed maximum when both headers are available.
+    app_usage=parse_usage({'x-app-usage':headers['x-app-usage']}) if 'x-app-usage' in headers else None
+    observed=max(v for v in (scoped,app_usage) if v is not None) if scoped is not None or app_usage is not None else None
+    return posts,next_cursor,oldest,observed,bd
 
 
 def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_usage=None):
