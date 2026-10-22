@@ -1,5 +1,5 @@
 """Offline history recovery never sends HTTP without persisted page evidence."""
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 import tempfile
@@ -51,7 +51,7 @@ class HistoryRecoveryTests(unittest.TestCase):
                 raw_receipt_verified=True, capture_verified=True)
             captured = {
                 (account, "tail"): {
-                    "capture_id": "cap-1", "oldest_post_at": None, "terminal": False},
+                    "capture_id": "cap-1", "oldest_post_at": datetime(2026, 1, 1, tzinfo=timezone.utc), "terminal": False},
                 (account, "next"): {
                     "capture_id": "cap-2", "oldest_post_at": None, "terminal": True},
             }
@@ -163,6 +163,28 @@ class HistoryRecoveryTests(unittest.TestCase):
                 recover_history_pages(
                     store, None, None, self.keys, self.names,
                     latest_complete_keys=set(), captured_pages={}, lane="D")
+
+    def test_duplicate_capture_preflight_rejects_without_commit(self):
+        with P50HistoryStore(self.path) as store:
+            account = self.keys[0]
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            captured = {
+                (account, "tail"): {
+                    "capture_id": "shared-cap", "oldest_post_at": None,
+                    "terminal": True},
+                (self.keys[1], "future"): {
+                    "capture_id": "shared-cap", "oldest_post_at": None,
+                    "terminal": True},
+            }
+            with patch("three_api_p50_history_recovery.commit_persisted_history_page") as commit:
+                with self.assertRaisesRegex(ValueError, "Duplicate history Capture"):
+                    recover_history_pages(
+                        store, None, None, self.keys, self.names,
+                        latest_complete_keys={account}, captured_pages=captured)
+                commit.assert_not_called()
 
     def test_invalid_step_budget_rejected(self):
         with P50HistoryStore(self.path) as store:
