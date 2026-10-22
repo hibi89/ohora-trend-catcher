@@ -94,8 +94,10 @@ def release_verified_lane(path, lane, observation, *, now=None):
         try:
             result = db.execute(
                 "UPDATE lanes SET halted=0,reason=NULL,ready_at=? "
-                "WHERE lane=? AND halted=1 AND reason='usage_limit'",
-                (now.astimezone(timezone.utc).isoformat(), lane),
+                "WHERE lane=? AND ((halted=1 AND reason='usage_limit') "
+                "OR (halted=0 AND reason IS NULL AND ready_at>?))",
+                (now.astimezone(timezone.utc).isoformat(), lane,
+                 now.astimezone(timezone.utc).isoformat()),
             )
             db.execute("COMMIT")
             return result.rowcount == 1
