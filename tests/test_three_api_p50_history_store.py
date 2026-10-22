@@ -51,14 +51,15 @@ class P50HistoryStoreTests(unittest.TestCase):
     def test_unverified_raw_never_advances(self):
         self.initialize()
         with P50HistoryStore(self.path) as store:
-            result = self.commit(store, raw_receipt_verified=False)
-            self.assertEqual(result["state"], "blocked_unverified_page")
+            with self.assertRaises(ValueError):
+                self.commit(store, raw_receipt_verified=False)
             self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
 
     def test_unknown_http_never_advances(self):
         self.initialize()
         with P50HistoryStore(self.path) as store:
-            self.commit(store, uncertain_http=True)
+            with self.assertRaises(ValueError):
+                self.commit(store, uncertain_http=True)
             self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
 
     def test_roster_change_rejected_without_mutation(self):
