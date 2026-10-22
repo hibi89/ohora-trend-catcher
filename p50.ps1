@@ -11,6 +11,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $runner = Join-Path $PSScriptRoot 'raw_v2\three_api_p50_cycle.py'
 if (!(Test-Path -LiteralPath $runner)) { throw 'P50 runner not found' }
+if ($MaxPages -lt 0) { throw 'MaxPages must be a positive integer; no HTTP was attempted.' }
+if ($Mode -eq 'status' -and $PSBoundParameters.ContainsKey('MaxPages')) { throw 'Status cannot accept MaxPages.' }
+if ($Mode -ne 'status' -and $PSBoundParameters.ContainsKey('MaxPages') -and $MaxPages -eq 0) { throw 'Explicit MaxPages must be positive; no HTTP was attempted.' }
 $argsList = @($runner, $Mode, '--source', $Source, '--workspace', $Workspace)
 if ($Mode -ne 'status') {
     if (!$Live) { throw 'Live collection requires operator -Live switch; no HTTP was attempted.' }
