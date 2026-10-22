@@ -1,5 +1,13 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
-> Index: [P6-075 n8n runtime stopped — OPEN](docs/P6_TROUBLESHOOTING_LEDGER.md) · last trigger 09:05 KST; no matching n8n process at 10:36; cause unknown.
+> Index: [P6-076 lane diagnosis](docs/P6_TROUBLESHOOTING_LEDGER.md) · Actual Desktop credentials structurally valid; A target-account errors identified; B/C remain usage-gated; n8n process absent.
+
+### P6-076 — 2026-10-22 · A/B/C usage/auth blocker diagnosis (OPEN)
+- **범위/증거:** Read-only P6 status at 10:45 KST: 321 durable receipts / 1284 observations / 1065 unique; A=146 done/4 leased/144 pending, B=0/0/294, C=72/0/222. No current-day state was modified.
+- **인증 파일:** The actual `C:\Users\haein\OneDrive\Desktop\ohora_env_a_b_c` folder contains all three `.env.api_a/b/c` files. Structural checks found nonempty unique token/ID pairs and matching v26.0; `three_api_env_loader.py --directory ...` returned `VALID`, with Meta calls=0. This proves file structure only, not token validity or Meta permissions. The adjacent ZIP is stale/incomplete for B/C IDs; the ignored project `.env.api_b.local` is older (2026-10-19) and matches neither current B token nor ID. No secret values were emitted or changed.
+- **A:** Four bound `failed_no_retry` account HTTP400s have Graph code=110/subcode=2207013 and parsed usage percentages 20, 26, 19, 26 (all <85). The local transport's exact classifier names this target-account-unavailable. That rules in an account-target-scoped Graph rejection; it does not establish whether the target ID, account visibility, or per-target permission caused it. All four have no Capture/response evidence; no resend.
+- **B:** 10/21 coordinator ended halted as `live_pending_usage`, inherited into 10/22. It has 52 bound requests, 48 safe responses; latest stored response usage was 27% at 17:18 KST, before the hold timestamp 21:13 KST. The four subsequent account HTTP400 failures aggregate to code 100×1, code 110×2, code missing×1; all lack subcode and usage_pct. 10/22 has zero B bindings/responses. Thus the hold is caused by missing post-hold usage evidence, not proven current token failure. The existing `p6_resume_b_guarded.py` was not run; its reset conditions check cooldown/job shape but do not independently verify fresh usage evidence.
+- **C:** 10/22 has 72 safe responses; the latest recorded usage is 85% at 08:40 KST. Stored `ready_at` ended 09:45 KST, but `halted=1/reason=usage_limit` persists by design. Time elapsed does not prove quota recovery; no new C request was sent.
+- **Runtime/verification:** n8n has an active workflow record but no matching runtime process; latest trigger was 09:05. User authorized continued work, but an operational tick entrypoint pointing at the P6 workspace was rejected by automatic approval review because pilot/scheduler state writes were possible. It was not retried through another path. No Meta request, operational DB/RAW/Capture write, retry, hold reset, scheduler restart, or main merge. Offline gate/coordinator group: 46/46 PASS; credential loader structural command: VALID. Documentation test first ran 50 tests: 49 PASS / 1 FAIL because this new P6-076 detail had not yet been added to the incident-index table; exact mismatch was detailed IDs containing P6-076 vs index without P6-076. Root cause: incomplete documentation fixture, not runtime code. After adding the missing row, the same test command passed 50/50. Repair commit: N/A (diagnosis only; no code/runtime repair). Rollback: revert this documentation-only record and its HANDOFF/STATUS/index updates; no operational data impact.
 
 ### P6-075 — 2026-10-22 · OPEN / 원인 미확인 — n8n runtime process 부재
 - **증상/범위:** n8n SQLite runtime에는 동일명 P6 workflow 3행 중 active=1이 남아 있으나, 최신 trigger execution은 09:05:15 KST. 10:36 KST Windows process 목록에서 command line이 `OHORA_N8N_RUNTIME` 또는 n8n을 가리키는 Node process 0개, 기존 PID 20464 없음, n8n Windows service 미발견. 이로써 09:05 이후 scheduled trigger가 실행되지 않은 상태를 확인했으나, 더 늦은 다른 실행 경로 존재 여부는 확인하지 못함.
@@ -324,6 +332,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-076 | lane/auth 진단 | A code 110/2207013; B usage proof missing; C usage 85%; local credential files structurally valid | A 4건 no-retry; B/C hold 유지; 운영 tick은 자동 검토 차단 |
 | P6-001 | 개발운영 | 병렬 작업·웹 채팅 사용량 소진·원복 어려움 | 격리 브랜치/워크트리·복원지점·인수인계 필요 |
 | P6-002 | 인수인계 | 기획/계약은 Git에 있으나 STATUS/HANDOFF 미동기화 | 두 문서 동시 갱신 필수 |
 | P6-003 | Meta 사용량 | 배치 수집은 빨랐지만 API #4/시간 한도 대기 병목 | 속도보다 예산/쿨다운이 제약 |
