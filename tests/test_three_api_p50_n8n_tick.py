@@ -111,7 +111,7 @@ class P50N8nTickTests(unittest.TestCase):
             with patch.dict(os.environ, {"OHORA_P50_ENGINE_ROOT": str(engine)}):
                 pilot = adapter._load_pilot()
                 self.assertEqual(pilot.run_p50(), "engine-root")
-                self.assertEqual(adapter.sys.path[0], str(raw_v2))
+                self.assertEqual(adapter.sys.path[0], str(raw_v2.resolve()))
         finally:
             adapter.sys.modules.pop("three_api_p50_manual_pilot", None)
             adapter.sys.path[:] = old_path

@@ -5,7 +5,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $engineRoot = Join-Path $repo '.tmp\p50_engine'
-$expectedEngineCommit = '9f165b897169ec466171ab2d39fc469b6ecdc9ce'
+$expectedEngineCommit = '8548ecb650bb17a7f671829b740609f6a72cac5a'
 $engineCommit = (& git -C $engineRoot rev-parse HEAD 2>$null | Out-String).Trim()
 if ($engineCommit -cne $expectedEngineCommit -or
         -not (Test-Path -LiteralPath (Join-Path $engineRoot 'raw_v2\three_api_p50_manual_pilot.py') -PathType Leaf)) {
