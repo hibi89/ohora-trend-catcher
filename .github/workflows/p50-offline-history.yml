@@ -1,0 +1,32 @@
+name: P50 Offline History Tests
+
+on:
+  push:
+    branches:
+      - feature/p6-50-account-pilot-20261022
+    paths:
+      - 'raw_v2/three_api_p50_history_*.py'
+      - 'raw_v2/three_api_request_spec.py'
+      - 'raw_v2/three_api_runtime_contract.py'
+      - 'tests/test_three_api_p50_history_*.py'
+      - '.github/workflows/p50-offline-history.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  history-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile offline modules
+        run: python -m compileall -q raw_v2 tests
+      - name: Run history tests without Meta credentials
+        env:
+          PYTHONPATH: raw_v2
+        run: python -m unittest discover -s tests -p 'test_three_api_p50_history_*.py' -v
