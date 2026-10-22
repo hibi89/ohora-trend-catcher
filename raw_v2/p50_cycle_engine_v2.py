@@ -73,6 +73,7 @@ class CyclePlanner:
                 self.db.execute("COMMIT")
                 return None
             for cycle in range(1, MAX_CYCLES + 1):
+                cycle_blocked = False
                 for lane in LANES:
                     pending = self.db.execute("""
                       SELECT a.ordinal,a.cursor FROM accounts a
@@ -84,8 +85,8 @@ class CyclePlanner:
                         continue
                     gate = self.db.execute("SELECT halted FROM lanes WHERE lane=?", (lane,)).fetchone()
                     if gate["halted"]:
-                        self.db.execute("COMMIT")
-                        return None
+                        cycle_blocked = True
+                        continue
                     self.db.execute("""
                       INSERT INTO jobs(cycle,lane,ordinal,state,cursor_before)
                       VALUES (?,?,?,'reserved',?)""",
@@ -93,6 +94,9 @@ class CyclePlanner:
                     self.db.execute("COMMIT")
                     return {"cycle":cycle,"lane":lane,"ordinal":pending["ordinal"],
                             "cursor":pending["cursor"],"limit":PAGE_LIMIT}
+                if cycle_blocked:
+                    self.db.execute("COMMIT")
+                    return None
             self.db.execute("COMMIT")
             return None
         except BaseException:
