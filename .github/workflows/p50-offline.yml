@@ -71,3 +71,6 @@ jobs:
             throw 'History without explicit -Live must be refused before Python or HTTP.'
           }
           Write-Host 'PASS: Windows history/live forwarding, status read-only, no-live refusal; real Meta calls 0.'
+          # The deliberately rejected no-Live subprocess exited nonzero.
+          # Clear that expected code after assertions so the CI shell exits 0.
+          $global:LASTEXITCODE = 0
