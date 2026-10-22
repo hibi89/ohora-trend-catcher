@@ -9,10 +9,10 @@ def run_offline_history_session(store, journal, raw_writer, account_keys,
                                 usernames, *, latest_complete_keys,
                                 captured_pages, max_steps=10, lane="A"):
     """Inspect, recover only durable pages, and report persisted state."""
-    account_keys = tuple(account_keys)
-    latest_complete_keys = frozenset(latest_complete_keys)
     if type(max_steps) is not int or not 1 <= max_steps <= 50:
         raise ValueError("History session step budget must be 1..50")
+    account_keys = tuple(account_keys)
+    latest_complete_keys = frozenset(latest_complete_keys)
     before = history_status(
         store, account_keys, latest_complete_keys=latest_complete_keys)
     recovery = recover_history_pages(
