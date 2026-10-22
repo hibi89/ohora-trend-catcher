@@ -1,3 +1,21 @@
+## 최신 추가 보고 — P1/P2 재개 (2026-10-22)
+
+- n8n P50 결과 분기 결함을 수정했다. 이전 export는 `MANUAL_REVIEW` 또는 계정 실패(`attention`)를 classifier에서 표시하고도 NoOp으로 끝내 n8n 실행이 성공 상태가 될 수 있었다. 이제 해당 상태를 `StopAndError`로 보내 n8n 실행 기록에 실패로 남긴다. 실패 메시지는 고정 문자열이며 runner stdout/토큰을 포함하지 않는다. 정상 진척과 대기 상태는 결과로 저장한다. Workflow는 계속 비활성이다.
+- 검증: `python -m pytest -q tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py tests/test_p6_troubleshooting_handoff_guard.py` → **19 PASS, 2 guard subtests PASS**; pinned engine `test_three_api_serial_lock.py` **8/8 PASS**; Node classifier 5/5 PASS (offline wait, clean progress, partial attention, manual review, serial busy). JSON parse 및 `git diff --check` PASS. 격리 n8n CLI E2E도 실제로 재실행했다.
+- 비교: 최신 P50 feature branch `c4944f1565ade857754a4a71b6c94af2e61903ec`; pinned `10ebaf8`부터 최신 tip까지 n8n이 호출하는 P50 entrypoint, Capture/RAW/coordinator, roster/status 경계 파일은 변경되지 않았다. 새 history 모듈은 P50 코드에는 추가됐으나 n8n tick에서 dispatch하지 않는다. 따라서 pin은 `10ebaf8` 유지; history 연동을 구현했다고 주장하지 않는다.
+- 새 upstream CI run `39727639343`은 green이 아니다. Ubuntu `offline-runtime` 1,087 tests 중 3개 handoff guard 실패: HANDOFF/STATUS 상단에서 ledger 링크 누락 및 incident index/detail mismatch. Windows `offline-windows (remaining)` 927 tests 중 같은 3개 guard 실패와 synthetic `raw.sqlite` cleanup 시 `WinError 32` 17건. Windows 일부 shard는 PASS, 일부 CANCELLED. 17건의 핸들 소유자는 미확인이다. 이는 P50 owner branch 문제이며 이 작업에서 수정하지 않았다.
+- 이번 편집 범위: `kq3_294_collection/n8n_p50_daily_collection.json`, `tests/test_n8n_p50_export.py`, `tests/test_three_api_p50_n8n_tick.py`; handoff/status/ledger/checklist/report 문서도 동기화했다. Meta 호출·운영 DB 변경·n8n 활성화·P294 활성화·main 병합은 없음. 로컬 브랜치 `4e1469225a17d28285b09132fdb7175fbee49e1e`와 알려진 `origin/codex/...` SHA는 변경 전 일치했으며, 새 변경은 아직 커밋/push되지 않았다. `.git/FETCH_HEAD` ACL 때문에 일반 `git fetch`는 실패했고 GitHub connector/local remote refs로 latest upstream 확인했다.
+- **다음:** P50 owner가 `c4944f1` guard/Windows cleanup CI를 해결한 뒤 candidate SHA를 격리 오프라인 계약 테스트한다. 이 n8n branch의 `serial_tick_lock` is owned by the pinned engine: the tick reports `serial_busy` as a no-call wait; the pinned lock suite is 8/8 PASS. Actual n8n production configuration, alert channel and any live schedule/API call still require follow-up/approval.
+
+> 아래 본문은 이전 인계 시점의 상세 기록이며, P50 remote SHA와 CI 상태는 이 최신 추가 보고가 대체한다.
+
+
+### Isolated n8n E2E revalidation
+
+- The first temporary roster fixture was invalid (one-line placeholder rather than required 50 rows and country counts), producing the expected fail-closed `MANUAL_REVIEW`. This was a test-fixture mistake, not an engine defect; P6-100 records it.
+- Replaced only the ignored temporary input with 50 synthetic accounts (US 18/KR 16/JP 16). The existing launcher returned `OFFLINE_PREFLIGHT` / `P50_OFFLINE`, 0 attempts/pages and `live_meta_called=false`. Isolated inactive workflow execution then completed through classifier, IF false branch and result NoOp. n8n CLI reported `status=success`, `storedAt=db`; no P50 workspace was written.
+- The malformed-input run demonstrated the review branch ending in `StopAndError`; n8n reported and persisted `status=error` with sanitized classifier fields. A normal sandbox attempt to reach n8n's loopback task broker failed `EACCES` and left one `running` record in the disposable test DB; an elevated isolated rerun completed. That temporary DB now has one `success`, one `error`, and one orphan `running` record from the sandbox-denied attempt; no records were deleted.
+- Import emitted a telemetry DNS `ENOTFOUND`; no connection succeeded. Diagnostics/version notifications were disabled for subsequent CLI runs. Meta API calls and production database writes were zero.
 # OHORA P50/n8n 진행 보고서 — 2026-10-22
 
 ## 현재 인계 요약

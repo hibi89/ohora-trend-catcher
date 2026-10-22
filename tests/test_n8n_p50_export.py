@@ -44,7 +44,30 @@ class P50N8nExportTests(unittest.TestCase):
         self.assertIn("r.action==='MANUAL_REVIEW'", code)
         self.assertIn("r.action==='WAIT_EXPLICIT_LIVE_APPROVAL'", code)
         self.assertIn("typeof r.live_meta_called==='boolean'?r.live_meta_called:null", code)
+        self.assertIn("alert_required:alertRequired", code)
+        self.assertIn("alert_code:alertCode", code)
         self.assertNotIn('stdout:', code)
+
+    def test_review_states_fail_the_n8n_execution_with_redacted_context(self):
+        workflow = json.loads((ROOT / 'kq3_294_collection' /
+                               'n8n_p50_daily_collection.json').read_text(encoding='utf-8'))
+        nodes = {node['name']: node for node in workflow['nodes']}
+        gate = nodes['Operator review required?']
+        self.assertEqual(gate['type'], 'n8n-nodes-base.if')
+        self.assertEqual(
+            gate['parameters']['conditions']['conditions'][0]['leftValue'],
+            '={{ $json.alert_required }}')
+        stop = nodes['Stop P50 run for operator review']
+        self.assertEqual(stop['type'], 'n8n-nodes-base.stopAndError')
+        self.assertNotIn('={{', stop['parameters']['errorMessage'])
+        self.assertNotIn('stdout', stop['parameters']['errorMessage'])
+        connections = workflow['connections']
+        self.assertEqual(
+            connections['Validate P50 runner result']['main'][0][0]['node'],
+            'Operator review required?')
+        routes = connections['Operator review required?']['main']
+        self.assertEqual(routes[0][0]['node'], 'Stop P50 run for operator review')
+        self.assertEqual(routes[1][0]['node'], 'Keep result in n8n execution')
 
 
 if __name__ == '__main__':

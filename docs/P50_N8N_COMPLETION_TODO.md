@@ -2,6 +2,13 @@
 
 Use this list to track the user's agreed sequence. P50 and P294 use independent RAW databases, coordinators, Capture journals, and collection histories. The frozen P6 design and P6 production data remain unchanged.
 
+## Latest n8n/P50 integration evidence — 2026-10-22
+
+- [x] P2 result routing is fail-visible: `manual_review` and partial `attention` go through an IF node to `StopAndError`; clean progress/waiting remain recorded in n8n execution history. Focused tests 19 PASS + 2 handoff subtests PASS; pinned P50 serial-lock suite 8/8 PASS; direct Node classifier cases 5/5 PASS. `serial_busy` stays a no-call waiting outcome.
+- [ ] No n8n production/instance execution was repeated after this edit. The workflow remains inactive, the user deferred the credential-backed alert channel, and no n8n schedule is authorized to run Meta calls.
+- [ ] Latest P50 source tip `c4944f1` keeps the n8n `run_p50`/status/receipt boundary modules unchanged from tested pin `10ebaf8`, but the additional history modules are not integrated with the n8n tick. Keep the exact pin unchanged until an offline contract test against the candidate SHA and green relevant CI.
+- [ ] Upstream P50 CI run `39727639343` has OPEN blockers: Ubuntu offline-runtime failed three handoff-link/index assertions; Windows `remaining` failed those and 17 temporary SQLite cleanup errors (`WinError 32`). P50 owner must repair/retest that branch. Do not change its source from this n8n branch.
+
 ## P50 readiness and one-page proof
 
 - [x] Validate the supplied 50-account roster locally (50 rows; US 18, KR 16, JP 16; unique usernames; profile links agree). Keep the normalized roster under ignored local `.tmp`; never commit account identities.

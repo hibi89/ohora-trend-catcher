@@ -250,6 +250,22 @@ class P50N8nTickTests(unittest.TestCase):
         self.assertFalse(result["live_meta_called"])
         self.assertEqual(result["storage_verification"]["status"], "verified")
 
+    def test_serial_busy_is_a_verified_wait_without_a_meta_call(self):
+        _seed(self.workspace)
+        result = adapter.tick(
+            self.source, self.workspace, live=True, approved=True,
+            credentials_dir=self.base / "credentials", environment={}, now=NOW,
+            pilot_runner=self._runner({"mode": "P50_EXPLICIT_SERIAL",
+                                       "status": "serial_busy", "committed_pages": 0,
+                                       "recovered_pages": 0, "account_failures": 0,
+                                       "attempted_steps": 1}),
+            environment_loader=self._loader)
+        self.assertEqual(result["status"], "serial_busy")
+        self.assertEqual(result["action"], "LIVE_TICK_COMPLETE")
+        self.assertFalse(result["live_meta_called"])
+        self.assertEqual(result["storage_verification"]["status"], "verified")
+        self.assertEqual(result["storage_verification"]["receipt_delta"], 0)
+
     def test_runner_exception_never_claims_no_live_call(self):
         def fail(*_args, **_kwargs):
             raise RuntimeError("synthetic failure")
