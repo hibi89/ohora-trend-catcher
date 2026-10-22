@@ -34,8 +34,12 @@ def handoff_completed_latest_accounts(coordinator, history_store, journal,
             raise ValueError("P50 history roster not initialized")
         if state["state"] != "ready":
             supplied = capture_ids.get(key)
-            if supplied is not None and supplied != state["last_capture_id"]:
-                raise ValueError("Conflicting latest-tail capture for resumed account")
+            if supplied is not None:
+                receipt = history_store.db.execute(
+                    "SELECT capture_id FROM history_receipts WHERE account_key=? "
+                    "ORDER BY committed_at ASC LIMIT 1", (key,)).fetchone()
+                if receipt is None or receipt["capture_id"] != supplied:
+                    raise ValueError("Conflicting latest-tail capture for resumed account")
             already.append(key)
             continue
         jobs = coordinator.db.execute(
