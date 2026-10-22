@@ -257,8 +257,8 @@ def _canonical(value: Any) -> Any:
                 if not ((isinstance(value, RequestSpec) and f.name == "account_fields"
                          and value.account_fields == ("id", "username"))
                         or (isinstance(value, RequestEnvelope) and
-                            f.name == "history_offline_only" and
-                            value.history_offline_only is False))}
+                            f.name in ("history_offline_only", "history_live_approved") and
+                            getattr(value, f.name) is False))}
     if isinstance(value, Mapping):
         if not all(isinstance(k, str) for k in value):
             raise ValueError("JSON mapping keys must be strings")
