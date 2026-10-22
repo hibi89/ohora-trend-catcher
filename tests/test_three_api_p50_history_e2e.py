@@ -62,7 +62,7 @@ class HistoricalFixtureE2E(unittest.TestCase):
                     journal = CaptureJournal(str(base / "capture.sqlite"))
                     result = ingest_and_commit_offline_history_page(
                         store, journal, writer, request, response,
-                        oldest_post_at=datetime(2026, 10, 19, tzinfo=timezone.utc),
+                        oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
                         terminal=True)
                     self.assertEqual(result["history"]["state"], "terminal_verified")
                     self.assertEqual(store.read(keys[0])["pages_verified"], 1)
