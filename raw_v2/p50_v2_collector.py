@@ -213,7 +213,12 @@ def main():
                        ("C",a.verified_usage_c)) if value is not None})
         print(json.dumps(result,ensure_ascii=False))
     except Exception as exc:
+        frames=traceback.extract_tb(exc.__traceback__)
+        own=[frame for frame in frames if frame.filename.replace("\\","/").endswith(("/p50_v2_collector.py","/p50_cycle_engine_v2.py","/three_api_p50_quota_recovery.py"))]
+        location=own[-1] if own else None
         print(json.dumps({"status":"safely_stopped","error_type":type(exc).__name__,
+                          "error_location":location.name if location else None,
+                          "error_line":location.lineno if location else None,
                           "message":"Inspect local planner; no automatic retry"}))
         raise SystemExit(2)
 
