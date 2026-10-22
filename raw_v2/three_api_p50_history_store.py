@@ -88,6 +88,58 @@ class P50HistoryStore:
             "SELECT * FROM history_accounts WHERE account_key=?", (account_key,)).fetchone()
         return dict(row) if row else None
 
+    def anchor_verified_latest_tail(self, *, account_key, next_cursor,
+                                    capture_id, raw_receipt_id,
+                                    raw_receipt_verified, capture_verified,
+                                    terminal=False, oldest_post_at=None):
+        """Seed history only from independently verified latest-tail evidence.
+
+        Caller must first check both persisted receipts and the latest page's
+        account, request identity, and next cursor. Never infer a cursor.
+        """
+        if not isinstance(next_cursor, str) or not next_cursor:
+            if terminal is not True:
+                raise ValueError("Verified latest-tail continuation cursor required")
+        if raw_receipt_verified is not True or capture_verified is not True:
+            raise ValueError("Both durable latest-tail receipts required")
+        if not isinstance(capture_id, str) or not capture_id:
+            raise ValueError("Capture identifier required")
+        if not isinstance(raw_receipt_id, str) or not raw_receipt_id:
+            raise ValueError("RAW receipt identifier required")
+        if capture_id == raw_receipt_id:
+            raise ValueError("Distinct receipt identities required")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.read(account_key)
+            if row is None or row["state"] != "ready" or row["cursor"] is not None:
+                raise ValueError("History anchor already initialized or unavailable")
+            if self.db.execute(
+                "SELECT 1 FROM history_receipts WHERE capture_id=? OR raw_receipt_id=?",
+                (capture_id, raw_receipt_id)
+            ).fetchone():
+                raise ValueError("Latest-tail evidence already consumed")
+            decision = history_checkpoint(
+                account_key=account_key, current_cursor=None,
+                next_cursor=next_cursor, oldest_post_at=oldest_post_at,
+                cutoff_day=date.fromisoformat(row["cutoff_day"]),
+                raw_receipt_verified=True, capture_verified=True,
+                terminal=terminal)
+            self.db.execute(
+                "INSERT INTO history_receipts VALUES(?,?,?,?,?,?)",
+                (capture_id, account_key, raw_receipt_id, decision["state"],
+                 decision["next_cursor"], datetime.now().astimezone().isoformat()))
+            self.db.execute(
+                """UPDATE history_accounts SET cursor=?,state=?,
+                   last_capture_id=?,last_raw_receipt_id=?
+                   WHERE account_key=?""",
+                (decision["next_cursor"], decision["state"],
+                 capture_id, raw_receipt_id, account_key))
+            self.db.execute("COMMIT")
+            return decision
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+
     def commit_verified_page(self, *, account_key, expected_cursor, next_cursor,
                              oldest_post_at, terminal, capture_id, raw_receipt_id,
                              raw_receipt_verified, capture_verified,
