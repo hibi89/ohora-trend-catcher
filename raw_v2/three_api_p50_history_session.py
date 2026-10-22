@@ -9,6 +9,8 @@ def run_offline_history_session(store, journal, raw_writer, account_keys,
                                 usernames, *, latest_complete_keys,
                                 captured_pages, max_steps=10, lane="A"):
     """Inspect, recover only durable pages, and report persisted state."""
+    account_keys = tuple(account_keys)
+    latest_complete_keys = frozenset(latest_complete_keys)
     before = history_status(
         store, account_keys, latest_complete_keys=latest_complete_keys)
     recovery = recover_history_pages(
