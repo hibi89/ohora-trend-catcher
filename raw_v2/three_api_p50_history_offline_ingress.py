@@ -24,6 +24,12 @@ def ingest_offline_history_response(capture, raw_writer, request, response):
         raise ValueError("History RequestSpec cursor mismatch")
     if request.request_spec.username != request.username:
         raise ValueError("History request username mismatch")
+    from three_api_runtime_contract import digest_sha256
+    if request.request_spec_digest != digest_sha256({
+            "api_version": request.api_version,
+            "target_ig_user_id": request.target_ig_user_id,
+            "spec": request.request_spec}):
+        raise ValueError("History request spec digest mismatch")
     if response.request_id != request.request_id:
         raise ValueError("Response request mismatch")
     if not 200 <= response.http_status < 300:
