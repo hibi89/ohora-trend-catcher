@@ -29,7 +29,9 @@ def _paths():
 
 
 def _needs_latest(workspace):
-    root = Path(workspace)
+    root = Path(workspace).expanduser()
+    if root.name.lower() != "p50" or root.is_symlink():
+        raise ValueError("Dedicated non-symlink P50 workspace required")
     candidates = sorted(root.glob("????-??-??/coordinator.sqlite"))
     if not candidates:
         return True
