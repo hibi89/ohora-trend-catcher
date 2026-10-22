@@ -156,7 +156,7 @@ class P50ManualPilotTests(unittest.TestCase):
         self.assertEqual(result["attempted_steps"], 3)
         self.assertEqual(calls, ["A", "B", "C"])
         kst_day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
-        with sqlite3.connect(self.workspace / "p50_raw.sqlite") as raw:
+        with closing(sqlite3.connect(self.workspace / "p50_raw.sqlite")) as raw:
             self.assertEqual(raw.execute(
                 "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 3)
             self.assertEqual(raw.execute(
