@@ -15,6 +15,7 @@ ACCOUNTS = 50
 MAX_CYCLES = 20
 PAGE_LIMIT = 8
 MAX_USAGE = 85
+COOLDOWN_MINUTES = 63
 
 
 def iso(dt):
@@ -46,20 +47,57 @@ class CyclePlanner:
           receipt_id TEXT, post_count INTEGER,
           PRIMARY KEY(cycle,lane,ordinal));
         CREATE TABLE IF NOT EXISTS lanes(
-          lane TEXT PRIMARY KEY, usage INTEGER, halted INTEGER NOT NULL DEFAULT 0);
+          lane TEXT PRIMARY KEY, usage INTEGER, halted INTEGER NOT NULL DEFAULT 0,
+          ready_at TEXT);
         """)
+        columns = {row[1] for row in self.db.execute('PRAGMA table_info(lanes)')}
+        if 'ready_at' not in columns:
+            self.db.execute('ALTER TABLE lanes ADD COLUMN ready_at TEXT')
         for lane in LANES:
             self.db.execute("INSERT OR IGNORE INTO lanes(lane) VALUES (?)", (lane,))
         for ordinal in range(1, ACCOUNTS + 1):
             self.db.execute("INSERT OR IGNORE INTO accounts(ordinal) VALUES (?)", (ordinal,))
         self.cutoff = (start_at or datetime.now(timezone.utc)) - timedelta(days=365)
 
-    def set_usage(self, lane, usage):
+    def set_usage(self, lane, usage, *, now=None):
         if lane not in LANES or (usage is not None and
                                   (type(usage) is not int or not 0 <= usage <= 100)):
             raise ValueError("Invalid lane or usage")
-        self.db.execute("UPDATE lanes SET usage=?,halted=? WHERE lane=?",
-                        (usage, int(usage is None or usage >= MAX_USAGE), lane))
+        halted = usage is None or usage >= MAX_USAGE
+        until = iso((now or datetime.now(timezone.utc)) + timedelta(minutes=COOLDOWN_MINUTES)) if halted else None
+        self.db.execute("UPDATE lanes SET usage=?,halted=?,ready_at=? WHERE lane=?",
+                        (usage, int(halted), until, lane))
+
+    def resume_cooled_lanes(self, *, now=None):
+        current = iso(now or datetime.now(timezone.utc))
+        # Time expiry allows a guarded probe request; it is NOT proof of recovered quota.
+        self.db.execute("UPDATE lanes SET halted=0 WHERE halted=1 AND ready_at<=?", (current,))
+
+    def cooldown_until(self):
+        rows = self.db.execute('SELECT halted,ready_at FROM lanes').fetchall()
+        if len(rows)!=3 or not all(row['halted'] for row in rows):
+            return None
+        dates = [datetime.fromisoformat(row['ready_at']) for row in rows if row['ready_at']]
+        return min(dates) if dates else None
+
+    def reconcile_saved_receipts(self, raw):
+        # Only reconcile pages already durably saved; never replay unknown HTTP.
+        rows = self.db.execute("SELECT cycle,lane,ordinal,cursor_before FROM jobs WHERE state='reserved'").fetchall()
+        recovered = 0
+        for row in rows:
+            receipt = raw.execute('SELECT response_json FROM pages WHERE cycle=? AND lane=? AND ordinal=?',
+                (row['cycle'],row['lane'],row['ordinal'])).fetchone()
+            if receipt is None:
+                continue
+            body = __import__('json').loads(receipt[0]); media = body.get('media',{})
+            posts = media.get('data',[]); paging = media.get('paging') or {}
+            cursor = (paging.get('cursors') or {}).get('after')
+            dates = [datetime.fromisoformat(p['timestamp'].replace('Z','+00:00')) for p in posts if p.get('timestamp')]
+            self.acknowledge(dict(row),receipt_id=f"p50v2-{row['cycle']}-{row['lane']}-{row['ordinal']}",
+                posts=posts,next_cursor=cursor,exhausted=cursor is None,
+                oldest_published_at=min(dates) if dates else None)
+            recovered += 1
+        return recovered
 
     def next_job(self):
         """A->B->C within each cycle; unfinished accounts only.
