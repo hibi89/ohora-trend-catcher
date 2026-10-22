@@ -337,6 +337,21 @@ def _final_history_status(events, coordinator):
     return "quota_hold" if held is not None else status
 
 
+def _history_completion_status(events, coordinator, counts, total_accounts):
+    """Derive completion from durable account states, never HTTP success alone."""
+    finished = counts.get("window_covered", 0) + counts.get("terminal_verified", 0)
+    status = _final_history_status(events, coordinator)
+    if finished == total_accounts and status in (
+            "no_ready_work", "recovered", "already_committed"):
+        status = "completed"
+    elif status == "no_ready_work" and finished != total_accounts:
+        if any(counts.get(state, 0) for state in (
+                "blocked_unknown_http", "blocked_unverified_page",
+                "blocked_missing_cursor", "blocked_repeated_cursor")):
+            status = "manual_review"
+    return status, finished
+
+
 def run_history(source, workspace, *, environment, max_pages=5000,
                 live=False, approved=False, clock=None):
     """Explicit operator invocation; no HTTP unless both live gates are set."""
@@ -409,22 +424,7 @@ def run_history(source, workspace, *, environment, max_pages=5000,
                         break
                 counts = dict(store.db.execute(
                     "SELECT state,COUNT(*) FROM history_accounts GROUP BY state").fetchall())
-                finished = counts.get("window_covered", 0) + counts.get("terminal_verified", 0)
-                final_status = _final_history_status(events, coordinator)
-                # Only an entirely verified 50-account window may report complete.
-                # Do not overwrite a safety hold or explicit failure with success.
-                if finished == len(accounts) and final_status in ("no_ready_work", "recovered", "already_committed"):
-                    final_status = "completed"
-                # A run can make progress on healthy accounts after an isolated
-                # failure; its final no_ready_work must not hide blocked accounts.
-                if final_status == "no_ready_work" and finished != len(accounts):
-                    blocked = [state for state in (
-                        "blocked_unknown_http", "blocked_unverified_page",
-                        "blocked_missing_cursor", "blocked_repeated_cursor")
-                        if counts.get(state, 0)]
-                    if blocked:
-                        final_status = "manual_review"
-                return {"status": final_status,
+                final_status, finished = _history_completion_status(\n                    events, coordinator, counts, len(accounts))\n                return {"status": final_status,
                         "collection_complete": finished == len(accounts),
                         "completed_accounts": finished,
                         "remaining_accounts": len(accounts) - finished,
