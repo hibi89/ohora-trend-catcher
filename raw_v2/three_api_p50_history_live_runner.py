@@ -405,6 +405,8 @@ def run_history(source, workspace, *, environment, max_pages=5000,
                     {k: v for k, v in mapping.items() if store.read(k)["state"] == "ready"})
                 if not any(store.read(a["key"])["state"] != "ready" for a in accounts):
                     return {"status": "needs_verified_latest", "deferred": len(handoff["deferred"]),
+                            "collection_complete": False, "completed_accounts": 0,
+                            "remaining_accounts": len(accounts),
                             "http_requests": 0, "pages_committed": 0}
                 journal = CaptureJournal(str(history_capture_path))
                 stack.callback(journal.close)
