@@ -70,6 +70,30 @@ class SheetsExportTests(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             export_observations(Path(self.tmp.name) / "missing.sqlite")
 
+    def test_unverified_capture_is_not_exported(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "INSERT INTO post_observations VALUES (3,'p1',"
+                "'2026-10-22T03:00:00Z','batch-3','unverified',"
+                "60,5,1,1)"
+            )
+        result = export_observations(self.path, after_id=2)
+        self.assertEqual(result["rows"], [])
+        self.assertEqual(result["next_after_id"], 2)
+
+    def test_explicit_zero_is_not_missing(self):
+        with sqlite3.connect(self.path) as db:
+            payload = json.dumps({
+                "request_id": "req-2",
+                "posts": [{"id": "p1", "view_count": 0}],
+                "post_field_status": {"p1": {"view_count": "returned"}},
+            })
+            db.execute("UPDATE three_api_raw_receipts SET payload_json=? "
+                       "WHERE capture_id='cap-2'", (payload,))
+        result = export_observations(self.path, after_id=1)
+        self.assertEqual(result["rows"][0]["reels_view_count"], 0)
+        self.assertEqual(result["rows"][0]["reels_view_count_status"], "returned")
+
     def test_export_does_not_mutate_raw(self):
         before = self.path.read_bytes()
         export_observations(self.path)
