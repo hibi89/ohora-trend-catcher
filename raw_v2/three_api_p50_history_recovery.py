@@ -28,8 +28,7 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
             store, account_keys, usernames,
             latest_complete_keys=available, lane=lane)
         if job is None:
-            return {"status": "awaiting_persisted_page" if deferred else "no_eligible_cursor", "completed": completed,
-                    "network_requests": 0, "deferred_accounts": deferred}
+            break
         key = (job["account_key"], job["cursor"])
         evidence = captured_pages.get(key)
         if evidence is None:
