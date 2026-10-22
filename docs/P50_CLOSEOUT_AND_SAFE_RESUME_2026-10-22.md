@@ -138,4 +138,6 @@ if (Test-Path -LiteralPath $backup) {
 
 **운영 판단: P50은 재개 준비 완료가 아니다.** 49계정 resume와 quota 변경은 금지 상태로 유지한다. 귀가 후 canonical root와 백업 생성 방식/시각을 확인하고, SQLite가 지원하는 일관된 read-only 상태에서 sidecar를 포함한 검증을 수행한다. 다음날 최신 요청 격리는 합성 테스트로 확인됐지만 이 결과가 live DB의 분리·무손상을 증명하지는 않는다. CI는 코드 검증이며 실제 수집 성공이 아니다.
 
+이후 읽기 전용 ` .\p50.ps1 status` 재조회에서 `history=not_initialized`, `latest.raw_exists=false`가 반환됐고 기본 AppData P50 폴더가 없었다. Downloads 백업은 존재한다. 이는 앞선 active-workspace 관측과 시간/환경이 다르므로, 자동 restore·초기화·복사를 하지 말고 복귀 시 canonical 위치를 먼저 확인한다.
+
 다음날 최신 수집의 비파괴 기준은 기존 synthetic `test_next_day_latest_preserves_existing_history_state`: 다음 KST 날짜 coordinator/capture를 사용하고 history account rows, history receipts, history Capture bytes가 변경되지 않는 것을 확인한다. Restart/dedup 기준은 crash-window close/reopen 테스트가 같은 미확정 HTTP를 재전송하지 않고 기존 Capture/RAW 증거를 복구하는지 확인한다. 두 검증 모두 offline/injected sender 범위다.
