@@ -17,6 +17,8 @@ def plan_next_history_page(store, account_keys, *, latest_complete_keys, max_pag
     complete = set(latest_complete_keys)
     if not complete.issubset(set(keys)):
         raise ValueError("Unknown latest-complete account")
+    if not isinstance(account_keys, (list, tuple)):
+        raise ValueError("Ordered 50-account roster required")
     candidates = []
     for ordinal, key in enumerate(keys):
         if key not in complete:
