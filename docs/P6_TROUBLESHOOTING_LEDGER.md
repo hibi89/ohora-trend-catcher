@@ -345,7 +345,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
-| P6-078 | B quota 재개 gate | cooldown 이후 완료된 페이지의 safe usage 증거만 재개 허용 | 현 B에 증거 없음; 62/62 offline PASS; 미커밋 |
+| P6-078 | B quota 재개 gate | cooldown 이후 완료된 페이지의 safe usage 증거만 재개 허용 | 현 B에 증거 없음; 62/62 offline PASS; feature에 push 완료 |
 | P6-077 | 진단/민감정보 | read-only 실패 진단에 숫자 오류 코드·사용률만 노출 | 문자열 원문/재시도 불가, 65/65 PASS |
 | P6-076 | lane/auth 진단 | A code 110/2207013; B usage proof missing; C usage 85%; local credential files structurally valid | A 4건 no-retry; B/C hold 유지; 운영 tick은 자동 검토 차단 |
 | P6-001 | 개발운영 | 병렬 작업·웹 채팅 사용량 소진·원복 어려움 | 격리 브랜치/워크트리·복원지점·인수인계 필요 |
