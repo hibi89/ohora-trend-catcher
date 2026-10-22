@@ -123,6 +123,20 @@ class SheetsExportTests(unittest.TestCase):
         self.assertEqual(export_observations(
             self.path, after_id=4, limit=1)["rows"], [])
 
+    def test_malformed_raw_field_status_fails_closed(self):
+        for status in ([], "returned", {"p1": ["returned"]}):
+            with self.subTest(status=status):
+                with sqlite3.connect(self.path) as db:
+                    db.execute(
+                        "UPDATE three_api_raw_receipts SET payload_json=? "
+                        "WHERE capture_id='cap-1'",
+                        (json.dumps({"request_id": "req-1",
+                                     "posts": [{"id": "p1"}],
+                                     "post_field_status": status}),),
+                    )
+                with self.assertRaisesRegex(ValueError, "Invalid RAW"):
+                    export_observations(self.path, limit=1)
+
     def test_malformed_raw_posts_fail_closed(self):
         for posts in (None, {}, ["invalid"]):
             with self.subTest(posts=posts):
