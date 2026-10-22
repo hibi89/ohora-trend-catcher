@@ -56,7 +56,7 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
     latest_complete_keys = frozenset(latest_complete_keys)
     if any(not isinstance(key, str) or not key for key in latest_complete_keys):
         raise ValueError("Invalid latest-complete account key")
-    if not latest_complete_keys.issubset(set(account_keys)):
+    if not latest_complete_keys.issubset(valid_accounts):
         raise ValueError("Unknown latest-complete history account")
     if not isinstance(usernames, dict) or any(
             key not in usernames or not isinstance(usernames[key], str)
