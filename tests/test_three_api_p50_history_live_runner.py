@@ -31,6 +31,7 @@ class HistoryFinalStatusTests(unittest.TestCase):
             db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
             db.executemany("INSERT INTO lanes VALUES (?,?,?)",
                            [("A", 1, "missing_usage"), ("B", 0, None), ("C", 0, None)])
+            db.row_factory = sqlite3.Row
             coordinator = SimpleNamespace(db=db)
             self.assertEqual(_final_history_status([{"status": "recovered"}],
                                                    coordinator), "quota_hold")
@@ -46,8 +47,9 @@ class HistoryFinalStatusTests(unittest.TestCase):
     def test_completion_requires_fifty_verified_accounts(self):
         with closing(sqlite3.connect(":memory:")) as db:
             db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
-            db.executemany("INSERT INTO lanes VALUES (?,?)",
+            db.executemany("INSERT INTO lanes VALUES (?,?,?)",
                            [("A", 0, None), ("B", 0, None), ("C", 0, None)])
+            db.row_factory = sqlite3.Row
             coordinator = SimpleNamespace(db=db)
             counts = {"window_covered": 1, "continuation_ready": 49}
             self.assertEqual(_history_completion_status(
@@ -72,6 +74,7 @@ class HistoryFinalStatusTests(unittest.TestCase):
             db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
             db.executemany("INSERT INTO lanes VALUES (?,?,?)",
                            [("A", 1, "usage_limit"), ("B", 0, None), ("C", 0, None)])
+            db.row_factory = sqlite3.Row
             coordinator = SimpleNamespace(db=db)
             self.assertEqual(_final_history_status([{"status": "recovered"}],
                                                    coordinator), "recovered")
@@ -82,8 +85,9 @@ class HistoryFinalStatusTests(unittest.TestCase):
     def test_unheld_lane_does_not_invent_quota_hold(self):
         with closing(sqlite3.connect(":memory:")) as db:
             db.execute("CREATE TABLE lanes(lane TEXT, halted INTEGER, reason TEXT)")
-            db.executemany("INSERT INTO lanes VALUES (?,?)",
+            db.executemany("INSERT INTO lanes VALUES (?,?,?)",
                            [("A", 0), ("B", 0), ("C", 0)])
+            db.row_factory = sqlite3.Row
             coordinator = SimpleNamespace(db=db)
             self.assertEqual(_final_history_status([{"status": "recovered"}],
                                                    coordinator), "recovered")
