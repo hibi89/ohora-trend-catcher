@@ -1,8 +1,16 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-082 n8n alert webhook env-access blocker (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · alert URL expressions rely on `$env`; runtime env-access configuration and actual delivery remain unverified; no global security relaxation made.
 > Index: [P6-081 n8n native import verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · fixed missing workflow ID; actual installed runtime 2.44.5 scratch round trip: 2 workflows, both inactive; 23/23 focused PASS.
 > Index: [P6-080 n8n receipt readback](docs/P6_TROUBLESHOOTING_LEDGER.md) · approved tick compares the read-only before/after durable receipt counts to committed pages; mock tests 23/23 PASS; runtime store access pending.
 > Index: [P6-079 n8n result gate and alert wiring](docs/P6_TROUBLESHOOTING_LEDGER.md) · workflow export remains inactive; 20/20 original focused PASS; default AppContainer temp ACL failure recurred during later verification and the same suite passed 23/23 with workspace TEMP/TMP.
 > Index: [P6-078 B/C resume evidence gate](docs/P6_TROUBLESHOOTING_LEDGER.md) · The guarded B/C helper requires fresh usage below 85%, elapsed cooldown, explicit approval and (for C) a no-competing-C-traffic attestation; 69/69 focused PASS.
+
+### P6-082 — 2026-10-22 · OPEN / alert webhook environment access not verified
+- **증상/범위:** Daily attention alert and global error alert both use the n8n URL expression `$env.OHORA_P6_ALERT_WEBHOOK`. The actual user start script does not set `N8N_BLOCK_ENV_ACCESS_IN_NODE`; Process/User/Machine values visible to this shell are unset. The n8n server is stopped, so the URL expression and delivery path have not been executed.
+- **원인 상태:** Cause is not fully confirmed for the installed profile. Official n8n 2.0 migration docs say environment access is blocked by default and require `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` to allow it ([official migration docs](https://docs.n8n.io/2-0-breaking-changes/)); however the current official security environment-variable table lists a conflicting default ([official security settings](https://docs.n8n.io/hosting/configuration/environment-variables/security/)). The local 2.44.5 binary was not started because its profile contains three same-name daily workflow records and one active schedule; startup could execute it. No instance config was changed.
+- **대안 판단:** Do not silently set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, because that can expose all process environment variables to n8n expressions/Code nodes, beyond the single webhook value. A credential-backed alert destination or explicit owner approval for the instance-level setting is required; the owner has not selected a channel or approved changing the setting. Existing webhook workflow files remain importable but alert delivery is unverified.
+- **영향/안전:** P6-081 import/export scratch 2/2, offline Python suite 23/23 PASS with workspace-scoped TEMP/TMP, Node classifier mock 3/3 PASS; these do not prove alert delivery. Profile was queried read-only: 3 daily records / 1 active, error-alert 0; current process/listener 0. Meta calls=0; operational n8n/P6/RAW/Capture DB writes=0; P6 core and frozen design unchanged.
+- **수정·검증·예방·롤백:** No product/runtime repair yet; repair SHA N/A (OPEN). The first handoff-guard rerun had 3 PASS / 1 FAIL because the newly added P6-082 detail existed but its quick-index row did not; expected `set(table)==set(details)`, actual detailed IDs contained P6-082 while the table did not. Added the missing row; final guard rerun passed 4/4. Do not start or import into the operational profile until the active duplicate and webhook configuration are reviewed and separately approved. If resumed, first verify expression behavior in isolated n8n 2.44.5 scratch with a mock receiver, then deploy only after owner approval. This diagnosis entry can be reverted without runtime impact.
 
 ### P6-081 — 2026-10-22 · n8n JSON import 실패 수정 및 격리 runtime 확인
 - **증상/원인:** Global n8n CLI 2.40.7은 `n8n --help`를 명령 도움말로 종료하지 않고 runtime을 시작했으며 scratch `.n8n/config`에 자동 생성 키를 기록했다. 세션을 중단하고 node/n8n 프로세스·5678 listener 종료를 확인했다. 별도 격리 DB import에서 error-alert workflow는 성공했지만 daily workflow는 `SQLITE_CONSTRAINT: NOT NULL constraint failed: workflow_entity.id`로 실패. 확정 원인은 daily JSON의 top-level workflow `id` 누락.
@@ -371,6 +379,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-082 | n8n 경고 웹훅 환경 접근 | 2.44.5 `$env` 허용 설정/실제 발송 확인이 미완료; 프로필에 1 active schedule 존재 | OPEN; 보안 설정 완화/credential 통합 및 운영 반영 승인 대기 |
 | P6-081 | n8n export/import 호환성 | missing daily workflow ID 수정; n8n 2.40.7 isolated round-trip, both inactive | 23/23 focused PASS; operational activation pending |
 | P6-080 | n8n 저장 검증 | read-only receipt baseline/delta, 레인 count를 결과·알림으로 전달 | 23/23 focused PASS; actual pilot readback pending |
 | P6-079 | n8n 결과·승인·알림 연동 | live opt-in, structured progress/attention, redacted webhook; 16/16 PASS | inactive export; runtime import/webhook pending |
