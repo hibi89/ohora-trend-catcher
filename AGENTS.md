@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **작업 시작 필독:** [회초리.md](회초리.md) — 사용자 최신 실행 규율. [설계자에게 전하는 말.md](설계자에게%20전하는%20말.md) — 지침 변경 공시 및 설계자 인수인계. 모든 P6 작업자·Codex·새 채팅방은 작업 전 두 문서를 확인하고, 중요한 지침 변경 시 공시 문서를 갱신한다. 동결 설계와 별도 운영 승인 게이트는 유지한다.
+
 ## ABSOLUTE EXECUTION PRIORITY — owner instruction (2026-10-22)
 
 **When the owner says `ㄱ`, `진행`, or asks to move quickly: perform the next substantial, independently executable work immediately.** Do not stop simply because another task is queued, pending CI, waiting for external access, rate-limited, or blocked by the owner's unavailable PC.
