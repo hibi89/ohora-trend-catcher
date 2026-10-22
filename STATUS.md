@@ -1,5 +1,11 @@
 Operating instructions: [AGENTS.md](AGENTS.md) · [docs/P6_TROUBLESHOOTING_LEDGER.md](docs/P6_TROUBLESHOOTING_LEDGER.md).
 
+## P50 quota recovery test correction / 2026-10-23
+
+Operator Windows Python 3.11 focused tests initially reported 5 ERROR, all due to SQLite fixture handles preventing TemporaryDirectory cleanup (WinError 32); this was a **test cleanup issue, not 5 product logic failures**. Fixed all 4 unclosed test connections in commit [4cf97ce](https://github.com/hibi89/ohora-trend-catcher/commit/4cf97ce6f3e8816ed50a0d976696a7f2ffdcb70f). Windows rerun still pending. User live read-only A caller quota probe: HTTP 200, usage 1.0%, quota_verified=true, released=false, applied=false. B/C fresh scoped probes and actual 50-account collection remain pending; no live data or quota gates modified. See [P6-096](docs/P6_TROUBLESHOOTING_LEDGER.md).
+
+Operating instructions: [AGENTS.md](AGENTS.md) · [docs/P6_TROUBLESHOOTING_LEDGER.md](docs/P6_TROUBLESHOOTING_LEDGER.md).
+
 ## P50 quota recovery tool — 2026-10-23 (implemented, live unverified)
 
 Code: [raw_v2/three_api_p50_quota_recovery.py](raw_v2/three_api_p50_quota_recovery.py), offline tests: [tests/test_three_api_p50_quota_recovery.py](tests/test_three_api_p50_quota_recovery.py). New operator command checks one caller-scoped Meta Business Use Case usage header per A/B/C lane, without reading or persisting response bodies. Explicit `--apply --live --confirm-owner-approval` releases only expired `usage_limit` holds after HTTP 200, scoped Instagram usage below 85%, and estimated regain time 0. Missing header, malformed telemetry, >=85 usage, other hold reasons, or unexpired cooldown never release. No automatic scheduling, no DB reset/RAW/cursor writes. **This caller-ID endpoint is a quota proxy, not a full Business Discovery payload test; live end-to-end 50-account run remains unverified.** Commit implementation `81f27f6`; tests committed `f3ea8e8` but not yet executed in this session.
