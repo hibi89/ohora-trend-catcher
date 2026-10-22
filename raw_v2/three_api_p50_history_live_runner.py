@@ -341,8 +341,12 @@ def _final_history_status(events, coordinator):
                   "account_blocked"):
         return status
     held = coordinator.db.execute(
-        "SELECT lane FROM lanes WHERE halted=1 ORDER BY lane LIMIT 1").fetchone()
-    return "quota_hold" if held is not None else status
+        "SELECT lane,reason FROM lanes WHERE halted=1 ORDER BY lane").fetchall()
+    # An independent Meta app with usage_limit does not mask successful
+    # collection through another available app.
+    if any(row["reason"] != "usage_limit" for row in held) or len(held) == len(LANES):
+        return "quota_hold" if held else status
+    return status
 
 
 def _history_completion_status(events, coordinator, counts, total_accounts):
