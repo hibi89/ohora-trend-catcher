@@ -3,7 +3,7 @@ from collections import Counter
 from three_api_p50_history_plan import plan_next_history_page
 
 def history_status(store, account_keys, *, latest_complete_keys):
-    if not isinstance(account_keys, (list, tuple)):
+    if isinstance(account_keys, (set, frozenset, dict)):
         raise ValueError("Ordered 50-account roster required")
     keys = tuple(account_keys)
     if len(keys) != 50 or len(set(keys)) != 50:
