@@ -3,7 +3,9 @@ import json
 import unittest
 from pathlib import Path
 
-WORKFLOW = Path(__file__).resolve().parents[1] / "kq3_294_collection" / "n8n_p6_sheets_manual_pilot.json"
+WORKFLOW_DIR = Path(__file__).resolve().parents[1] / "kq3_294_collection"
+WORKFLOW = WORKFLOW_DIR / "n8n_p6_sheets_manual_pilot.json"
+LINUX_WORKFLOW = WORKFLOW_DIR / "n8n_p6_sheets_linux_manual_pilot.json"
 
 
 class ManualSheetsPilotTests(unittest.TestCase):
@@ -12,6 +14,21 @@ class ManualSheetsPilotTests(unittest.TestCase):
         workflow = json.loads(WORKFLOW.read_text(encoding="utf-8"))
         cls.workflow = workflow
         cls.nodes = {node["name"]: node for node in workflow["nodes"]}
+
+    def test_linux_variant_matches_safety_contract(self):
+        linux = json.loads(LINUX_WORKFLOW.read_text(encoding="utf-8"))
+        self.assertFalse(linux["active"])
+        linux_nodes = {node["name"]: node for node in linux["nodes"]}
+        self.assertEqual(set(linux_nodes), set(self.nodes))
+        self.assertEqual(linux["connections"], self.workflow["connections"])
+        self.assertEqual(linux_nodes["Sheets upsert by observation_key"]["parameters"],
+                         self.nodes["Sheets upsert by observation_key"]["parameters"])
+        command = linux_nodes["Read-only RAW export"]["parameters"]["command"]
+        self.assertIn("three_api_sheets_export.py", command)
+        self.assertIn("OHORA_P6_RAW_DB", command)
+        self.assertIn("OHORA_P6_SHEETS_AFTER_ID", command)
+        self.assertNotIn("powershell", command.lower())
+        self.assertNotIn("--live", command)
 
     def test_inactive_manual_only(self):
         self.assertFalse(self.workflow["active"])

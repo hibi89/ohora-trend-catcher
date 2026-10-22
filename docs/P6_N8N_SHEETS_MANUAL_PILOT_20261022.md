@@ -44,3 +44,7 @@ python "$OHORA_P6_REPO_ROOT/raw_v2/three_api_sheets_export.py" \
 7. 전 행 저장·재실행 검증 후에만 운영자가 `next_after_id`를 기록한다. 자동 갱신 기능은 미구현 상태다.
 
 **주의:** `Manual checkpoint approval required` 노드가 내보내는 `NOT_AUTOMATED` 표시는 실제 승인이나 영구 저장을 뜻하지 않는다. 자동 운영 전환에는 별도의 실패 복구·체크포인트 저장 로직과 승인 절차가 필요하다.
+
+## Linux/Docker용 독립 import JSON
+
+Linux 호스트에서 Windows PowerShell 명령을 직접 수정할 필요 없이 `kq3_294_collection/n8n_p6_sheets_linux_manual_pilot.json`를 사용할 수 있다. 원본 Windows 파일과 동일하게 수동 트리거·검증·Sheets upsert·수동 체크포인트 보류로 구성했으며 **비활성 상태**다. 실제 컨테이너 내 파일 마운트·Python 설치·Google OAuth·스프레드시트 ID 설정은 운영자가 별도로 검증해야 한다. 두 파일을 동시에 활성화하지 않는다.
