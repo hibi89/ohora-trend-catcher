@@ -27,11 +27,13 @@ def ingest_offline_history_response(capture, raw_writer, request, response):
         return commit_raw_and_confirm(capture, raw_writer, existing)
     if capture.get_intent_outcome(request.request_id) is not None:
         raise ValueError("Unresolved history intent; no replay")
+    # Validate schema before creating a durable intent. A rejected fixture
+    # must not leave a pending request that looks like an unknown HTTP outcome.
+    record = capture_record_from_response(request, response)
     if capture.save_intent(request) is not True:
         raise ValueError("History intent already exists")
     evidence = capture.save_response_evidence(response)
     if evidence["classification"] != "safe":
         raise ValueError("Unsafe history response; no RAW commit")
-    record = capture_record_from_response(request, response)
     persist_capture_verified(capture, record)
     return commit_raw_and_confirm(capture, raw_writer, record)
