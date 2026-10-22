@@ -23,7 +23,7 @@ class P50CycleSafetyTests(unittest.TestCase):
             result = cycle.main(["history", "--live", "--confirm-owner-approval",
                                  "--credentials-dir", "/synthetic",
                                  "--workspace", "/synthetic/p50"])
-        self.assertEqual(result, 0)
+        self.assertEqual(result, 2)
         history.assert_not_called()
         self.assertEqual(json.loads(out.getvalue())["status"], "latest_incomplete")
 
