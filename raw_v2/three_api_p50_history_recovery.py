@@ -20,6 +20,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
         raise ValueError("Explicit persisted page index required")
     # An account's captured page index must be keyed by its immutable
     # (account_key, cursor) pair; malformed keys cannot be silently skipped.
+    if any(not isinstance(key, str) or not key for key in account_keys):
+        raise ValueError("Invalid pilot account key")
     valid_accounts = set(account_keys)
     if len(valid_accounts) != 50 or len(account_keys) != 50:
         raise ValueError("Exactly 50 pilot accounts required")
@@ -44,8 +46,14 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
             raise ValueError("Invalid persisted history page evidence")
     completed = []
     latest_complete_keys = frozenset(latest_complete_keys)
+    if any(not isinstance(key, str) or not key for key in latest_complete_keys):
+        raise ValueError("Invalid latest-complete account key")
     if not latest_complete_keys.issubset(set(account_keys)):
         raise ValueError("Unknown latest-complete history account")
+    if not isinstance(usernames, dict) or any(
+            key not in usernames or not isinstance(usernames[key], str)
+            or not usernames[key].strip() for key in latest_complete_keys):
+        raise ValueError("Missing verified account username")
     backlog = scan_history_backlog(store, account_keys,
         latest_complete_keys=latest_complete_keys, captured_pages=captured_pages)
     available = {j['account_key'] for j in backlog['ready']}
