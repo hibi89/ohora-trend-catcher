@@ -22,40 +22,47 @@ class CycleTests(unittest.TestCase):
             p.db.close()
 
 
-    def test_a_then_b_then_c_with_cursor(self):
+    def test_full_50_account_sweep_then_switch(self):
         with tempfile.TemporaryDirectory() as d:
             p=CyclePlanner(Path(d)/"planner.sqlite")
             for lane in ("A","B","C"):
                 p.set_usage(lane,1)
-            for i,lane in enumerate(("A","B","C"),1):
+            for ordinal in range(1,51):
                 j=p.next_job()
                 self.assertEqual((j["lane"],j["ordinal"],j["cursor"]),
-                                 (lane,1,None if i==1 else f"cursor{i-1}"))
-                p.acknowledge(j,receipt_id=f"receipt{i}",
-                              posts=[{"id":str(i)}],next_cursor=f"cursor{i}")
+                                 ("A",ordinal,None))
+                p.acknowledge(j,receipt_id=f"a{ordinal}",posts=[{"id":str(ordinal)}],
+                              next_cursor=f"after{ordinal}")
             p.set_usage("A",86)
             j=p.next_job()
             self.assertEqual((j["lane"],j["ordinal"],j["cursor"]),
-                             ("B",1,"cursor3"))
+                             ("B",1,"after1"))
+            p.acknowledge(j,receipt_id="b1",posts=[{"id":"b1"}],next_cursor="after-b1")
+            j=p.next_job()
+            self.assertEqual((j["lane"],j["ordinal"],j["cursor"]),
+                             ("B",2,"after2"))
             p.db.close()
 
-    def test_legacy_jobs_resume_without_replaying_pages(self):
+    def test_legacy_uneven_progress_balances_accounts(self):
         with tempfile.TemporaryDirectory() as d:
             p=CyclePlanner(Path(d)/"planner.sqlite")
             for lane in ("A","B","C"):
                 p.set_usage(lane,1)
-            for lane in ("A","B","C"):
+            for ordinal in range(1,51):
                 j=p.next_job()
-                p.acknowledge(j,receipt_id=f"legacy-{lane}",
-                              posts=[{"id":lane}],next_cursor=f"after-{lane}")
-            p.db.close()
-            p=CyclePlanner(Path(d)/"planner.sqlite")
-            p.set_usage("A",86)
-            p.set_usage("B",1)
-            p.set_usage("C",1)
+                p.acknowledge(j,receipt_id=f"a{ordinal}",posts=[{"id":str(ordinal)}],
+                              next_cursor=f"after{ordinal}")
+            for ordinal in range(1,51):
+                j=p.next_job()
+                p.acknowledge(j,receipt_id=f"a2-{ordinal}",posts=[{"id":str(ordinal)}],
+                              next_cursor=f"after2-{ordinal}")
+            for _ in range(3):
+                j=p.next_job()
+                self.assertEqual(j["ordinal"],1 if _==0 else _+1)
+                p.acknowledge(j,receipt_id=f"extra-{_}",posts=[{"id":str(_)}],
+                              next_cursor=f"extra-{_}")
             j=p.next_job()
-            self.assertEqual((j["cycle"],j["lane"],j["ordinal"],j["cursor"]),
-                             (2,"B",1,"after-C"))
+            self.assertEqual(j["ordinal"],4)
             p.db.close()
 
     def test_one_year_cutoff_skips_account(self):
