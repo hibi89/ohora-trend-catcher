@@ -121,8 +121,13 @@ class LiveSerialStep:
                 # starved B (and eventually C), despite valid frozen jobs.
                 # Recovery above still takes precedence; the original lease
                 # remains the final quota/cursor/binding authorization gate.
-                for lane in self.coordinator.dispatch_lane_order(now=now):
-                    job = self.coordinator.lease_for_dispatch(lane, now=now)
+                if is_p50:
+                    dynamic_job = self.coordinator.lease_dynamic_p50(now=now)
+                    dispatch_candidates = ((dynamic_job["lane"], dynamic_job),) if dynamic_job else ()
+                else:
+                    dispatch_candidates = ((lane, self.coordinator.lease_for_dispatch(lane, now=now))
+                                           for lane in self.coordinator.dispatch_lane_order(now=now))
+                for lane, job in dispatch_candidates:
                     if job is None:
                         continue
                     # Preflight must finish before reserving an immutable intent.
