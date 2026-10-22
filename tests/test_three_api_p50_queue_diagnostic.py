@@ -39,6 +39,9 @@ class QueueDiagnosticTests(unittest.TestCase):
     def test_held_b_blocks_dependent_a_and_c(self):
         result = inspect_queue(self.root, now=self.now)
         self.assertEqual(result["jobs_remaining"], 3)
+        self.assertEqual(result["front_accounts_completed"], 0)
+        self.assertEqual(result["page_coverage"]["1"], {"done": 0, "total": 1})
+        self.assertFalse(result["daily_complete"])
         self.assertEqual(result["dispatchable_now"], 0)
         self.assertEqual(result["next_action"], "waiting_quota_lane")
         self.assertEqual(result["lanes"]["B"]["eligible_before_gate"], 1)
@@ -58,6 +61,7 @@ class QueueDiagnosticTests(unittest.TestCase):
         with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.execute("UPDATE jobs SET state='done' WHERE id=1")
         result = inspect_queue(self.root, now=self.now)
+        self.assertEqual(result["front_accounts_completed"], 1)
         self.assertEqual(result["lanes"]["A"]["waiting_cursor"], 1)
         self.assertEqual(result["dispatchable_now"], 0)
         with closing(sqlite3.connect(self.db)) as conn, conn:
