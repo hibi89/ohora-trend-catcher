@@ -40,12 +40,12 @@ def history_checkpoint(*, account_key, current_cursor, next_cursor,
     if not (raw_receipt_verified and capture_verified):
         return {"state": "blocked_unverified_page", "next_cursor": current_cursor,
                 "eligible_to_dispatch": False}
+    if terminal and next_cursor is not None:
+        raise ValueError("Terminal page cannot have continuation cursor")
     if oldest_post_at is not None and oldest_post_at.astimezone(timezone(timedelta(hours=9))).date() < cutoff_day:
         return {"state": "window_covered", "next_cursor": None,
                 "eligible_to_dispatch": False}
     if terminal:
-        if next_cursor is not None:
-            raise ValueError("Terminal page cannot have continuation cursor")
         return {"state": "terminal_verified", "next_cursor": None,
                 "eligible_to_dispatch": False}
     if next_cursor is None:
