@@ -93,7 +93,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved):
         return {"status":"offline","accounts":len(accounts),"meta_calls":0}
     if not 1<=max_requests<=3000:
         raise ValueError("max_requests must be 1..3000")
-    env=load_three_api_environment(credentials_dir)
+    env=load_three_api_environment(credentials_dir, base_environment={})
     credentials=_credentials(env)
     version=env.get("P6_META_GRAPH_VERSION","v26.0")
     if not re.fullmatch(r"v\d{1,3}\.\d{1,2}",version):
@@ -102,6 +102,11 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved):
     if root.name.lower()!="p50_v2" or root.is_symlink():
         raise ValueError("Dedicated p50_v2 workspace required")
     planner=CyclePlanner(root/"planner.sqlite")
+    # Never resend a reserved request automatically. Reconcile it manually.
+    pending=planner.db.execute("SELECT COUNT(*) FROM jobs WHERE state='reserved'").fetchone()[0]
+    if pending:
+        planner.db.close()
+        raise RuntimeError("Unreconciled reserved request; inspect RAW before resuming")
     raw=sqlite3.connect(root/"raw.sqlite",isolation_level=None)
     raw.execute("""CREATE TABLE IF NOT EXISTS pages(
       cycle INTEGER,lane TEXT,ordinal INTEGER,receipt_id TEXT UNIQUE,
@@ -112,6 +117,12 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved):
       first_lane TEXT NOT NULL, first_ordinal INTEGER NOT NULL,
       published_at TEXT)""")
     sender=make_strict_sender()
+    # Missing usage evidence is not proof of available quota. Start conservatively.
+    # The operator must verify quotas for all three lanes before a live run.
+    for lane in ("A","B","C"):
+        state=planner.db.execute("SELECT usage FROM lanes WHERE lane=?", (lane,)).fetchone()
+        if state["usage"] is None:
+            planner.set_usage(lane,None)
     done=0
     try:
         for _ in range(max_requests):
