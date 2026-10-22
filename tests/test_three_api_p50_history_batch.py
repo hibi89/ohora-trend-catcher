@@ -105,8 +105,7 @@ class OfflineHistoryBatchTests(unittest.TestCase):
                     [f"P50_JP_{i:03d}" for i in range(1, 17)])
             pages = []
             for index, key in enumerate(keys, 1):
-                p = page(index if index <= 28 else index - 28,
-                         f"tail-{index}", f"next-{index}")
+                p = page(1, f"tail-{index}", f"next-{index}")
                 p["request"].account_key = key
                 p["request"].request_id = f"history-{index}"
                 p["response"].request_id = f"history-{index}"
