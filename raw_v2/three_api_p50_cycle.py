@@ -168,8 +168,16 @@ def main(argv=None):
                     result["latest_preparation"] = {
                         "status": latest_result["status"],
                         "committed_pages": latest_result["committed_pages"]}
+        if args.mode == "latest":
+            # One successful bounded page is valid partial progress. However,
+            # no-ready-work with unfinished durable jobs is NOT daily success:
+            # n8n/operator must not mark today's collection complete.
+            result["collection_complete"] = not _needs_latest(args.workspace)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         if args.mode == "history" and result.get("collection_complete") is False:
+            return 2
+        if (args.mode == "latest" and result.get("status") in
+                ("no_ready_work", "serial_busy") and not result["collection_complete"]):
             return 2
         if args.mode != "status" and result.get("status") in (
                 "quota_hold", "manual_review", "blocked_unknown_http",
