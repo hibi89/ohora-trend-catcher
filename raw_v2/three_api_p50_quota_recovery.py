@@ -77,7 +77,9 @@ def release_verified_lane(path, lane, observation, *, now=None):
     """Release a usage_limit hold when Meta explicitly verifies recovery.
 
     Caller must hold P50's serial operator lock. A successful probe is not
-    permission to clear other reasons or restart an unknown HTTP request.\n    A successful scoped Meta BUC probe with zero regain time supersedes the\n    locally estimated cooldown, but never an explicit Meta regain hold.
+    permission to clear other reasons or restart an unknown HTTP request.
+    A successful scoped Meta BUC probe with zero regain time supersedes the
+    locally estimated cooldown, but never an explicit Meta regain hold.
     """
     now = now or datetime.now(timezone.utc)
     if (not isinstance(now, datetime) or now.utcoffset() is None
@@ -92,9 +94,8 @@ def release_verified_lane(path, lane, observation, *, now=None):
         try:
             result = db.execute(
                 "UPDATE lanes SET halted=0,reason=NULL "
-                "WHERE lane=? AND halted=1 AND reason='usage_limit' "
-                "AND ready_at<=?",
-                (lane, now.astimezone(timezone.utc).isoformat()),
+                "WHERE lane=? AND halted=1 AND reason='usage_limit'",
+                (lane,),
             )
             db.execute("COMMIT")
             return result.rowcount == 1
