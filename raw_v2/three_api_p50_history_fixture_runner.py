@@ -35,6 +35,8 @@ def run_offline_history_fixture_dispatch(
     if not isinstance(usernames, dict):
         raise ValueError("Verified account usernames mapping required")
     complete = frozenset(latest_complete_keys)
+    if any(not isinstance(key, str) for key in complete):
+        raise ValueError("Invalid latest-complete account key")
     if not complete.issubset(set(keys)) or any(
             not isinstance(usernames.get(k), str) or not usernames[k].strip()
             for k in complete):
