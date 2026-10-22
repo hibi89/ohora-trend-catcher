@@ -16,7 +16,8 @@ from test_three_api_raw_writer import SCHEMA
 from three_api_capture import CaptureJournal
 from three_api_raw_writer import ContractRawWriter
 from three_api_p50_history_store import P50HistoryStore
-from three_api_p50_history_offline_ingress import (\n    ingest_and_commit_offline_history_page, ingest_offline_history_response)
+from three_api_p50_history_offline_ingress import (
+    ingest_and_commit_offline_history_page, ingest_offline_history_response)
 from three_api_request_spec import build_request_spec
 from three_api_runtime_contract import digest_sha256
 
