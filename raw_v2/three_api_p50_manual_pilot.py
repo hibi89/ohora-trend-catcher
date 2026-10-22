@@ -76,7 +76,7 @@ def run_p50(source, workspace, *, live=False, approved=False, environment=None,
             coordinator, capture, raw, _transports(values))
         result = run_bounded_serial_steps(
             runner, accounts, max_steps=max_pages,
-            run_id="p50-" + day.strftime("%Y%m%d"),
+            run_id="three-api-p50-" + day.strftime("%Y%m%d"),
             roster_digest=digest, day_kst=day,
             api_version=version,
             caller_ids={lane: values[lane][1] for lane in LANES},
