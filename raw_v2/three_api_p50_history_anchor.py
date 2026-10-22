@@ -26,7 +26,11 @@ def anchor_latest_tail(store, journal, raw_writer, *, account_key, capture_id,
         raise ValueError("Capture cursor does not match request")
     if record.cursor_state.page != record.request.page:
         raise ValueError("Capture page does not match request")
-    if terminal is not True and not record.cursor_state.next_cursor:
+    if type(terminal) is not bool:
+        raise ValueError("Explicit latest-tail terminal flag required")
+    if terminal and record.cursor_state.next_cursor is not None:
+        raise ValueError("Terminal latest-tail Capture contains continuation cursor")
+    if not terminal and not record.cursor_state.next_cursor:
         raise ValueError("Missing verified continuation cursor")
     return store.anchor_verified_latest_tail(
         account_key=account_key, next_cursor=record.cursor_state.next_cursor,
