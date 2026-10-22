@@ -36,6 +36,24 @@ class P50HistoryPlanTests(unittest.TestCase):
                 self.assertEqual(result["jobs"][0]["cursor"], "saved-tail")
                 self.assertEqual(result["network_requests"], 0)
 
+    def test_least_progressed_account_selected_first(self):
+        keys = [f"P50_US_{i:03d}" for i in range(1, 51)]
+        with tempfile.TemporaryDirectory() as tmp:
+            with P50HistoryStore(Path(tmp) / "p50" / "history.sqlite") as store:
+                store.initialize(keys, date(2025, 10, 22))
+                for key, pages in ((keys[0], 5), (keys[1], 1), (keys[2], 1)):
+                    store.db.execute(
+                        "UPDATE history_accounts SET state='continuation_ready', "
+                        "cursor=?,pages_verified=? WHERE account_key=?",
+                        ("cursor-" + key, pages, key))
+                result = plan_next_history_page(
+                    store, keys, latest_complete_keys=set(keys[:3]), max_pages=2)
+                self.assertEqual(
+                    [job["account_key"] for job in result["jobs"]],
+                    [keys[1], keys[2]])
+                self.assertEqual(result["network_requests"], 0)
+                self.assertEqual(result["database_writes"], 0)
+
     def test_unknown_completion_rejected(self):
         keys = [f"P50_US_{i:03d}" for i in range(1, 51)]
         with tempfile.TemporaryDirectory() as tmp:
