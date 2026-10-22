@@ -273,6 +273,47 @@ class SheetsExportTests(unittest.TestCase):
         self.assertEqual(result["rows"][0]["reels_view_count"], 0)
         self.assertEqual(result["rows"][0]["reels_view_count_status"], "returned")
 
+    def test_partial_verified_page_stops_before_unverified_gap(self):
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(3,'p1','2026-10-22T03:00:00Z','batch-3','missing-req',60,5,1,1)"
+            )
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(4,'p1','2026-10-22T04:00:00Z','batch-4','req-4',61,6,1,1)"
+            )
+            db.execute("INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
+                       ("cap-4", "P50_US_001", json.dumps({
+                           "request_id": "req-4", "posts": [{"id": "p1"}]})))
+        page = export_observations(self.path, after_id=0, limit=500)
+        self.assertEqual([row["observation_id"] for row in page["rows"]], [1, 2])
+        self.assertEqual(page["next_after_id"], 2)
+        self.assertTrue(page["has_more"])
+        retry = export_observations(self.path, after_id=page["next_after_id"])
+        self.assertEqual(retry["rows"], [])
+        self.assertEqual(retry["next_after_id"], 2)
+        self.assertTrue(retry["has_more"])
+
+    def test_partial_page_replay_after_late_receipt_is_idempotent(self):
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(3,'p1','2026-10-22T03:00:00Z','batch-3','req-3',60,5,1,1)"
+            )
+        first = export_observations(self.path)
+        self.assertEqual(first["next_after_id"], 2)
+        self.assertTrue(first["has_more"])
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
+                       ("cap-3", "P50_US_001", json.dumps({
+                           "request_id": "req-3", "posts": [{"id": "p1"}]})))
+        replay = export_observations(self.path, after_id=0)
+        self.assertEqual([row["observation_id"] for row in replay["rows"]], [1, 2, 3])
+        self.assertEqual(len({row["observation_key"] for row in replay["rows"]}), 3)
+        self.assertEqual(replay["next_after_id"], 3)
+        self.assertFalse(replay["has_more"])
+
     def test_export_does_not_mutate_raw(self):
         before = self.path.read_bytes()
         export_observations(self.path)
