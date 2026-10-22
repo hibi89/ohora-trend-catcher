@@ -45,5 +45,14 @@ class HistorySessionTests(unittest.TestCase):
             self.assertEqual(result["recovery"]["deferred_accounts"], [self.keys[0]])
             self.assertEqual(result["history_pages_added"], 0)
 
+    def test_one_shot_iterables_survive_before_recovery_after(self):
+        with P50HistoryStore(self.path) as store:
+            result = run_offline_history_session(
+                store, None, None, iter(self.keys), self.names,
+                latest_complete_keys=iter(self.keys), captured_pages={})
+            self.assertEqual(result["history_pages_added"], 0)
+            self.assertEqual(result["recovery"]["status"], "no_eligible_cursor")
+            self.assertEqual(result["network_requests"], 0)
+
 if __name__ == "__main__":
     unittest.main()
