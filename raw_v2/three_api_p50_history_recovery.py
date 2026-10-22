@@ -89,7 +89,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
             terminal=evidence["terminal"])
         persisted = store.read(key[0])
         if (persisted is None or persisted["cursor"] == key[1] or
-                persisted["state"] != decision["state"]):
+                persisted["state"] != decision["state"] or
+                persisted["pages_verified"] != job["verified_pages"] + 1):
             raise RuntimeError("History commit did not advance durable account state")
         completed.append({"account_key": key[0], "state": decision["state"]})
         if decision["state"] != "continuation_ready":
