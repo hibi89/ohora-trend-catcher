@@ -33,6 +33,9 @@ def handoff_completed_latest_accounts(coordinator, history_store, journal,
         if state is None or state["account_key"] != key:
             raise ValueError("P50 history roster not initialized")
         if state["state"] != "ready":
+            supplied = capture_ids.get(key)
+            if supplied is not None and supplied != state["last_capture_id"]:
+                raise ValueError("Conflicting latest-tail capture for resumed account")
             already.append(key)
             continue
         jobs = coordinator.db.execute(
