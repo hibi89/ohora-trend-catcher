@@ -166,7 +166,8 @@ class OfflineHistoryIngressTests(unittest.TestCase):
             keys = [f"P50_US_{i:03d}" for i in range(1, 51)]
             journal = CaptureJournal(str(root / "capture.sqlite"))
             self.addCleanup(journal.close)
-            raw_db = sqlite3.connect(":memory:", isolation_level=None)
+            raw_path = root / "raw.sqlite"
+            raw_db = sqlite3.connect(raw_path, isolation_level=None)
             self.addCleanup(raw_db.close)
             raw_db.executescript(SCHEMA)
             raw_db.execute("INSERT INTO accounts VALUES(?)", (keys[0],))
@@ -213,8 +214,53 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                 self.assertIsNotNone(journal.get_capture_for_request(request.request_id))
                 self.assertEqual(raw_db.execute(
                     "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
-            with P50HistoryStore(history_path) as reopened:
-                self.assertEqual(reopened.read(keys[0])["cursor"], "next")
+            # Restart all three durable ports, then ingest the next page
+            # without replaying the first response or opening a transport.
+            journal.close()
+            raw_db.close()
+            journal2 = CaptureJournal(str(root / "capture.sqlite"))
+            raw_db2 = sqlite3.connect(raw_path, isolation_level=None)
+            try:
+                from dataclasses import replace
+                from three_api_p50_history_batch import ingest_offline_history_batch
+                spec2 = build_request_spec("A", "nailartist", after="next", limit=4)
+                request2 = replace(
+                    request, request_id="req-" + "c" * 64, cursor="next",
+                    page=5, request_spec=spec2,
+                    request_spec_digest=digest_sha256({
+                        "api_version": "v26.0",
+                        "target_ig_user_id": "17840000000000000",
+                        "spec": spec2}))
+                payload2 = {"business_discovery": {
+                    "id": "17840000000000099", "username": "nailartist",
+                    "media": {"data": [{
+                        "id": "1234567891", "media_type": "IMAGE",
+                        "timestamp": "2025-10-01T10:00:00+0000",
+                        "caption": "older synthetic nail",
+                        "permalink": "https://www.instagram.com/p/SYNTHETIC2/",
+                    }]}}}
+                response2 = replace(response, request_id=request2.request_id,
+                                    payload=payload2, next_cursor=None)
+                with P50HistoryStore(history_path) as reopened:
+                    self.assertEqual(reopened.read(keys[0])["cursor"], "next")
+                    result2 = ingest_offline_history_batch(
+                        reopened, journal2, ContractRawWriter(raw_db2),
+                        [{"request": request2, "response": response2,
+                          "oldest_post_at": datetime(
+                              2025, 10, 1, 10, tzinfo=timezone.utc),
+                          "terminal": True}])
+                    self.assertEqual(result2["pages_committed"], 1)
+                    self.assertEqual(reopened.read(keys[0])["pages_verified"], 2)
+                    self.assertEqual(reopened.read(keys[0])["state"], "terminal_verified")
+                    self.assertEqual(raw_db2.execute(
+                        "SELECT COUNT(*) FROM three_api_contract_receipts"
+                    ).fetchone()[0], 2)
+                    self.assertEqual(raw_db2.execute(
+                        "SELECT COUNT(*) FROM post_observations"
+                    ).fetchone()[0], 2)
+            finally:
+                journal2.close()
+                raw_db2.close()
 
     def test_terminal_cursor_contradiction_never_writes_raw(self):
         from three_api_p50_history_offline_ingress import (
