@@ -61,7 +61,7 @@ class LiveSerialStep:
         is_p50 = type(getattr(self, "coordinator", None)) is P50Coordinator
         expected_count = 50 if is_p50 else 294
         if not isinstance(accounts, (list, tuple)) or len(accounts) != expected_count:
-            raise LiveSerialStepError("Selected roster size mismatch")
+            raise LiveSerialStepError(\n                "P50 50-account roster required" if is_p50\n                else "Official 294-account roster required")
         # Reject missing A/B/C callers and forbidden offline evidence before
         # touching an injected transport or coordinator, even with bad rows.
         if not isinstance(caller_ids, dict) or set(caller_ids) != set(LANES):
