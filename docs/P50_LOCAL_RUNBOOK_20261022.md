@@ -9,6 +9,7 @@ From repository root, PowerShell:
 ```powershell
 python -m compileall -q raw_v2
 python -m unittest discover -s tests -p "test_three_api_p50_*.py" -v
+python -m unittest discover -s tests -p "test_three_api_sheets_export.py" -v
 python raw_v2/three_api_p50_preflight.py --source "$env:USERPROFILE\Downloads\ohora_p50_roster_20261022.csv"
 python raw_v2/three_api_p50_manual_pilot.py --source "$env:USERPROFILE\Downloads\ohora_p50_roster_20261022.csv" --workspace "$env:LOCALAPPDATA\OHORA_P50\p50"
 ```
@@ -42,3 +43,9 @@ Verify at least one immutable Capture receipt, a matching RAW receipt, and a com
 - The GitHub Actions workflow has not yet returned a passing run.
 - Live Meta credentials, permissions, rate limits, actual RAW write, and Reels view-count coverage have not been validated in this branch.
 - Historical backfill completion is **not** proven by a first-page success.
+
+## 5. Read-only status and Sheets export safety (2026-10-22)
+
+The initialized P50 status returns `live_meta_called: null` because persisted row counts cannot prove whether a Meta HTTP call occurred. An uninitialized workspace still reports `false`. The status reader rejects a symlinked `p50` root; the Sheets exporter rejects a symlinked RAW database. The exporter excludes observations without matching RAW receipts and rejects ambiguous duplicate receipt matches instead of silently emitting duplicate rows. No SQLite or Google Sheets write is performed by these readers.
+
+The two focused test commands in section 1 are required before an operational approval request. GitHub commits alone are **not** test evidence; if DNS/network restrictions prevent repository checkout, record offline test status as **UNVERIFIED**, not PASS. Never treat the first page or an export fixture as evidence of 50-account live collection.
