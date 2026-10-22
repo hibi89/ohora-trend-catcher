@@ -7,6 +7,7 @@ on:
     paths:
       - 'raw_v2/**'
       - 'tests/test_three_api_p50_*.py'
+      - 'tests/test_three_api_sheets_export.py'
       - '.github/workflows/p50-offline.yml'
 jobs:
   p50-offline:
@@ -22,3 +23,5 @@ jobs:
         run: python -m compileall -q raw_v2/three_api_p50_*.py raw_v2/three_api_live_serial_step.py raw_v2/three_api_serial_bootstrap.py
       - name: P50 offline unit and integration tests
         run: python -m unittest discover -s tests -p 'test_three_api_p50_*.py' -v
+      - name: Read-only n8n export contract tests
+        run: python -m unittest discover -s tests -p 'test_three_api_sheets_export.py' -v
