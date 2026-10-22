@@ -20,8 +20,9 @@ def preview(source):
     # An ephemeral in-memory plan ensures no workspace or operational DB mutation.
     with sqlite3.connect(":memory:") as db:
         db.execute("CREATE TABLE jobs(account_ordinal INTEGER, page INTEGER, lane TEXT, phase TEXT)")
+        patterns = (("A", "C", "B"), ("B", "A", "C"), ("C", "B", "A"))
         for account in accounts:
-            for page, lane in enumerate(("A", "C", "B"), 1):
+            for page, lane in enumerate(patterns[(account["ordinal"] - 1) % 3], 1):
                 db.execute("INSERT INTO jobs VALUES(?,?,?,?)", (
                     account["ordinal"], page, lane,
                     "front" if page == 1 else "catchup"))
