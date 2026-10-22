@@ -16,6 +16,28 @@ class MetaNormalizerTests(unittest.TestCase):
         self.assertEqual(result, {"data": [
             {"id": "p1", "caption": "nail", "like_count": 4}]})
 
+    def test_reels_view_count_and_product_type_survive_allowlist(self):
+        src = {"data": [{"id": "123", "media_type": "VIDEO",
+               "media_product_type": "REELS", "view_count": 18711,
+               "access_token": "DO_NOT_KEEP"}]}
+        observed = normalize_meta_page(src)["data"][0]
+        self.assertEqual(observed["view_count"], 18711)
+        self.assertEqual(observed["media_product_type"], "REELS")
+        self.assertNotIn("access_token", observed)
+
+    def test_view_count_zero_and_null_are_distinct_from_absent(self):
+        posts = [{"id": "1", "view_count": 0},
+                 {"id": "2", "view_count": None}, {"id": "3"}]
+        result = normalize_meta_page({"data": posts})["data"]
+        self.assertEqual(result[0]["view_count"], 0)
+        self.assertIsNone(result[1]["view_count"])
+        self.assertNotIn("view_count", result[2])
+
+    def test_invalid_view_counts_are_rejected(self):
+        for invalid in (True, -1, "100", 1.5):
+            with self.subTest(value=invalid), self.assertRaises(ValueError):
+                normalize_meta_page({"data": [{"id": "1", "view_count": invalid}]})
+
     def test_next_url_removed_but_cursor_kept(self):
         payload = {"data": [{"id": "p1"}], "paging": {
             "next": "https://graph.facebook.com/?access_token=SECRET",
@@ -24,6 +46,12 @@ class MetaNormalizerTests(unittest.TestCase):
         self.assertEqual(result["paging"]["next"], "offline-next-page")
         self.assertNotIn("SECRET", str(result))
         self.assertEqual(result["paging"]["cursors"]["after"], "edge1")
+
+    def test_after_only_cursor_is_preserved_without_inventing_next_url(self):
+        result = normalize_meta_page({"data": [{"id": "p1"}],
+                                      "paging": {"cursors": {"after": "opaque1"}}})
+        self.assertEqual(result["paging"], {"cursors": {"after": "opaque1"}})
+        self.assertNotIn("next", result["paging"])
 
     def test_meta_error_fails_closed(self):
         with self.assertRaises(ValueError):

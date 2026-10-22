@@ -1,6 +1,7 @@
 # Secrets and private configuration
 **/.env.local
 **/.env.*.local
+**/.env.api_*
 **/*secret*.json
 **/*credentials*.json
 *.pem

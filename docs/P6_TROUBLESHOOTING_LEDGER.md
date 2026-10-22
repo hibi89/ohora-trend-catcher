@@ -1,0 +1,937 @@
+### P6-098 — 2026-10-23 · Incomplete latest run could return exit code 0 (fixed in code; CI pending)
+- **Observed/reproduction scope:** A real bounded P50 latest run committed 52 pages then returned `status=no_ready_work`, while 2026-10-23 latest had only 53/150 jobs done. Static review of `three_api_p50_cycle.main` showed it only treated a specific error-status list as nonzero; `no_ready_work` and `serial_busy` were not included. Thus an automation reading process exit code alone could mark an incomplete day as a success.
+- **Confirmed cause:** `run_bounded_serial_steps` legitimately stops on no eligible work; the CLI lacked a final durable job-completion check in this branch for latest mode.
+- **Repair:** Commit [`f2155e5`](https://github.com/hibi89/ohora-trend-catcher/commit/f2155e51d420e2e99a06edd7d6cc392a689c9cd7) annotates latest JSON `collection_complete` based on existing read-only `_needs_latest` and returns code 2 on incomplete `no_ready_work` or `serial_busy`; bounded `page_committed` progress remains a valid code-0 action with `collection_complete=false`. Synthetic tests committed [`2bc2d64`](https://github.com/hibi89/ohora-trend-catcher/commit/2bc2d642843cda7fcb90cf8f8a126767ffba5cd3) cover four modes with mocked transport/data access.
+- **Verification:** Static code change confirmed in GitHub; new tests/CI **PENDING**, no direct live execution of new CLI. Existing Windows 53-page run occurred before this fix. A separate read-only queue diagnostic [`aa36809`](https://github.com/hibi89/ohora-trend-catcher/commit/aa3680991b92e5691b593dcf609e20e9cf82a8db) now distinguishes quota-held candidates from missing predecessor/cursor proof without touching live state.
+- **Safety:** The new completion flag and exit-code handling do not call Meta, reset quota, change scheduling policy, mutate RAW, update cursors, or alter immutable jobs. For n8n, never treat `collection_complete=false` as a fully successful daily run. Do not auto-resend unknown HTTP requests.
+- **Rollback:** Revert CLI and synthetic tests; restores previous incomplete-as-zero behavior, no data migration needed.
+
+### P6-097 — 2026-10-23 · 53/150 latest pages succeeded; B quota stop with A/C idle (diagnostic added)
+- **Observed operator evidence:** User's repaired Windows quota-recovery tests ran **5/5 OK**. Three approved live caller-scoped probes returned HTTP 200, quota usage 1% for A/B/C, and explicit `--apply` released all three `usage_limit` holds. One bounded P50 latest call committed 1 page, then `latest -Live -MaxPages 150` attempted 53 steps and committed another 52 pages (0 account failures), ending `no_ready_work`. Read-only status showed **2026-10-23: 53/150 latest jobs done (97 remaining)**, B held by `usage_limit` until `2026-10-22T16:20:37.371659+00:00` (2026-10-23 01:20:37 KST), A/C unhalted, total lifetime receipts 438, 1,752 post observations, 1,555 unique posts, 235 history pages. These are user-supplied local runtime outputs; no independent access to their Windows DB.
+- **Root-cause scope:** `LiveSerialStep.step` returns `no_ready_work` when no quota-and-proof-eligible job can be leased from any lane. Fixed page ordering and cursor dependency can leave A/C without eligible work while B is quota-held. **Specific per-lane queue counts have NOT yet been measured**; do not present the B-predecessor explanation as verified for every remaining account.
+- **Remediation:** Added [`three_api_p50_queue_diagnostic.py`](raw_v2/three_api_p50_queue_diagnostic.py) in commit `aa36809`, enriched page-1 coverage in `9988901`, and synthetic read-only fixture tests in `1b7fada` / `6fcb1de`. The new CLI reports per-lane dispatchable jobs, quota-held eligible jobs, predecessor/cursor waits, total latest done, and **first-page coverage (0..50)**, without modifying operating stores or credentials. It does not reschedule fixed frozen A/B/C assignments.
+- **Verification:** New queue tests and operator Windows diagnostic are **PENDING**. Prior quota-recovery focused test **5/5 OK as operator reported**. The operator's latest Meta collection successfully committed 53 pages in this UTC/KST reporting interval; not 150/150.
+- **Data safety:** No changes to live API cadence/limit=4, 85% stop, 65-minute cooldown, RAW/Capture, cursors, frozen design, scheduler, P8, or main. At B readiness time, check live scoped quota again before deliberate `--apply`; never reset B based on expiry alone. Continue latest only for remaining fixed jobs after gate.
+- **Rollback:** Revert queue diagnostic script and tests; no operating data requires restoration.
+
+### P6-096 — 2026-10-23 · Windows SQLite test-fixture handle leak (fixed; recheck pending)
+- **Observed:** The operator ran `python -m unittest discover -s tests -p test_three_api_p50_quota_recovery.py -v` on Windows Python 3.11. All five test cases reported `ERROR` during `TemporaryDirectory.cleanup()`, each with `PermissionError [WinError 32]` attempting to delete a temporary `coordinator.sqlite`. No test assertion failure or production DB failure was shown in the supplied traceback.
+- **Confirmed cause:** Four `with sqlite3.connect(self.db) as db:` scopes in the newly created test fixture commit/close transactions but do **not** close the SQLite connection. Windows refuses to unlink the DB while the handle is still open.
+- **Repair:** Commit [`4cf97ce`](https://github.com/hibi89/ohora-trend-catcher/commit/4cf97ce6f3e8816ed50a0d976696a7f2ffdcb70f) uses `with closing(sqlite3.connect(self.db)) as db, db:` for all four scopes. Commit+rollback and connection-close both complete before fixture cleanup.
+- **Verification boundary:** Windows 5/5 tests **FAILED before repair** (all cleanup errors). After commit, CI at this exact SHA was QUEUED/IN_PROGRESS; Windows rerun is **PENDING**. The user separately executed the live A *read-only quota probe*, obtaining `{"http_status":200,"lane":"A","usage_percent":1.0,"quota_verified":true,"applied":false,"released":false}`. That is caller-ID Business Use Case telemetry, not an actual collected page or unlocked lane.
+- **Data safety:** Code/test/docs only; no operating SQLite, RAW, Capture, cursors or stored tokens were edited by the assistant, and no new Meta call initiated by the assistant. Pending follow-up is rerun the focused tests, then independently validate B/C telemetry and deliberate operator actions. **Do not alter 85% limit or reset holdings without evidence and approval.**
+- **Rollback:** Revert `4cf97ce` if necessary; restoring the unclosed test connections will reproduce the Windows fixture cleanup failure, but does not impact collection.
+
+### P6-095 — 2026-10-23 · Explicit P50 quota recovery gap (implementation; live verification pending)
+- **Observed:** User's live A/B/C Business Discovery checks returned HTTP 200 but omitted usage headers; caller IG-ID lookups returned scoped `x-business-use-case-usage` at 0. P50 persisted `usage_limit` holds from prior 85/91/85 readings and existing status only reported them. The old local procedure could not promote fresh, caller-scoped usage proof into an explicitly authorized per-lane release.
+- **Confirmed cause:** `three_api_coordinator.py` stores holds; `three_api_p50_cycle.py` has no quota recovery mode. The elapsed cooldown alone intentionally cannot release a lane. **Unconfirmed:** whether caller-level usage always corresponds to the specific Business Discovery request's limiting bucket.
+- **Repair implementation:** `raw_v2/three_api_p50_quota_recovery.py` (commit `81f27f6`) issues one caller-ID request with a strict HTTPS sender, accepts only same-caller Instagram business usage (all reported metrics below 85, regain time 0), and offers an explicitly flagged per-lane release only for expired `usage_limit` holds. `tests/test_three_api_p50_quota_recovery.py` (commit `f3ea8e8`) covers scoped payloads, >=85 rejection, cooldown, non-usage holds and isolation. No background execution or automatic reset. Existing 85% data-collection guard remains untouched.
+- **Verification:** GitHub commits confirmed; no local offline tests or live probe were executed by the assistant. Need run focused test and obtain real approved proof and 50-account collection results; **do not claim operational recovery or CI pass**.
+- **Data safety:** No user operational SQLite, Capture, RAW, tokens, cursors, scheduler, P8, main or frozen design changed in these commits. The opt-in tool will modify only a selected P50 lane's quota-gate row after evidence and manual `--apply`.
+- **Rollback:** Revert the newly added recovery script and test commits; leave existing user data and holding gates untouched.
+
+### P6-094 — 2026-10-22 · STATUS handoff pointer regression recurred
+- **Observed:** On `23eb01a`, Runtime Windows `offline-windows (remaining)` job `119848228336` failed 1 of 382 tests: `test_current_handoff_links_survive_chat_restart` could not find literal `docs/P6_TROUBLESHOOTING_LEDGER.md` in the first 2,000 characters of `STATUS.md`.
+- **Cause:** The current STATUS top summary had displaced the mandatory cross-chat pointer. This is a documentation regression, not evidence of a Meta collection failure; related prior incident: P6-093.
+- **Repair:** Prepended explicit `AGENTS.md` and `docs/P6_TROUBLESHOOTING_LEDGER.md` pointers to `STATUS.md` in commit [`046ea88`](https://github.com/hibi89/ohora-trend-catcher/commit/046ea8856b564d5dd0c98a53ef5fd845e7a2ba80). Independently fetched the new branch file and verified both literal paths within its first 2,000 characters.
+- **Verification boundary:** This is a static check, not a new local test execution. Six workflows for `046ea88` were queued/pending when checked; do not claim CI success yet. No Meta calls, operational DB, quota, main or P8 changes.
+
+### P6-093 — 2026-10-22 · Current handoff index omitted AGENTS.md pointer
+- **Observed failure:** Documentation SHA `1c06ff80802c1797979856c4da0c929e61fb5249`: Runtime push [39765324429](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765324429) failed Linux `offline-runtime` and Windows `remaining`; Runtime PR [39765330241](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765330241) also failed Linux. The exact assertion was `AssertionError: 'AGENTS.md' not found in ...`. Linux ran 1,175 tests and failed 2; Windows `remaining` ran 376 and failed 2. Both failures were the two first-2,000-character `HANDOFF.md`/`STATUS.md` subtests. No watchdog timeout occurred.
+- **Confirmed cause:** The latest summary retained the incident ledger link but omitted the literal `AGENTS.md` link inside the guard's first 2,000 characters. The historical link was below the tested prefix. This is a documentation-index regression, not an engine/test runtime fault.
+- **Repair:** Added a top-level operating-instructions pointer to `AGENTS.md` and the ledger in both `HANDOFF.md` and `STATUS.md`, within the guard's checked prefix; removed a duplicate P50 hold summary.
+- **Repair commit / tests / CI:** Repair commit [`fa4a023`](https://github.com/hibi89/ohora-trend-catcher/commit/fa4a023a01717f42d079dea002174a56c5b512f3); `python -m unittest discover -s tests -p 'test_p6_troubleshooting_handoff_guard.py' -v`: 4/4 PASS. All six workflows SUCCESS on `fa4a023`: Frozen [39765836438](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765836438), Sheets [39765836422](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765836422), C Contract [39765843344](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765843344), P50 [39765836492](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765836492), Three API [39765836454](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765836454), Runtime [39765836485](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765836485). Pre-fix SHA `1c06ff8` had five workflows SUCCESS and Runtime FAILED as above. This ledger/handoff sync has a new SHA; its CI is checked separately.
+- **Data safety / rollback / prevention:** No Meta/HTTP, SQLite, RAW, Capture, cursor, quota, n8n, Sheets data, frozen design, or main changes. Roll back only the pointer/summary edit if needed. Keep both links within the guard's prefix and retain the guard itself.
+
+### P6-092 — 2026-10-22 · P50 next-day isolation test fixture cleanup
+- **Symptom / reproduced error:** A newly added synthetic next-day latest regression first failed under direct module invocation with `ModuleNotFoundError: No module named 'test_three_api_serial_bootstrap'`; under repository-standard `unittest discover -s tests`, it exposed `TypeError: 'CaptureJournal' object does not support the context manager protocol`. The open SQLite handle then caused Windows `PermissionError [WinError 32]` while unittest removed the temporary directory.
+- **Confirmed cause:** The test fixture imported another test module using the discovery-mode top-level import convention (the first command used a different package invocation), and incorrectly treated `CaptureJournal` as a context manager. The production runner was not implicated. Closing the journal in `finally` removes the test-only file lock.
+- **Repair:** `tests/test_three_api_p50_manual_pilot.py` now closes its synthetic history capture journal explicitly in `finally`. The regression seeds synthetic 50-account history state, performs a next-day latest tick with an injected sender, and checks that history accounts/receipts and history Capture bytes remain unchanged.
+- **Verification:** Correct repository invocation, `python -m unittest discover -s tests -p 'test_three_api_p50_manual_pilot.py' -v`: 7/7 PASS. `python -m unittest discover -s tests -p 'test_three_api_p50_*.py' -v`: 144 run, 143 PASS, 1 platform symlink SKIP. `python tests/run_offline.py --list-groups`: 1,175 unique tests, 13 non-empty groups; the synthetic new case is included in `remaining-3`. Linux Runtime job ran all 1,175 in 117.649s, `OK`, and includes the new test.
+- **Repair commit / CI:** Code/test commit [`ff13186`](https://github.com/hibi89/ohora-trend-catcher/commit/ff13186b733ac59af4ed6c6235bd8a163a6fda8d). All six required workflows are **SUCCESS on this exact SHA**: Frozen [39764558617](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39764558617), Sheets [39764558206](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39764558206), C Contract [39764558238](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39764558238), P50 [39764558254](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39764558254), Three API [39764558257](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39764558257), Runtime [39764558226](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39764558226). Duplicate push-triggered runs are tracked separately; these six PR runs suffice for same-SHA validation.
+- **Data safety / prevention / rollback:** Only temporary synthetic SQLite files were created and cleaned; no Meta HTTP, user data, operating SQLite/RAW/Capture, quota state, n8n, Sheets, main or frozen design was touched. Keep explicit `finally`/close discipline for journal fixtures. Roll back only the test-only addition if needed; no operational rollback.
+
+### P6-091 — 2026-10-22 · P50 active workspace vs backup status mismatch (OPEN)
+- **Symptoms / reproduction scope:** The documented active workspace read-only status was 4 RAW posts/observations, 1 receipt and daily coordinator 1 done/149 pending; history showed 135 pages, 49 `continuation_ready` and 1 `window_covered`. The 2026-10-22 backup `status.json` reported 1,140 posts/observations, 285 receipts and 150 daily jobs done. Five active-vs-backup DB file hashes/sizes differed. No account identifiers or post payloads were printed.
+- **Fresh local status follow-up (2026-10-22):** Re-read the wrapper and ran the read-only command `.\p50.ps1 status`. It returned `{"history":"not_initialized","latest":{"live_meta_called":false,"raw_exists":false,"status":"not_initialized"}}`; the computed default `%LOCALAPPDATA%\OHORA_P50\p50` folder does not exist, while the documented Downloads backup exists with the five SQLite files and `status.json`. This current-shell observation does not erase the earlier AppData observation: it establishes a time/environment discrepancy, not that the backup should be restored or that the data was deleted. No DB contents were changed.
+- **New confirmed backup-snapshot evidence (read-only, 2026-10-22):** Resolved the backup's documented nested layout (`2026-10-22/capture.sqlite` and `2026-10-22/coordinator.sqlite`) and opened all five SQLite **main files only** via `mode=ro&immutable=1`. `PRAGMA quick_check` returned `ok` for each. In this immutable main-file view: RAW has 50 accounts, 1,140 posts/observations, 285 contract receipts and 285 raw receipts; daily Capture/coordinator have 150 captures, 150 captured intents, 150 bindings and 150 jobs; history has 50 accounts, 135 requests (all `committed`), 185 history receipts and 135 history Capture captures. All 49 remaining history accounts are `continuation_ready`; one is `window_covered`. Read-only cross-store checks passed: daily bindings/intents/captures align 150/150/150; history request/intents/captures align 135/135/135; all 285 daily+history capture IDs match contract and RAW receipt IDs; receipt references are covered. The backup coordinator records lane A `halted=1, reason=usage_limit`, B/C unhalted. This is concrete evidence that a usage-limit hold existed in this backup snapshot and explains the reported `quota_hold` path; it does not establish the current live lane state or exact contemporaneous usage percentage.
+- **Cause:** **OPEN / current canonical state unconfirmed.** The backup directory has no WAL/SHM sidecars for its WAL-mode RAW/Capture files. Under [SQLite WAL rules](https://www.sqlite.org/wal.html), those sidecars can hold persistent database state. `immutable=1` deliberately inspects the main files without consulting or creating sidecars; `quick_check=ok` and matching aggregates do not prove excluded WAL state was absent or the backup was taken after a complete checkpoint. Therefore the backup is a coherent-looking snapshot, not a verified canonical/live snapshot. The prior `mode=ro` open failure was caused by the diagnostic URI form/path in this session (correct URI form opens the main file); this corrects the earlier access-error interpretation but does not remove the missing-sidecar limitation. Active-vs-backup discrepancy remains unresolved.
+- **Affected files / repair:** No repository or operational data file was changed to repair the condition. No code diagnosis was changed. Preserve the immutable design and all source snapshots; do not restore, merge, checkpoint, delete, replace, or edit any active/backup database.
+- **Verification / CI:** Metadata and SQLite main-file reads only; all five `quick_check=ok`, cross-store predicates listed above PASS. Command behavior used Python `sqlite3` URI `file:<absolute-path>?mode=ro&immutable=1`; no output included identifiers or payloads. P50 offline suite previously ran 144 tests: 143 PASS, 1 platform symlink SKIP; it does not verify these user databases. Current branch SHA `ddeb00632599a6f3842d3fc9d8228b02444c1465` has all six required CI workflows SUCCESS (Frozen 39766505045, Sheets 39766505017, C Contract 39766505185, P50 39766505059, Three API 39766505322, Runtime 39766505074). The documentation update containing this correction requires its own exact-SHA CI recheck.
+- **Data safety / next action:** No Meta API, operational DB, RAW, Capture, cursor, quota, backup, n8n or Sheets writes occurred. P50 resume readiness remains **NOT READY**. On return, first confirm the canonical workspace and backup provenance; inspect mode and sidecars for all five DBs without modifying them; obtain a supported consistent read-only snapshot; verify raw/Capture/history request, receipt and cursor relationships plus per-account cutoff evidence; inspect lane `halted/reason/ready_at` and its matching sanitized usage evidence; confirm no competing collector. Do not resume 49 accounts or clear quota until the owner separately approves. The code's `history_step` returns `quota_hold` when a lane is halted; one halted lane is not bypassed by trying B/C. A cooldown alone is not release evidence.
+- **365-day completion criterion:** Do not use aggregate page/post counts. For each of all 50 accounts, require an auditable cutoff/window covering the configured 365-day start, verified terminal proof or a history receipt-backed cursor at/beyond cutoff, and every request linked to Capture, RAW and committed history receipt. Report excluded/private/unavailable accounts and unresolved cursor/unknown HTTP cases explicitly; only then classify the roster complete. `continuation_ready` means more work remains.
+- **Latest isolation / restart checks:** Existing synthetic tests cover crash/reopen without duplicate HTTP, fail-closed unknown/missing-cursor/quota cases, and next-day latest preserving prior history rows, receipts and history Capture bytes. They establish offline behavior only, not canonical backup safety or live Meta success.
+- **Safe rollback / prevention:** No mutation to roll back. Preserve every snapshot and WAL/SHM pair as one unit. Never promote a backup based on status counts or immutable-only integrity checks. Do not retry an unknown request or force-clear a lane.
+
+### P6-090 — 2026-10-22 · Offline shard inventory contract after three-way split
+- **Observed failure (not a timeout):** Runtime Integration run [39757538358](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39757538358) on `492dc9b` failed Linux `offline-runtime`, Windows `remaining`, and Windows `remaining-3`. The updated-contract run [39758733382](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39758733382) on `63f5808` still failed Linux `offline-runtime` and Windows `remaining`: `test_group_selection_cannot_duplicate_remaining_tests` expected the obsolete group name `remaining`, actual group names were `remaining`, `remaining-2`, `remaining-3`; the `remaining-3` job passed. Exact failures were stale assertions, not watchdog timeouts.
+- **Confirmed cause:** `tests/test_offline_shard_inventory.py` pinned a one-group partition assumption after the Windows inventory was split across three remaining groups. Runtime workflow path filters also omitted the two shard-contract tests, so isolated edits to those contracts would not themselves trigger this workflow.
+- **Repair:** commit [`74aa66d`](https://github.com/hibi89/ohora-trend-catcher/commit/74aa66d) dynamically discovers every `remaining*` group, proves exact non-duplicated case coverage and stable assignment under rerun/reversed discovery, and checks each synthetic group selection. `.github/workflows/p6-runtime-integration-offline.yml` now watches both shard-contract test files on push and pull request. No shard tests were removed/skipped; watchdog, frozen design, runtime policy, API lanes, limit=4 and collection schedule were unchanged.
+- **Verification:** focused command `python -m unittest discover -s tests -p "test_offline_shard*.py" -v`: 14/14 PASS. `python tests/run_offline.py --list-groups`: 1,174 unique tests, all groups non-empty (remaining 376, remaining-2 323, remaining-3 315). With repository-scoped `TEMP`/`TMP`, Windows offline groups: remaining 376/376 PASS, remaining-2 323 pass + 1 platform symlink SKIP, remaining-3 315 pass + 2 platform symlink SKIPs. The default AppContainer temp run of `remaining` produced 5 fixture errors including synthetic RAW `os.replace` WinError 5; rerunning with scoped temp passed, confirming environment-specific temp permissions. A local full-suite attempt was interrupted (CANCELLED; not a pass).
+- **CI state:** Failure evidence above is exact and attached to its respective old SHA. The shard repair is included in `8763c65`, whose six core workflow runs were SUCCESS: Frozen [39762520027](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39762520027), Sheets [39762520009](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39762520009), C Contract [39762519994](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39762519994), P50 [39762519886](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39762519886), Three API [39762519980](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39762519980), Runtime [39762519976](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39762519976). The newer P50 regression is independently validated at `ff13186` in P6-092.
+- **Data safety / design:** No Meta API or Instagram collection was called; no operational SQLite, RAW source, n8n, Sheets, quota policy, main branch, or frozen design was changed. Only synthetic test discovery and CI path triggers changed.
+- **Prevention / rollback:** keep the inventory test derived from `GROUP_NAMES` so future shard-count changes are exercised across every remaining group. Revert only `74aa66d` to roll back this test/trigger repair; no production-state rollback is needed.
+
+### P6-089 — 2026-10-22 · P50 quota-hold review and Windows Sheets fixture locking
+- **10/22 최종 사용자 수집 교차확인:** 10/21 동일 50계정 `OHORA_RAW_v2/collection.sqlite`의 username 50/50 매치, 날짜별 164건; 당시 공식 294 전체는 960건. 10/22 `OHORA_P50`의 날짜별 1,140건(최신 600+과거 540; 150+135페이지); 1계정 window_covered·49 continuation_ready. **양일 게시물 ID 교집합·합집합은 계산하지 않았다.** 164+1,140=1,304는 통합 고유값 아님. 실제 로컬 DB는 GitHub 작업 환경에서 미조회. [현재 최종 인수인계](docs/P50_CLOSEOUT_AND_SAFE_RESUME_2026-10-22.md).
+- **Runtime CI 정정:** [`e579451` run 39750398082](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39750398082)은 Linux 1,164 테스트/Windows remaining 1,004 테스트 각각 *P6-089 세부기록의 빠른색인 행 누락* **1 실패**, 기존 Windows SQLite WinError32 재발은 아니었다. 아래 장부 색인에 누락된 P6-089만 추가하고 추적한다. 기능 코드나 테스트의 검증 성공과 문서 CI를 구별한다.
+- **Observed:** Operator-supplied `status=quota_hold`, 135 committed history pages/136 steps, 49 continuation_ready/1 window_covered; latest 150/150, 1,140 unique posts. User-local records were NOT directly inspected. In `three_api_p50_history_live_runner.py` a halted lane yields `quota_hold` and breaks loop; `three_api_p50_cycle.py` handles Ctrl+C separately as exit 130. A normal quota-hold JSON is consistent with intentional safety return, but does not rule out a distinct earlier interruption. Without lane `reason`/usage, reaching exactly 85% is NOT independently established.
+- **Confirmed unrelated CI failure:** On commit `cc5f031dfa1d08fb7f8d68e596626e1103aa4493`, [Runtime Integration #39744672467](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39744672467) FAILED only on Windows `offline-windows (remaining)`, job `119710565765`, 17 `PermissionError [WinError 32]` during `raw.sqlite` temporary teardown in `tests/test_three_api_sheets_export.py`. Python `with sqlite3.connect(...) as db` does not close the handle; on Windows an open file cannot be unlinked. Not evidence of live-data loss.
+- **Minimal fix:** [commit `b6f7346`](https://github.com/hibi89/ohora-trend-catcher/commit/b6f734667b40dec6511c8ed8248bbd3ff0556ea2) replaces 14 fixture connection managers with `with closing(sqlite3.connect(self.path)) as db, db:` and adds `contextlib.closing`. Transaction semantics retained, OS handle always closed. No production collection, schema, limit=4, lanes, quota policy, original RAW or frozen design modified.
+- **Verification:** Readback confirmed new test blob SHA `e1c72f8b390be6a062f67bbb2290e819124e991b`. Same-fix-SHA initial P50/C/Frozen GitHub Actions SUCCESS; full Runtime/Three API IN_PROGRESS when written. Treat CI as PENDING until exact SHA workflow passes. Rollback with single test-only commit revert; never edit operating DB.
+- **Safe next:** Read-only local `.\p50.ps1 status`, per-lane `halted/reason/ready_at` and matching response usage evidence, original RAW/Capture/backup inspection. Do not auto-release a held lane on elapsed time, relink unknown cursors, call Meta, enable n8n/P294 or merge main without separate approval.
+
+### P6-088 — 2026-10-22 · P50 Windows/RAW/cursor/safety acceptance verification
+- **Owner scope:** Verify only (1) Windows `p50.ps1 history -Live` entrypoint, (2) RAW/Capture/history preservation and no duplicate HTTP after process termination/restart, and (3) 85%/missing quota, invalid cursor, unknown HTTP fail-closed behavior. No scheduler, cursor ID auto-relink, n8n, Google Sheets, or 294 changes approved.
+- **Confirmed Windows fixture failure:** Windows Runtime Integration run `39742776545` failed in the P50 history reopen fixture because the reopened `history.sqlite` connection was not registered for cleanup, triggering `WinError 32` when deleting the test directory. Corrected cleanup in `f8d0e1c6`; this was a test-fixture lock, not confirmed production data loss.
+- **Validation-harness failures (not engine failures):** Windows PowerShell command forwarding actually passed, but CI returned code 1 because the intentionally denied no-`-Live` subprocess left `LASTEXITCODE=1`; fixed in `8fba9e7d`. A missing-usage negative test wrongly queried a success-only receipt table that correctly did not exist; assertion changed to read the stable `post_observations` table in `000a7bfd`. Test added to close/reopen all RAW, Capture and history DBs after a crash window: `af15906d`.
+- **Verified evidence on `af15906d`:** Windows `p50-windows` job `119708864293` in GitHub Actions run `39744304332` completed **SUCCESS**, `Ran 141 tests ... OK`; PowerShell argument forwarding with a synthetic `python.cmd` shim, read-only status, rejection without explicit `-Live` all PASS. Linux focused history run `39744304320`: **123/123 PASS**, including actual SQLite close/reopen recovery after RAW commit before checkpoint with simulated API calls remaining **1** (no duplicate). Synthetic 85%-threshold, missing usage, cursor invalidity and unknown-HTTP cases pass and preserve fail-closed behavior.
+- **Limits:** No live Meta HTTP, actual tokens, local user's Windows environment, or operating SQLite were accessed. Windows test invokes the literal PowerShell wrapper with a shim; synthetic Python tests exercise the real capture/raw/history engine separately. Workflow `P6 Runtime Integration Offline` contains unrelated broad Windows Sheets fixture WinError 32 failures; do not conflate these with the focused P50 acceptance. No automatic 65-minute cooldown or expired cursor auto-relink was added. No main merge/n8n activation. Rollback only this validation CI/test fixture, preserving all collected data.
+
+### P6-087 — 2026-10-22 · Owner-approved P50 emergency manual history execution
+- **Owner decision:** prioritize an operator-invoked PowerShell history/latest/status cycle for 50 accounts by 2026-10-23 00:15 KST; postpone n8n/Sheets/294. Explicit live use is reserved to the operator; implementation and synthetic tests only. Frozen 294 design, page limit=4, 85% hold, 65-minute cooldown and immutable data are unchanged.
+- **Confirmed gap:** historical planner/store existed, but RequestEnvelope, executor, router, MetaTransport and RAW writer rejected history; daily coordinator generated only pages 1–3, while P50 raw/capture tail was not automatically discovered. Added explicit `history_live_approved` request capability (false by default, legacy canonical request digests unchanged), `three_api_p50_history_live_runner.py`, `three_api_p50_cycle.py` and `p50.ps1`. Reuses GraphHTTPClient, CaptureJournal, ContractRawWriter and SQLite account cursors; binds each request before HTTP, recovers verified Capture/RAW with zero additional Meta calls, preserves day history between latest updates.
+- **Fail-closed corrections:** reject misleading terminal on full 4-post page without next cursor; do not treat legacy unbound V10/V11 latest as a verified P50 tail; missing Capture or unknown request outcome blocks rather than retries; lane holds identify exact history request and release only after verified RAW/checkpoint plus safe usage <85; explicit account errors can be isolated only with verified usage <85. No automatic cooldown bypass or alternate-lane quota evasion.
+- **Synthetic evidence:** GitHub P50 offline validation at commit `41911f9`: SUCCESS; focused P50 history at `41911f9`: SUCCESS. Added actual injected synthetic transport cases for first page, account-independent cursors, 50-account fair round, terminal stop, missing Capture fail closed, RAW→checkpoint crash recovery and additional later regressions. Final branch SHA/newest CI must be checked separately; Windows PowerShell and real Meta HTTP NOT TESTED. No operating data/Meta calls/main merge/n8n activity in assistant session.
+- **Known limitations:** 00:15 operator must verify the PowerShell paths and credentials, pull branch, then explicitly use `-Live`. If eligible latest page-three Capture/RAW is absent, runner dispatches unfinished bounded latest jobs first; 4-post V10/V11 records are not automatically accepted as three-page P50 evidence. Full 50-account live 365-day completion is not guaranteed. Rate/unknown outcomes may halt session for manual review. Ensure no competing legacy collector is running. Rollback: revert P50 history runner/CLI/PowerShell and the new opt-in history capability patches; leave all durable SQLite/RAW intact.
+
+# P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+### P6-086 — 2026-10-22 · Prevent NULL-cursor P50 history planning
+- **Static vulnerability:** initial history state `ready` had `cursor=NULL`; previous planner produced eligible history jobs solely on caller-provided latest-complete keys. This could restart from front rather than verified page-three tail. `390899c` makes planner skip unanchored states, and `cb760f4` updates offline tests. Only durable `continuation_ready` with nonempty cursor may be planned; actual trusted tail-anchoring still P0 OPEN. Tests not run, CI unverified. No Meta/DB operational writes. Rollback both commits only after verified anchoring design supersedes gate.
+
+### P6-085 — 2026-10-22 · P50 v3 P1 safety fixes and KST cutoff decision
+- **Owner decision:** begin implementing goal-driven P50 manual latest/history cycle v3 on isolated feature branch; frozen P294 design, limit=4, 85% stop, 65-minute/unknown-HTTP protections remain unchanged. No live Meta, operational DB, scheduler, main merge authorization.
+- **Confirmed fixture defect:** `tests/test_three_api_p50_manual_pilot.py::test_three_independent_lanes_commit_three_distinct_accounts` used `with sqlite3.connect(...)` which commits a transaction but does not close Windows DB handle. Fixed with `contextlib.closing` in commit `ba3a27c`. Postfix suite not run; Windows WinError 32 risk addressed at source, outcome still unverified.
+- **Confirmed calendar discrepancy:** history checkpoint compared oldest post UTC date against cutoff specified as P50/KST date. A post at 2025-10-21T16:00Z is 2025-10-22T01:00+09:00 and must not falsely complete the 365-day window for cutoff 2025-10-22. Fixed at `8d3f4d9`; edge tests added at `2de5af4`.
+- **OPEN P0:** verified latest page-3 tail anchor, actual history transport and durable RAW/Capture readback are not wired. History preview is read-only; status must not claim success. Simulation v2 capacity formula needs real lane quota measurements; A/B/C must not be assumed independent.
+- **Verification:** offline Python suite NOT RUN, CI unverified, no real Meta HTTP, operational SQLite writes, n8n activation or main merge. Safe rollback: revert individual P50 commits. Next: evidence-gated history anchor and offline regression.
+
+### P6-084 — 2026-10-22 · P50 365-day history checkpoint foundation
+- Added `raw_v2/three_api_p50_history_checkpoint.py`: pure offline cursor decision. Requires RAW and Capture verification before advancement; uncertain HTTP blocks; missing/repeated cursor blocks; explicit terminal or timestamp older than cutoff stops. Cursor remains opaque, not reconstructed from paging URL.
+- Added `tests/test_three_api_p50_history_checkpoint.py` with 11 unit cases. **Tests not executed in assistant environment; no success claim.**
+- **Not yet wired** into coordinator/transport, persistent per-account cursor table, day rollover, or actual 365-day backfill. These remain open. No Meta requests, operational DB changes, or main merge.
+- Rollback: revert commits `0c0ef03` and `19513d8` before integration.
+
+### P6-083 — 2026-10-22 · Windows P50 suite second run and SQLite fixture handle repairs
+- **User-executed second result:** `Ran 18 tests in 0.942s; FAILED (errors=3, skipped=1)`. All three errors are `PermissionError [WinError 32]` during `TemporaryDirectory` cleanup: two P50 manual pilot fixtures (`capture.sqlite`, `coordinator.sqlite`) and one status fixture (`coordinator.sqlite`). The earlier batch-name assertion and workspace test error are gone.
+- **Root cause in fixtures:** Python `with sqlite3.connect(path) as db` controls transactions but does **not** close the connection. Windows forbids unlink of the still-open SQLite file. Replace fixture context managers with `contextlib.closing(sqlite3.connect(...))` for both tests; repairs `18373f4` (status) and `be29f38` (manual pilot). The production runner already uses ExitStack cleanup; do not modify it based on test-only lock evidence.
+- **Post-fix test run:** not executed, **verification pending**. Owner explicitly requests only to be contacted for a true blocking issue; avoid repeated routine test requests. No Meta calls, P294 DB writes, or main merge.
+
+### P6-082 — 2026-10-22 · Windows P50 offline suite actual failure evidence
+- **User-executed result:** `python -m unittest discover -s tests -p "test_three_api_p50_*.py" -v` from a checkout at `bb9b2ed`: **18 run; failures=1, errors=4, skipped=1**. The full traceback of three other errors has not been supplied; do not call them fixed.
+- **Confirmed batch-name regression:** `test_injected_graph_response_commits_p50_raw_and_capture` expected `three-api-p50-20261022` but actual `three-api-three-api-p50-20261022`. Cause: previous change added `three-api-` at the caller while the downstream RAW path already prefixes it. Reverted that caller prefix in `raw_v2/three_api_p50_manual_pilot.py`, repair commit `a7dbc5c`.
+- **Confirmed Windows fixture handle:** `test_create_only_and_exact_50` raised WinError 32 removing temporary `coordinator.sqlite`. Its test used `with sqlite3.connect(...)`, which commits/rolls back but does not close the connection. Replace fixture uses with `contextlib.closing`, repair commit `94eb0ab`. This is a test fixture repair, not evidence of an operating coordinator leak.
+- **Verification:** patches committed, **post-fix suite PENDING**. User should pull branch and rerun; no Meta calls or operational DB edits authorized. Rollback by reverting the two repair commits; no data mutation.
+
+### P6-081 — 2026-10-22 · P50 emergency manual-collection priority and verified blockers
+- **Owner decision:** prioritize P50 Windows manual latest→365-day history→next-day latest→resume over n8n/Sheets/Batch optimizations; preserve frozen 294 A/B/C limit=4 and existing 294 operating DB. The existing P50 serial latest path is in `raw_v2/three_api_p50_manual_pilot.py`; `P50Coordinator.seed` currently creates only 150 daily front/catchup jobs. **365-day history jobs and durable history checkpoint resume are not implemented/verified.** Do not advertise overnight backfill readiness.
+- **Static defects fixed:** Ctrl+C was not explicitly caught at the P50 CLI boundary; now exits 130 without a success report (commit `7b891a9`). The P50 run_id used `p50-YYYYMMDD` while existing integration test asserts `three-api-p50-YYYYMMDD`; aligned the code (commit `ebbcba3`). Added Ctrl+C regression fixture (commit `e11bf74`).
+- **Verification and environment:** GitHub connector fetched branch source and frozen notices. `git ls-remote https://github.com/hibi89/ohora-trend-catcher.git HEAD` from container failed with `Could not resolve host: github.com`; full Python tests and Windows PowerShell runtime remain **NOT EXECUTED**, not PASS. Meta live, operational P50 writes, n8n activation and main merge **NOT PERFORMED**.
+- **Safe next action:** use a reachable local Windows checkout to run `python -m unittest discover -s tests -p "test_three_api_p50_*.py" -v` and `python -m unittest discover -s tests -p "test_three_api_sheets_export.py" -v`; inspect failure and only then request separate live approval. Implement history with independent per-account persisted checkpoint and verified RAW evidence, not by replaying latest page jobs or altering the 294 DB. Do not override lane quota/unknown-request holds.
+- **Rollback:** revert the three code/test commits individually; existing RAW/Capture and coordinator remain untouched. Status **OPEN** pending offline runtime verification and history implementation.
+
+
+> Index: [P6-080 n8n receipt readback](docs/P6_TROUBLESHOOTING_LEDGER.md) · approved tick compares the read-only before/after durable receipt counts to committed pages; mock tests 23/23 PASS; runtime store access pending.
+> Index: [P6-079 n8n result gate and alert wiring](docs/P6_TROUBLESHOOTING_LEDGER.md) · workflow export remains inactive; 20/20 focused PASS; live calls require `OHORA_P6_LIVE_APPROVED=YES`; alerts require an operator-configured webhook.
+> Index: [P6-078 B/C resume evidence gate](docs/P6_TROUBLESHOOTING_LEDGER.md) · The guarded B/C helper requires fresh usage below 85%, elapsed cooldown, explicit approval and (for C) a no-competing-C-traffic attestation; 69/69 focused PASS.
+
+### P6-080 — 2026-10-22 · n8n 영수증 저장 readback 및 레인 상태 표시
+- **범위/결정:** 사용자 정정에 따라 n8n 연동만 보강했다. 승인된 tick 직전 기존 pilot receipt count를 기존 read-only status API로 읽고, tick 뒤 count 차이가 `committed_pages` 이상인지 확인한다. 신설 pilot은 0 receipt baseline으로 시작한다. 불완전/읽을 수 없는 기존 상태는 API dispatch 전에 `MANUAL_REVIEW`로 fail-closed한다. 확인 결과는 receipt delta, total durable receipts, A/B/C lane counts로 n8n execution/output에 전달한다. 저장 확인 실패·불일치는 alert/manual review이며, cursor/collector 내부와 동결 정책은 변경하지 않는다.
+- **시험 중 실패와 원인:** 첫 Node mock은 n8n Code node body를 최상위 JavaScript로 실행해 `Illegal return statement`를 냈다. 기대는 n8n 함수 실행형 mock의 3개 판정 결과였고 실제는 syntax error; 원인은 test harness에서 Code node body를 함수 wrapper로 감싸지 않은 fixture 오류였다. 별도 Python mismatch test는 기대 `receipt_delta_mismatch`, 실제 `readback_unavailable`; 원인은 mocked `run_manual_pilot`이 구조화된 반환값 대신 기본 `MagicMock`을 반환해 숫자 비교에서 예외가 난 fixture 오류였다. 두 fixture를 바로잡았고 제품 코드 결함으로 오인하지 않았다.
+- **검증:** `tests.test_three_api_n8n_tick tests.test_p6_resume_b_guarded tests.test_p6_troubleshooting_handoff_guard`: **23/23 PASS**. Node workflow classifier mocks: **3/3 PASS** (`verified`, delta mismatch, readback unavailable). Python compile, PowerShell AST, workflow JSON parse, `git diff --check`: PASS. 이 테스트는 mock 기반이며 실제 운영 pilot SQLite의 Windows read-only 접근 가능성과 n8n execution을 검증하지 않는다.
+- **안전/미완료/롤백:** Meta HTTP 0, 운영 DB/RAW/Capture 쓰기 0, credential 출력 0. 실제 read-only status 호출도 이번 작업에서는 하지 않았다. 운영 n8n import/activation/webhook은 별도 승인/설정 전까지 pending. Rollback: 이 항목과 `HANDOFF.md`/`STATUS.md` top summary를 되돌리고 아래 adapter/workflow/test changes를 revert하면 된다. Repair commit SHA: `932eb33`.
+
+### P6-079 — 2026-10-22 · n8n 실행 결과 검증·승인 게이트·실패 알림 계약
+- **범위/판단:** 사용자 정정에 따라 P6 cursor algorithm/collector는 변경하지 않고 n8n integration만 수정. Export workflow stays inactive. `p6_n8n_tick.ps1` now passes live/owner-confirm flags only when the operator sets `OHORA_P6_LIVE_APPROVED=YES`; max page count remains 3. The workflow classifies committed progress separately from waiting and accepts external `resume_required`, `coverage_gap`, and `resume_ready` statuses as attention events. Failure and attention notifications use only redacted fields and require `OHORA_P6_ALERT_WEBHOOK`; no webhook or credential is embedded.
+- **증상/테스트 실패와 원인:** First broad offline run had 69 tests / 2 errors: `test_first_verified_committed_success_persisted` and `test_two_runs_same_post_two_days_unique_request_ids` failed at `os.replace` because Python's default AppContainer temporary directory denied replacement. Setting `TEMP`/`TMP` to a unique workspace temp directory made all 69 pass; no production code issue. First n8n test run then had 16 tests / 1 failure because the fixture expected literal `--max-pages 3`, while the PowerShell wrapper correctly supplies an argument array (`'--max-pages', '3'`). Updated the fixture to assert the array form; final targeted suite passed 16/16.
+- **검증:** `tests.test_three_api_n8n_tick tests.test_p6_resume_b_guarded tests.test_p6_troubleshooting_handoff_guard` — 20/20 PASS with workspace-scoped TEMP/TMP (n8n 10, lane guards 6, handoff guard 4). Node mock classification cases — 3/3 PASS (`waiting`, `collection_progress`, `resume_required` attention); JSON parse and PowerShell AST parse PASS; `git diff --check` PASS. No Meta calls, n8n activation, operational DB/RAW/Capture mutation, or retry. Runtime import and webhook delivery remain PENDING until the operator configures the endpoint and approves deployment.
+- **안전/롤백:** No P6 collection code changed. Roll back only `p6_n8n_tick.ps1`, `n8n_p6_daily_collection.json`, `n8n_p6_error_alert.json`, and its tests/docs; no operational data impact. Keep the live gate unset until explicit approval. Repair commit SHA: `1cfca7972971d0c76649779d85b20234ecba8992`.
+
+### P6-078 — 2026-10-22 · B/C resume requires fresh quota evidence
+- **확정된 안전 결함:** `p6_resume_b_guarded.py --approve-b-resume` previously could clear `live_pending_usage` based on an elapsed `ready_at` plus a hard-coded historical failed job/candidate check. It did not require any post-hold usage evidence. Current B has no current-day response evidence, so it must remain halted.
+- **최소 수정:** The guarded helper now supports B/C. It requires an unbound pending lane job and either (a) a completed lane-bound job, processed durable Capture, sanitized successful response after cooldown, usage below 85%, or (b) explicit operator-attested Meta dashboard usage below 85% with timezone-aware observation time after cooldown. C additionally requires an explicit confirmation that no competing API-C traffic is active. Approved manual evidence is appended to `lane_resume_evidence`; preview stays read-only. No failed request is replayed. Generic transport errors retain only bounded numeric usage; >=85 applies the global stop while other generic errors remain held.
+- **테스트 회귀와 원인:** First test import failed because the new test used a module path absent from the project root; corrected to `raw_v2.p6_resume_b_guarded`. The next fixture run showed `no such table: job_request_bindings` because evidence joins span coordinator and Capture databases; corrected with a read-only attached Capture DB. Test fixtures initially rolled back setup rows when closing SQLite connections; explicit commits/closes fixed the fixture. A C fixture then failed because the candidate assertion still required lane B/page 1; corrected to validate the selected lane and preserve B's page-1 constraint. Final command `python -m unittest tests.test_p6_resume_b_guarded tests.test_three_api_transport tests.test_three_api_live_serial_step tests.test_p6_troubleshooting_handoff_guard -v`: **69/69 PASS**; `git diff --check` PASS.
+- **인수인계 검사 보정:** New top summary initially omitted the required `AGENTS.md` pointer from STATUS's guarded prefix (expected present; actual absent). Added direct links to both top summaries; final `tests.test_p6_troubleshooting_handoff_guard`: **4/4 PASS**.
+- **안전·한계:** Offline synthetic SQLite only. No Meta call, operational DB/Capture/RAW edit, cooldown reset, retry, scheduler action, or frozen-design change. B/C have not been resumed; fresh dashboard readings and explicit approval are still required before the writer runs. C additionally needs confirmation that the independent API-C workload is stopped. The lower-level coordinator reset remains an operator-only primitive; use the evidence-guarded helper. GitHub combined status on the prior snapshot had no checks, so CI is unreported, not passed.
+
+### P6-077 — 2026-10-22 · Read-only failure diagnostics expose safe numeric Meta codes
+- **결정/이유:** A/B error root-cause analysis required persisted Meta codes, but `--failures` hid all detail. Extend only the read-only summary to expose bounded integer `meta_error_code`, `meta_error_subcode`, and `safe_usage_percent`; do not expose `safe_message`, response bodies, tokens, IDs, or arbitrary text. This changes diagnostics only, not API lanes, scheduler, storage contract, retry behavior, or frozen collection policy.
+- **변경:** `raw_v2/three_api_manual_pilot.py` parses only regex-matched bounded numeric fields from the existing sanitized `safe_message`; `tests/test_three_api_manual_pilot.py` verifies code/subcode/usage extraction and rejection of out-of-range data/secret-like trailing text.
+- **시험 중 회귀/수정:** First focused run expected code/subcode on the cursor-invalid fixture and failed with `KeyError: meta_error_code`; the fixture's cursor-specific sanitized message intentionally omits numeric fields. Root cause was an incorrect test expectation, not diagnostic engine behavior. The test now validates numeric allowlisting with an account-error-shaped sanitized string while retaining the cursor test's redaction assertions. A later handoff-guard run failed because adding the long P6-076 correction pushed the `AGENTS.md` link beyond the guard's first 2000 characters; expected pointer in that prefix, actual absent. Root cause was oversized top summary. The P6-077 top summary now links `AGENTS.md` directly. Exact final targeted command groups (manual pilot, serial live-step gates, coordinator, handoff guard): 65/65 PASS; rerun handoff guard after the link fix: pending; `git diff --check` PASS.
+- **안전/롤백:** Meta calls=0; operational P6/RAW/Capture DB writes=0; failed requests resent=0; scheduler changes=0. Revert only this diagnostic parser/test and this ledger/HANDOFF/STATUS record to roll back; no runtime data impact. Implementation commit: `c8956d7b0c0be6678395d926ef59865aeb476f04`.
+
+### P6-076 — 2026-10-22 · A/B/C usage/auth blocker diagnosis (OPEN)
+- **범위/증거:** Read-only P6 status at 10:45 KST: 321 durable receipts / 1284 observations / 1065 unique; A=146 done/4 leased/144 pending, B=0/0/294, C=72/0/222. No current-day state was modified.
+- **인증 파일:** The actual `C:\Users\haein\OneDrive\Desktop\ohora_env_a_b_c` folder contains all three `.env.api_a/b/c` files. Structural checks found nonempty unique token/ID pairs and matching v26.0; `three_api_env_loader.py --directory ...` returned `VALID`, with Meta calls=0. This proves file structure only, not token validity or Meta permissions. The adjacent ZIP is stale/incomplete for B/C IDs; the ignored project `.env.api_b.local` is older (2026-10-19) and matches neither current B token nor ID. No secret values were emitted or changed.
+- **A:** Four bound `failed_no_retry` account HTTP400s have Graph code=110/subcode=2207013 and parsed usage percentages 20, 26, 19, 26 (all <85). The local transport's exact classifier names this target-account-unavailable. That rules in an account-target-scoped Graph rejection; it does not establish whether the target ID, account visibility, or per-target permission caused it. All four have no Capture/response evidence; no resend.
+- **B:** 10/21 coordinator ended halted as `live_pending_usage`, inherited into 10/22. It has 52 bound requests, 48 safe responses; latest stored response usage was 27% at 17:18 KST, before the hold timestamp 21:13 KST. The four subsequent account HTTP400 failures aggregate to code 100×1, code 110×2, code missing×1; all lack subcode and usage_pct. 10/22 has zero B bindings/responses. Thus the hold is caused by missing post-hold usage evidence, not proven current token failure. Read-only `p6_resume_b_guarded.py` preflight (without approval flag) refused because current-day B has no bound job 451 that the helper requires; no write occurred. That helper also lacks a fresh-usage-evidence check, so it is not a valid current-day resume path.
+- **C:** 10/22 has 72 safe responses; the latest recorded usage is 85% at 08:40 KST. Stored `ready_at` ended 09:45 KST, but `halted=1/reason=usage_limit` persists by design. Time elapsed does not prove quota recovery; no new C request was sent.
+- **Runtime/verification:** n8n has an active workflow record but no matching runtime process; latest trigger was 09:05. User authorized continued work, but an operational tick entrypoint pointing at the P6 workspace was rejected by automatic approval review because pilot/scheduler state writes were possible. It was not retried through another path. No Meta request, operational DB/RAW/Capture write, retry, hold reset, scheduler restart, or main merge. Offline gate/coordinator group: 46/46 PASS; credential loader structural command: VALID. Documentation test first ran 50 tests: 49 PASS / 1 FAIL because this new P6-076 detail had not yet been added to the incident-index table; exact mismatch was detailed IDs containing P6-076 vs index without P6-076. Root cause: incomplete documentation fixture, not runtime code. After adding the missing row, the same test command passed 50/50. Repair commit: N/A (diagnosis only; no code/runtime repair). Rollback: revert this documentation-only record and its HANDOFF/STATUS/index updates; no operational data impact.
+
+### P6-075 — 2026-10-22 · OPEN / 원인 미확인 — n8n runtime process 부재
+- **증상/범위:** n8n SQLite runtime에는 동일명 P6 workflow 3행 중 active=1이 남아 있으나, 최신 trigger execution은 09:05:15 KST. 10:36 KST Windows process 목록에서 command line이 `OHORA_N8N_RUNTIME` 또는 n8n을 가리키는 Node process 0개, 기존 PID 20464 없음, n8n Windows service 미발견. 이로써 09:05 이후 scheduled trigger가 실행되지 않은 상태를 확인했으나, 더 늦은 다른 실행 경로 존재 여부는 확인하지 못함.
+- **근본 원인/가설:** 원인 미확인. 프로세스 종료, 호스트 재시작, 사용자 측 중단, runtime 오류 중 어느 것인지 증거가 없다. DB의 `active=1`은 프로세스 생존 증거가 아니다.
+- **영향/안전:** 이 agent는 scheduler를 시작/중지하지 않았고 Meta 요청·P6/RAW/Capture DB 변경도 하지 않았다. 최신 P6 snapshot은 321 receipts / 1284 observations / 1065 unique. A eligible=0; B 216 eligible, held `live_pending_usage`; C 74 eligible, held `usage_limit`, `ready_at` 경과 후에도 halt 유지. 전체 수집 중단 및 미완료.
+- **대안 판단/예방:** 새 AGENTS.md는 scheduler deployment/live calls를 승인하지 않았다고 명시한다. 승인 없는 n8n 재시작, lane reset, Meta 호출은 배제한다. 재개 전에 소유자가 runtime과 lane-safe usage evidence를 확인하고, 하나의 scheduler만 유지할 것.
+- **수정/검증/롤백:** runtime은 수정되지 않아 repair SHA 없음 (N/A; OPEN). 문서 기록은 HANDOFF.md, STATUS.md, 이 ledger만 변경. `$py -m unittest tests.test_p6_troubleshooting_handoff_guard -v` 4/4 PASS; `git diff --check` PASS. Meta/HTTP 0회. 문서 rollback은 이 P6-075 entry 및 두 current-state 요약의 해당 커밋만 되돌리면 되며 운영 데이터 영향 없음.
+
+### P6-074 — 2026-10-22 · 09:05 예약 tick 무진척 재확인
+- **실행/데이터:** 기존 활성 n8n workflow의 09:05:15 KST trigger는 `success`; read-only pilot snapshot은 321 receipts / 1284 observations / 1065 unique로 09:00과 동일. A 146 done/4 leased/144 pending, B 0/294, C 72/222.
+- **게이트/원인 범위:** 재계산할 새 lane 조건은 없었다. 직전 coordinator의 read-only predicate는 A=0 eligible, B=216 eligible but held `live_pending_usage`, C=74 eligible but held `usage_limit`; C cooldown은 09:45 KST까지. wrapper success는 실제 page commit을 뜻하지 않는다. 인증의 근본 원인은 아직 규명되지 않았다.
+- **안전/완료:** 새 assistant Meta 호출, 수동 tick, reset/retry, 운영 DB/RAW/Capture 변경, 85%/cooldown 우회는 없었다. 전체 수집 미완료; 기존 예약 workflow는 활성이나 gate가 열릴 때까지 진척 없음.
+
+### P6-072 — 2026-10-22 · 교차 채팅 인수인계 / 독립 emergency 50과 P6 운영 경계 명시
+- **자료 근거:** 사용자 제공 Windows 로그(긴급 V8~V10)와 P6-071의 2026-10-22 08:36 KST 읽기 전용 P6/n8n 스냅샷. 최신 50계정 수집 50/50, 관측 200, 실패 0은 실제 Meta 응답 로그로 검증. 긴급 역사 수집기는 사용률 85%에서 `quota_85_pause` 후 09:38:30 KST 대기까지 관측. 재개 성공/최종 완료는 미검증.
+- **P6 분리:** 318 receipts / 1260 observations / 1041 unique, A 146+4 failed bound / B 0 of 294 held / C 69 done; 08:35 n8n 예약 tick 성공. 이 수치와 긴급 저장소를 합치지 않는다. P6 4개 A 400은 no-retry, B safe usage hold 미해결. Cursor re-anchor는 오프라인-only.
+- **설계 판단/위험:** emergency 수집기와 P6 C lane은 서로 다른 coordinator/데이터 저장소를 가지지만 물리 Meta rate bucket 독립성은 입증되지 않음. 동시 운영 중 quota 중복 점유 위험이 있으므로 새 live dispatch 또는 gate reset/중복 tick을 허가하지 않는다. 긴급 수집기의 85%/쿨타임 정책을 동결 P6 85%/65분 정책 변경 승인으로 읽지 않는다.
+- **범위:** 문서 인수인계만 수행. Meta 0회, 로컬 운영 DB/RAW/Capture 0회 변경, main 병합 없음, 동결 설계 변경 없음. GitHub 직접 확인·수정한 파일만 기록하며 로컬 Windows 상태는 사용자 로그 관측치로 분리한다. 상세: [CHAT_HANDOFF_2026-10-22_P6_AND_EMERGENCY50.md](CHAT_HANDOFF_2026-10-22_P6_AND_EMERGENCY50.md).
+
+> Index: [P6-071 n8n verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · 08:35 trigger success; C=69 pages. A/B blockers and duplicate workflow records remain.
+> Index: [P6-070 overnight progress](docs/P6_TROUBLESHOOTING_LEDGER.md) · Read-only P6 snapshot: C=60 done; B held, A four failed_no_retry. Full collection incomplete.
+> Index: [P6-069 cursor recovery verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · [planner](raw_v2/three_api_paging_recovery.py) · Offline only; no live re-anchor.
+
+### P6-073 — 2026-10-22 · 예약 tick 무진척 재확인과 dispatch gate 근거
+- **실행/데이터:** 09:00:15 KST active n8n P6 workflow `trigger` execution은 `success`; P6 상태는 321 receipts / 1284 observations / 1065 unique로 동일. A=146 done / 4 leased / 144 pending; B=0/0/294; C=72/0/222.
+- **정확한 eligibility:** coordinator의 동일한 SELECT predicate를 SQLite `mode=ro`로 재계산: A ready, eligible=0, dispatchable=0; B halted `live_pending_usage`, eligible=216, dispatchable=0; C halted `usage_limit`, eligible=74, dispatchable=0. C `ready_at`은 09:45 KST. B의 ready 시각 경과만으로 halted 플래그나 usage proof 조건은 해제되지 않는다.
+- **원인 경계:** n8n wrapper `success`는 실제 page commit을 뜻하지 않는다. 이번 no-progress는 B/C lane hold와 A predecessor 조건상 현재 eligible job이 없는 상태로 설명된다. 인증 토큰/API 권한 오류가 근본 원인인지는 이 오프라인 검사로 판정하지 않는다.
+- **안전/다음:** manual tick, lane reset, retry, 85% 제한/cooldown 우회, RAW/Capture/DB 수정, assistant Meta request 모두 수행하지 않았다. 기존 n8n 자동 실행은 활성 상태다. 전체 수집은 미완료이며, 안전한 quota 증거와 승인된 lane 전이 전에는 dispatch 불가.
+
+### P6-071 — 2026-10-22 · n8n 예약 tick과 P6 페이지 진척의 교차 확인
+- **P6 상태:** sanitized read-only status 08:36 KST: `db_writes=0`, `live_meta_called=false`, 318 receipts / 1260 observations / 1041 unique posts; A 146 done / 4 leased / 144 pending; B 0/0/294; C 69/0/225. Since P6-070, C committed 3 additional pages (+12 observations).
+- **n8n 근거:** isolated runtime `database.sqlite` opened in SQLite read-only mode. Three workflow rows share the P6 display name; one is active, two are inactive. The active row latest execution is `trigger`, `success` at 2026-10-21 23:35:15 UTC (08:35:15 KST). Its schedule tick coincides with the +3 C page delta. Duplicate workflow rows were not changed. The repo workflow export has `active=false`; it is not authoritative for runtime activation.
+- **게이트/금지:** A has four account HTTP400 bound jobs, all `failed_no_retry`, no Capture/response evidence; causes remain unknown. B remains pending without fresh lane-safe usage evidence. No hold reset, retry, manual tick, quota/cooldown bypass, or operational DB/RAW/Capture edit. This assistant issued no Meta request; the standing n8n schedule produced the observed progress. Latest user response forbids initiating a new live Meta call.
+- **완료도:** n8n schedule path has current evidence of a successful trigger execution and persisted C collection progress, but 294×3 collection is incomplete. Cursor re-anchor remains offline-only and not connected to this scheduled runner. Continue bounded schedule only under existing gates; never claim full collection success.
+
+### P6-070 — 2026-10-22 · 야간 예약 수집의 최신 읽기 전용 진척 확인
+- **읽기 전용 관측:** 08:25 KST `three_api_manual_pilot.py --status` returned `db_writes=0`, `live_meta_called=false`, 309 durable receipts / 1236 observations / 1017 unique posts. A=146 done / 4 leased / 144 pending; B=0/0/294; C=60/0/234. Relative to P6-068 07:31 snapshot, C advanced by 30 pages.
+- **실패·쿼터 경계:** read-only `--failures` lists four A account HTTP400 `failed_no_retry`, no Capture or response evidence, automatic retry false. Failure causes remain unconfirmed. B remains pending/held without safe usage proof; this check did not reset holds or dispatch a request.
+- **운영/완료 상태:** n8n/Node processes remain present and C progress is consistent with the existing schedule, but no new Meta request was issued by this assistant. Full 294×3 collection remains incomplete. Cursor recovery stays offline-only; real recovery requires separate approval. No RAW/Capture/operational DB mutation, quota or cooldown bypass, manual tick, or retry.
+- **다음 안전 조치:** allow the pre-existing bounded schedule to continue only under its current gates; refresh read-only status later. Do not manually dispatch beside it. No live call is permitted by the latest user response. Code/handoff push SHA before this record: `960d1fd44714f6af9ceed251f82ef7f7fd42f910`.
+
+### P6-069 — 2026-10-22 · 사용자 추가 커서 무효화 복구 요구 오프라인 인수 검증
+- **요구/결정:** 커서 오류에서 무한 재시도·임의 커서를 금지하고 `resume_required`로 중단한다. 별도 승인 라운드에서 최신 페이지부터 최대 3페이지 재탐색, 기존 게시물 ID overlap이 있을 때만 응답 커서로 이어간다. overlap이 없으면 `coverage_gap`; 삭제를 확정하지 않는다. 기존 A/B/C 순서, 4개/page, 3-page round, 85%·cooldown·no-retry, Capture/RAW 불변성은 유지.
+- **기존 구현 확인:** [runtime failure handling](../raw_v2/three_api_manual_pilot.py)는 명시적 cursor-invalid 분류에 `resume_required`를 표시하고 기존 요청을 재전송하지 않는다. [planner](../raw_v2/three_api_paging_recovery.py)는 새 페이지 ID를 prior IDs와 비교하고 관측 중복은 보존하며 분석 목록만 deduplicate한다. 이 planner는 production runner와 연결되지 않았으며, 실제 복구 라운드는 별도 승인 필요.
+- **오프라인 시나리오:** 정상 cursor 후보, 기준 게시물 부재 후 주변 ID 연결, cursor-invalid→resume_required→최신 페이지 overlap→새 cursor, 다중 추가·누락 및 재정렬, duplicate observation, 연결 성공/실패, 3페이지 경계 및 4페이지 거부를 합성 데이터로 검증. recovery 대상 파일이나 운영 DB는 사용하지 않음.
+- **검증:** `python -m unittest tests.test_three_api_paging_recovery tests.test_three_api_reanchor tests.test_three_api_manual_pilot tests.test_three_api_transport` — 60/60 PASS. `python -m unittest tests.test_p6_troubleshooting_handoff_guard` — 4/4 PASS. `$py -m tests.run_offline` — 988 tests, 987 PASS / 1 SKIP / 0 FAIL, exit 0, 1361.508s. No live Meta request; no production DB/RAW/Capture mutation.
+- **Git/운영:** fetched `origin`; branch HEAD and origin both `362aa8a3bee8bbf2994311c91dff4d43c947e9b2` before this documentation-only update; tree was clean. No credentials staged. These docs record verification; the existing recovery code remains offline-only. Do not claim API collection or live recovery success.
+
+
+
+### P6-068 — 2026-10-22 · C lane 10회 연속 예약 수집
+- **실제 수집:** 07:20, 07:25, 07:30 ticks committed 3 C pages each, 0 account failures. C stayed unhalted; latest and maximum safe usage across 30 C responses=20%.
+- **현재 상태:** sanitized read-only status 279 receipts / 1116 observations / 910 unique; A=146 done / 4 leased / 144 pending; B=0/294 held; C=30/264 done/pending. All increments came from scheduled collection; monitoring was read-only.
+- **제약:** B lacks fresh post-failure safe usage evidence; its 4 bound HTTP400 jobs and A's 4 bound failed jobs remain no-retry. No manual tick, duplicate request, cooldown/quota bypass. Cursor re-anchor remains offline-only. Full collection incomplete.
+- **검증/Git:** no code change since P6-063. Offline suite 988 discovered / exit 0 / 1 skipped; focused tick+handoff 12/12, cursor/re-anchor 26/26. Branch `codex/p6-readiness-hardening-20261019`, prior pushed SHA `90c7133592a10ddacd6391ba22de4e0694faf6d5`; commit/push this status refresh.
+
+### P6-067 — 2026-10-22 · C lane 7회 연속 예약 수집
+- **실제 수집:** scheduled ticks 06:45 through 07:15 (7 executions) committed 21 C pages, 0 account failures. C stayed unhalted; latest and max safe usage across 21 responses=13%.
+- **현재 상태:** sanitized read-only status 270 receipts / 1080 observations / 877 unique; A=146 done / 4 leased / 144 pending; B=0/294 held; C=21/273 done/pending. New P6 pages were committed by n8n; the status check itself is read-only.
+- **제약:** B has no post-failure safe usage evidence; its four prior bound HTTP400s remain no-retry. A's four bound failures also remain no-retry. Do not reset B, replay jobs, exceed 85%, or bypass cooldown. Cursor re-anchor remains offline-only. Full 294×3 collection incomplete.
+- **검증/Git:** no code change since P6-063. Official offline suite 988 discovered / exit 0 / 1 skipped; focused tick+handoff 12/12, cursor/re-anchor 26/26. Branch `codex/p6-readiness-hardening-20261019`; previous pushed SHA `cc445f3eb860eff083c1beee3c128ff02c10ab86`; commit/push this status update.
+
+### P6-066 — 2026-10-22 · C lane 4회 연속 예약 수집
+- **실제 수집:** scheduled ticks at 06:45, 06:50, 06:55, and 07:00 each committed 3 C pages; no account failures. C remained unhalted; latest usage=5%, maximum across 12 responses=5%.
+- **현재 상태:** sanitized read-only status 261 receipts / 1044 observations / 849 unique; A=146 done / 4 leased / 144 pending; B=0/294 held; C=12/282 done/pending. New P6 pages were committed by n8n; the status check itself is read-only.
+- **제약:** B remains held without fresh safe usage evidence; A's four bound failed requests remain no-retry. No hold bypass, manual tick, or request replay. Cursor re-anchor remains offline-only. Full 294×3 plan incomplete; prior RAW/source and legacy 49 rows unchanged.
+- **검증/Git:** no code change since P6-063. Official offline suite 988 discovered / exit 0 / 1 skipped; tick+handoff 12/12, cursor/re-anchor 26/26. Branch `codex/p6-readiness-hardening-20261019`; prior pushed SHA `0d92e8837f6b9a77c3f73ff775324d2e7ed5a45f`; commit/push this status refresh.
+
+### P6-065 — 2026-10-22 · C lane 3회 연속 예약 수집
+- **실제 수집:** 06:45, 06:50, 06:55 KST ticks each committed 3 C pages, no account failures. C stayed unhalted with safe usage evidence; latest 4%, maximum over 9 C responses 4%.
+- **현재 상태:** sanitized read-only status 258 receipts / 1032 observations / 838 unique; A=146 done / 4 leased / 144 pending; B=0/294 held; C=9/285 done/pending. New writes were from the scheduled P6 collector, not the monitoring commands.
+- **제약:** B still has no safe usage evidence for the current lane hold; do not release without verified proof. A's four bound `failed_no_retry` remain untouched. No manual tick, resend, >85% bypass, or cooldown bypass. Cursor re-anchor remains offline-only; existing RAW source and legacy 49 rows unchanged. Full collection incomplete.
+- **검증/Git:** no code change since P6-063. Official offline suite 988 discovered / exit 0 / 1 skipped; focused tick+handoff 12/12, cursor/re-anchor 26/26. Current branch `codex/p6-readiness-hardening-20261019`; previous pushed SHA `0e3410192102c6d50cb7ac4c6ded59fecbefe658`. Commit/push this state update.
+
+### P6-064 — 2026-10-22 · C lane 2회 연속 예약 수집
+- **실제 수집:** P6-063의 C-only verified reset 뒤 n8n 예약 tick 06:45와 06:50 각각 3페이지를 Capture→RAW/evidence 경로로 commit, account failures 0. C lane remained unhalted after safe usage evidence; latest usage=2%, maximum across 6 responses=2%.
+- **현재 상태:** read-only `--status`: 255 durable receipts / 1020 observations / 831 unique; A=146 done / 4 leased / 144 pending; B=0/294; C=6 done / 288 pending. B remains held with no current-day safe usage; A's four bound `failed_no_retry` remain untouched. No manual tick or Meta request by the monitor.
+- **범위:** this is real partial current-day collection, not full 294×3 coverage. Per tick page cap=3 and page size=4 unchanged; no retries, no quota/cooldown bypass, no cursor recovery call. Cursor re-anchor stays offline-only; legacy 49 and existing RAW source data unchanged.
+- **테스트/깃:** code unchanged since P6-063. Prior official offline suite 988 discovered / exit 0 / 1 skipped; focused tick+handoff 12/12, cursor/re-anchor 26/26. Branch `codex/p6-readiness-hardening-20261019`, prior pushed SHA `9d962fb3c2735b03647aea22319b44100eb6e9e3`; this status refresh needs commit/push.
+
+### P6-063 — 2026-10-22 · 증거 확인 후 C lane 수동 재개와 실제 수집 진척
+- **재개 근거:** 06:42 KST read-only audit across isolated P6 dates found exactly one historical C-bound request: job done, intent captured, Capture present, HTTP 200 safe response with 66% maximum usage. No later C request existed; current day's C had no bindings, `live_pending_usage` hold, elapsed `ready_at`, and 146 dispatch candidates. No n8n execution was active. These conditions satisfy the existing manual cooldown-reset design; no quota/cooldown bypass.
+- **변경:** in a transaction-time recheck, cleared only current-day isolated coordinator lane C's `halted/reason` fields. Preserved `ready_at`, jobs, bindings, prior Capture/RAW evidence, and all other lanes. B stayed held; A's four bound failed requests stayed untouched. No manual tick or direct Meta call was made by the reset command.
+- **실제 예약 수집:** 06:45 n8n execution `success`, runner `page_committed`, 3 pages committed, 0 account failures, confirmed Meta response. C latest safe usage 0%, so C returned to unhalted; 146 candidates became 3 done / 291 pending. Read-only pilot status: 252 receipts / 1008 observations / 822 unique; A=146 done / 4 leased / 144 pending, B=0/294, C=3/291. This proves partial current-day live collection, not full completion.
+- **인증 구분:** all local ENV files passed structural uniqueness/version validation, and C produced three successful live page responses. B's actual token/permissions remain unverified; its four prior bound HTTP400 requests remain no-retry. A's four bound requests also remain no-retry. Cursor re-anchor is still offline-only.
+- **테스트:** official offline suite 988 discovered / exit 0 / 1 skipped; focused tick+handoff 12/12; cursor/re-anchor 26/26. No new code change in this record; only guarded isolated C coordinator reset and documentation. Existing RAW dataset/legacy 49 rows unchanged.
+- **Git:** branch `codex/p6-readiness-hardening-20261019`; previous pushed SHA `d66b3e19756423ec0ecf007538071ae099d00c8e`; this entry requires commit/push.
+
+### P6-062 — 2026-10-22 · ENV 구조 검증과 API 유효성의 구분
+- **검증:** `python -m raw_v2.three_api_env_loader --directory C:\Users\haein\OneDrive\Desktop\ohora_env_a_b_c` returned `VALID: three unique A/B/C configurations; Graph API v26.0; Meta calls=0; values=redacted`. No secret or identifier was emitted.
+- **해석:** All three local ENV files are structurally complete, have unique lane configurations, and agree on v26.0. This proves neither token activity nor the required Meta permissions. The shell process has no P6 credential variables, but n8n runner loads/maps the three ENV files for each eligible tick; do not interpret shell mismatch as proof of the n8n configuration.
+- **Runtime:** Historical snapshot (superseded by P6-063) was 249 receipts / 996 observations / 812 unique; A=146 done / 4 leased / 144 pending; B/C=0 done / 294 pending. Latest then-known 06:35 tick was `no_ready_work`, 0 committed, `live_meta_called=false`; no Meta call/reset at that point.
+- **Git:** branch `codex/p6-readiness-hardening-20261019`; P6-062 was committed/pushed as `d66b3e19756423ec0ecf007538071ae099d00c8e`; this state is superseded by P6-063.
+
+### P6-061 — 2026-10-22 · `no_ready_work` 원인 확인과 tick telemetry 수정
+- **근본 원인:** sanitized latest n8n payload resolves to runner status `no_ready_work`, 0 committed pages, 0 account failures. `LiveSerialStep.step` returns this before request preparation/transport if no dispatchable job exists. Read-only exact dispatch predicates: A is lane-ready but has 0 eligible jobs; B has 144 eligible page1 candidates and C has 146, but both are held and therefore have 0 dispatchable candidates. A's page1 roster has 146 done and 4 leased/bound jobs; all A page2 jobs remain pending on predecessor/evidence.
+- **Telemetry defect/fix:** `three_api_n8n_tick.tick` previously inferred `live_meta_called` from `attempted_steps > 0`, which counted a runner check ending `no_ready_work` as a Meta request. It now reports true only when status is `page_committed` or `account_failed`; unknown live exceptions retain the separate `unknown_after_live_error` path. Added an offline regression that stubs `no_ready_work` with one attempted step and proves `live_meta_called=False`.
+- **Evidence:** n8n wrapper latest status is `LIVE_TICK_COMPLETE`/`no_ready_work`; committed=0, account failures=0. Despite an earlier `live_meta_called=true` field, code-path review proves no transport call for `no_ready_work`; this field was a false positive, not proof of Meta traffic. Read-only DB remains 146 captures. No manual tick, actual Meta request, lane reset, or DB write by this diagnostic.
+- **Post-fix verification:** commit `adc9b8a0729fb7cedd4f46cd15dfbc99b7f20a65` was pushed. Scheduled ticks at 06:10 and latest 06:35 reported `no_ready_work`, 0 committed, 0 account failures, `live_meta_called=false`; Capture count stayed 146. Exact read-only dispatch counts: A ready/0 eligible; B eligible 144, C eligible 146 but lane-held, therefore 0 dispatchable in B/C.
+- **Tests:** official `python -m tests.run_offline` discovered 988 tests and exited 0 (1 skipped); focused `python -m unittest tests.test_three_api_n8n_tick tests.test_p6_troubleshooting_handoff_guard` — 12/12 PASS; cursor/re-anchor suites — 26/26 PASS. `git diff --check` clean.
+- **Constraints/next:** B/C require fresh safe lane usage evidence for release; their cooldown alone is insufficient. Four bound A page1 requests are no-retry and prevent dependent A page2 progression. Do not manually tick beside schedule or resend them. Cursor recovery remains offline-only; all 294 assignments, 4/page, max 3 pages, 85% cap, and RAW/Capture invariants unchanged. Full collection remains incomplete.
+- **Git:** work branch `codex/p6-readiness-hardening-20261019`; code/test commit `adc9b8a0729fb7cedd4f46cd15dfbc99b7f20a65` pushed and local/origin SHA matched. 06:36 handoff refresh SHA to be recorded after push.
+
+### P6-060 — 2026-10-22 · 예약 tick 성공과 실제 수집 무진척 구분
+- **Correction (superseded by P6-061):** initial interpretation of `live_meta_called=true` as actual HTTP was wrong. The tick result was `no_ready_work`; the wrapper flag was computed from attempted runner steps, not HTTP dispatch. No transport call occurred.
+- **실행/상태:** 격리 n8n workflow 실행은 06:00 및 06:05 KST 모두 `success`. 두 실행 뒤 read-only DB 상태는 146 captures; A=146 done / 4 leased / 144 pending, B/C 각 0 done / 294 pending로 그대로였다. 따라서 wrapper tick 성공은 실제 Meta 수집 성공이나 신규 receipt를 뜻하지 않는다.
+- **재개/안전:** B read-only guarded preflight는 safety conditions not met를 반환했다. hold reset, manual tick, Meta request, DB write 없음. B/C fresh lane-safe usage 증거가 없어 lane hold 및 85%/cooldown/no-retry 보호 유지.
+- **커서/범위:** cursor re-anchor planner는 offline-only이며 production runner에 연결/실행되지 않았다. 전체 collection과 legacy 49건 복구는 미완료/미변경. 기존 roster 294, lane assignment, page size 4, max 3 pages/tick, RAW/Capture 불변성 유지.
+- **다음 진단:** 실제 scheduled tick의 sanitized `action`, `committed_pages`, `live_meta_called` 출력과 eligible dispatch diagnostics를 읽어 왜 tick이 0페이지로 끝났는지 구분한다. 민감 로그를 읽거나 API를 다시 보내지 않는다.
+- **Git:** 작업 브랜치 `codex/p6-readiness-hardening-20261019`; 이전 P6-059 문서 SHA `83ad78d4ac15d91cb6d2add266894f0ac8ae77e0`. 이 항목의 commit/push SHA는 후속 기록 예정.
+
+### P6-059 — 2026-10-22 · 예약 실행 정체 재확인
+- **관측:** 05:59 KST read-only inspection found the latest execution for the active isolated P6 workflow was still 05:55 `success`; there was no later execution. P6 remained at 146 captures; A=146 done / 4 leased / 144 pending, B/C each 0 done / 294 pending. This establishes no new progress after the prior snapshot, not successful data collection.
+- **자동화 상태 (superseded by P6-060):** an initial process-name lookup searched for `n8n.exe` and found none. That lookup did not account for the Node.js runtime process name and was insufficient to establish scheduler state. Subsequent P6-060 checks found scheduled executions continuing through 06:05 KST.
+- **재개 가드/안전:** read-only B guarded preflight again refused with `safety conditions not met`. No hold reset, Meta request, manual tick, or DB write. B/C lack fresh lane-safe usage evidence. Do not bypass the 85% cap, cooldown, no-retry, or lane evidence gates.
+- **한계/다음:** full collection remains incomplete; cursor re-anchor remains offline-only. Restore/check n8n only through its normal operator path, then confirm new receipts using read-only status. Do not issue a competing tick. Existing RAW/Capture and legacy 49 rows remain unchanged.
+- **Git:** recorded on `codex/p6-readiness-hardening-20261019`; previous pushed SHA `83d4bff5b81e2bab3f3f9a8f2ab9146e59c3c6be`. Push and origin SHA check are required after this entry.
+
+### P6-058 — 2026-10-22 · n8n 진척 정체와 B/C 사용량 증거 보류
+- **실행 근거:** 격리 n8n DB의 `OHORA P6 bounded daily collection`은 active이며 최신 05:50 KST 실행 status는 `success`. 다만 wrapper success가 새 페이지 저장을 뜻하지는 않는다. 05:50 P6 read-only status는 249 receipts / 996 observations / 812 unique posts; A 146 done / 4 leased / 144 pending; B/C 각각 0 done / 294 pending이다. 최근 대조 status에서 page count 변화 없음.
+- **쿼터/보류:** 현재 날짜 `capture.sqlite`의 sanitized evidence에는 A 146건, B/C 0건 usage observations. A 최신 usage 35% (05:10 KST). B/C는 `live_pending_usage`로 held, 두 lane의 cooldown은 elapsed이나 fresh lane-safe usage evidence가 없다. elapsed cooldown만으로 해제하지 않았다.
+- **실패:** A ordinal 32, 61, 100, 113의 HTTP400은 `failed_no_retry`, Capture 없음, response evidence 없음, auto-retry 불가. 원인은 응답 증거 부재로 계속 미확정이다. Guarded B-resume read-only preflight는 `safety conditions not met`를 반환; reset/API 호출은 없었다.
+- **변경/제약:** 이번 점검은 P6 status, failure, cooldown, n8n execution, safe usage 집계만 read-only 수행했다 (`db_writes=0`, `live_meta_called=false`). 294 계정·A/B/C 순서, limit=4, 3페이지 상한, 85% cap, cooldown/no-retry, RAW/Capture 불변성 유지. Cursor recovery는 오프라인 테스트만 완료; 실제 재앵커/재개 미검증. full collection 미완료.
+- **다음 안전 단계:** B/C의 fresh lane-safe usage evidence와 guarded resume 조건을 검증하기 전에는 hold를 바꾸지 않는다. 다음 예약 실행은 자동 진행 여부만 읽기 전용 모니터링한다. B/C 자동화를 막는 현재 gate를 충족하지 못하면 collection 완료를 주장하지 말고, 기존 실패 요청은 재전송하지 않는다.
+- **Git:** 작업 브랜치 `codex/p6-readiness-hardening-20261019`; 직전 원격 SHA `b0ce679d8cc444b492328d458269c9020aa52107`. 이 기록 후 별도 문서 커밋/push 결과로 갱신.
+
+### P6-057 — 2026-10-22 · 커서 무효화 시 제한형 재연결 요구 및 오프라인 증거
+- **요구/기존 구현:** 사용자 추가 요구는 무효 커서 재시도 대신 `resume_required`로 중단하고, 별도 승인 라운드에서 최신 페이지부터 기존 게시물 ID와 재연결한 뒤 새 커서로 재개하는 것이다. 기존 [planner](../raw_v2/three_api_paging_recovery.py)는 `cursor_failure_disposition`으로 자동 재시도를 금지하고, `plan_cursor_recovery`는 합성 페이지의 ID overlap만으로 연결 후보를 찾으며 3페이지 초과를 거부한다. 삭제 여부는 단정하지 않는다. 재탐색 관측 ID는 중복 포함 보존하고 분석 ID만 deduplicate한다. 별도 [reanchor ledger](../raw_v2/three_api_reanchor.py)는 기존 proof를 지우지 않는 격리 증거 저장소이며, 현재 production Meta runner에 연결된 것은 아니다.
+- **시나리오 검증:** [recovery tests](../tests/test_three_api_paging_recovery.py)는 정상 커서, 기준 ID 부재/주변 ID 연결, cursor invalid 후 resume_required→최신 페이지 overlap→대체 cursor, 순서 변경·추가·다중 누락, 관측 중복과 분석 dedupe, overlap 발견/미발견, 3페이지 한도 및 4페이지 거부를 검증한다. [reanchor tests](../tests/test_three_api_reanchor.py)는 원본 proof 보존과 별도 증거 라운드를 검증한다. 회귀 원인: 첫 전체 serial suite에서 상세 incident 추가 뒤 인덱스 행을 누락해 `test_incident_index_matches_unique_detailed_records`가 실패. follow-up handoff guard found the new long top line also pushed the direct ledger path beyond its 2,000-character scan; added an explicit short index line. 인덱스 행과 handoff link 보완 후 cursor/re-anchor 26/26, handoff guard 4/4, 공식 전체 분할 suite 987 run / 986 PASS / 1 SKIP / 0 FAIL로 완료.
+- **현재 한계/안전:** 오프라인 planner는 수집 위치를 계산할 뿐 API 호출·RAW/Capture 기록·운영 DB 변경을 하지 않는다. 실제 무효화·재탐색·재개는 승인되지 않았고 검증되지 않았다. 294 roster와 lane order, page size 4, per-round 3-page ceiling, quota 85%, cooldown/no-retry 및 기존 RAW/Capture immutability 유지. legacy 49건 변경 없음.
+- **진단 차단:** 2026-10-22 05:02 KST의 read-only pilot status refresh가 isolated `p6_pilot_raw.sqlite` Windows ACL `PermissionError`로 거부됨. 파일에 쓰지 않았으며 권한 우회도 하지 않았다. 최신 runtime 상태는 확인 불가; handoff에 마지막 확인 시각(04:50)을 구분하여 기록.
+- **Git 상태:** 시작 시 사용자 작업 트리는 clean, HEAD와 origin 작업 브랜치는 일치했고 `git fetch origin` 성공. 문서 커밋 `228cc4655a5d2437a64c3f4a37c0fc6d878a4f45` push 및 SHA 일치 확인. 최종 핸드오프 전 검토를 위해 `origin/main` SHA `2e55b90a60892fb721295b1faa5207c84b48586b`도 fetch해 확인했으며, main에는 P6-057/planner가 없음; 요청대로 main 병합하지 않음. 인증파일·DB·CSV·RAW·Capture 파일은 변경/커밋 안 됨.
+
+### P6-056 — 2026-10-22 · 예약 A lane 진행 갱신
+- **관측:** isolated active n8n P6 execution at 04:50 KST `success`. Read-only status: 237 durable receipts / 948 observations / 764 unique posts; A 134 done / 4 leased / 156 pending; B/C each 0 done / 294 pending.
+- **쿼터:** latest sanitized A usage 35% at 04:50, below 85%. B/C still have no stored safe usage and remain held; cooldown alone is not sufficient to release.
+- **오류:** Four account-scoped A HTTP400 jobs have no Capture/response evidence and remain `failed_no_retry`; no retries. Root cause remains indeterminate. Historic B's 48 successful P6 pages do not prove current B credential validity or explain the separate 400s.
+- **상태:** five-minute n8n P6 workflow remains active and advancing A. 294×3 frozen page plan is incomplete; B/C and cursor re-anchor remain pending/unverified. Existing assignment order, page size=4, max 3 pages/tick, quota/cooldown, no retry, RAW/Capture invariants preserved.
+- **legacy 49건:** Prior immutable-row recovery planner/49-row evidence is read-only only; no repair/materialization was applied. State remains untouched and unverified.
+- **다음:** let active schedule continue, perform read-only checks after bounded intervals, never manually tick alongside it. No B/C hold reset without fresh lane-specific usage evidence.
+- **다음 확인 명령:** `$py='C:\Users\haein\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'; & $py raw_v2/three_api_manual_pilot.py --workspace (Join-Path $env:LOCALAPPDATA 'OHORA_P6_PILOT') --status --day (Get-Date -Format yyyy-MM-dd)` (repo root; read-only; no Meta call or DB write).
+
+### P6-055 — 2026-10-22 · 예약 A lane 추가 진척, 오류·보류 유지
+- **관측:** isolated-runtime active n8n P6 execution 04:30 KST `success`; P6 read-only status 225 durable receipts / 900 post observations / 716 unique posts; A 122 done / 4 leased / 168 pending; B/C each 0 done / 294 pending.
+- **쿼터/오류:** Latest sanitized A usage 32% at 04:30, below 85%. B/C have no safe usage evidence and remain `live_pending_usage`; cooldown passage does not clear the hold. Four A account HTTP400 failures remain `failed_no_retry`, all with no Capture/response evidence and no retry allowed; causes remain unclassified.
+- **실패 원인 범위:** B's historic 48 P6 pages prove prior serial GET auth worked then, but don't verify current token equality/validity. HTTP400 payloads only retain safe generic metadata; token/caller/permission/field/Batch/cursor source remains unknown. Method contrast (RAW Batch POST vs P6 serial GET) alone is not proof.
+- **자동화:** n8n's isolated P6 workflow continues every five minutes and is independently verified active; don't start a competing manual tick. The wrapper execution status and per-page failure count remain distinct.
+- **검증/완료도:** Offline cursor-recovery/P6 targeted tests remain 58/58 PASS, handoff guard 4/4 PASS; live cursor invalidation/re-anchor not observed. 294×3 page plan not complete. RAW data and Capture are preserved; no main merge.
+- **다음:** keep the existing schedule running within per-tick max 3, page size 4, 85% quota and cooldown; don't reset B/C without safe usage evidence and never replay failures.
+
+### P6-054 — 2026-10-22 · 예약 진행과 A 계정 오류 증가
+- **관측:** 활성 격리 n8n P6 tick at 04:10 KST `success` 종료; P6 결과는 2 page commits 후 새 A account HTTP400 1건. Read-only P6 status 04:10:42: 213 durable receipts / 852 observations / 668 unique posts; A 110 done / 4 leased / 180 pending; B/C 각각 0 done / 294 pending. Latest A sanitized usage 28% at 04:10.
+- **오류/원인:** A의 계정 범위 HTTP400 `failed_no_retry` 총 4건, 모두 Capture/response evidence 없음, automatic retry 불가. 보존된 근거로 token, caller ID, Meta permission, request field, Batch API, cursor 중 원인을 선택할 수 없다. 같은 타깃 재요청 없음.
+- **lane gate:** A unhalted, latest usage below 85%. B/C remain `live_pending_usage` with no lane-safe-usage evidence; elapsed cooldown alone does not clear them. No manual hold reset.
+- **자동화:** 격리 n8n DB의 P6 workflow active; 04:10 execution success verified. Wrapper success와 page-level 결과(2 success/1 failure)는 구분. 중복 수동 tick 금지.
+- **검증:** failure/status/quota diagnostics read-only, `db_writes=0`, `live_meta_called=false`; sensitive values suppressed. Prior offline cursor recovery/HTTP/P6 suite 58/58 PASS; handoff guard 4/4 PASS. Full 294-account page plan incomplete; no live cursor invalidation/re-anchor.
+- **다음:** leave active schedule running; check latest execution and P6 status after bounded intervals. Never resend 4 A failures, bypass 85%/cooldown, or resume B/C without fresh lane-specific quota evidence.
+
+### P6-053 — 2026-10-22 · 예약 A HTTP400 실패 추가 및 no-retry 유지
+- **관측:** 활성 격리 n8n P6 실행 03:50 KST `success` 종료. P6 tick은 페이지 2건을 저장한 뒤 새 A 계정 범위 HTTP400을 묶었다. 03:50:26 read-only status: 202 receipts / 808 observations / 624 unique posts; A 99 done / 3 leased / 192 pending; B/C 각 0 done / 294 pending. Latest A sanitized usage 20% at 03:50.
+- **실패 안전 상태:** read-only `--failures` 집계상 A HTTP400 `failed_no_retry` 총 3건이며 셋 모두 Capture 없음, response evidence 없음, `automatic_retry_allowed=false`. 새 실패도 재전송하지 않았다. 응답 근거가 없으므로 token/caller/permission/field/cursor 원인을 판정할 수 없다. A lane은 현재 unhalted; B/C는 `live_pending_usage` 및 safe usage 증거 부재로 held 상태.
+- **n8n:** active isolated-runtime workflow가 예약 호출을 계속 수행한다. 동일한 03:50 tick에서 2개 저장/1개 실패로 P6 page result와 n8n wrapper `success`는 구분해야 한다. 수동 실행은 병렬 중복을 일으킬 수 있으므로 하지 않는다.
+- **검증:** read-only status/failure/cooldown/quota queries 모두 `db_writes=0`, `live_meta_called=false`; failure output는 lane/type/count/booleans만 사용. A/B/C 별도 상태와 no-retry invariants 유지. 전체 수집은 진행 중이며 완료 아님.
+- **다음:** 활성 스케줄을 두고 매 tick 후 P6 `--status` 및 isolated n8n latest execution을 재확인한다. B/C는 새 lane-specific usage evidence 없이 풀지 않고, A failures는 절대 자동 재전송하지 않는다. See [P6-052 B/error analysis](P6_TROUBLESHOOTING_LEDGER.md), [workflow](../kq3_294_collection/n8n_p6_daily_collection.json), [P6 runner](../raw_v2/p6_n8n_tick.ps1).
+
+### P6-052 — 2026-10-22 · P6 예약 진행 및 B API 실패 근거 재확인
+- **관측:** 격리 n8n DB의 활성 `OHORA P6 bounded daily collection` 실행은 03:35 KST `success`. 03:35 상태 194 durable receipts / 776 observations / 592 unique posts; A 91 done / 2 leased / 201 pending; B/C 각각 0 done / 294 pending. A의 최신 sanitized usage 18% at 03:35; B/C에는 persisted safe usage evidence 없음, 기존 hold 유지.
+- **B 과거 성공:** 2026-10-21 status에 B 48 done, A 54, C 1. 당시 B의 네 계정 단위 HTTP400은 `failed_no_retry`; 원문/응답 Capture 없음. Capture failure records는 일반화된 `safe_message`와 숫자 code만 보존하며, 네 건 중 code100 1건 및 code110 3건; token/auth/permission/field/cursor 힌트, subcode, 원문 사유 없음. 따라서 당시 B 인증 경로가 48페이지에서 작동했다는 사실은 확인되지만, 현재 ENV 토큰과 동일성·현재 유효성 및 네 실패의 원인은 확정 불가.
+- **요청 방식 비교:** `raw_v2/collector.py`의 `request_batch`는 Batch POST form body로 access token을 전달한다. P6 `raw_v2/three_api_graph_http.py`는 개별 GET + bearer Authorization header, IG caller ID 경로 사용이다. 경로 차이는 사실이나 과거 48 B 성공은 P6 GET 경로가 적어도 일부 B 계정에서 작동했음을 증명한다. Batch 차이가 실패 원인이라는 증거는 없으며, 실패 응답 메시지/필드별 증거가 보존되지 않아 token vs caller ID vs permission vs request field vs Batch 원인을 나눌 수 없다.
+- **현재 조치/안전:** 실행 중인 5분 workflow를 유지하고 manual tick은 발송하지 않았다(자동 중복 방지). 별도 manual bounded-tick 시도는 automatic approval review에서 거부되어 Meta 요청을 보내지 않았다. A 2건 및 과거 B 4건은 절대 재전송 금지. B/C `live_pending_usage`는 cooldown 경과만으로 풀지 않는다.
+- **검증:** P6 current-session targeted suite 58/58 PASS; docs handoff guard 4/4 PASS; actual local ENV offline loader VALID (3 distinct lane values, v26.0; values redacted); historical/current DB and n8n queries read-only. These checks do not prove B/C live validity. No live cursor invalidation/re-anchor observed. Full 294-lane collection remains incomplete.
+- **다음:** n8n active schedule continues bounded A progress; inspect isolated runtime DB and read-only P6 status. Resume B/C only after fresh lane-appropriate quota evidence and authorized gate transition; no bypass, no retry. See [workflow](../kq3_294_collection/n8n_p6_daily_collection.json), [P6 transport](../raw_v2/three_api_graph_http.py), [RAW collector](../raw_v2/collector.py), [cursor planner](../raw_v2/three_api_paging_recovery.py).
+
+### P6-051 — 2026-10-22 · 격리 n8n DB와 실제 예약 실행 확인
+- **근본 원인 정정:** 표준 `%USERPROFILE%\.n8n\database.sqlite`는 P6 런타임 DB가 아니다. `OHORA_N8N_RUNTIME\user\.n8n\database.sqlite`를 읽기 전용 조사해 P6 관련 워크플로 3개, 그중 `OHORA P6 bounded daily collection` 활성 1개를 확인했다. 활성 워크플로 최근 실행은 03:25 KST `success`; 직후 pilot 상태도 03:22의 185 receipts에서 03:26:50의 188로 증가했다. 표준 DB만 보고 활성 워크플로가 0개라고 했던 판단은 잘못된 DB 선택에서 비롯됐으며 superseded.
+- **현재 상태:** 188 durable receipts / 752 post observations / 568 unique posts; A 85 done / 2 leased / 207 pending; B/C each 0 done / 294 pending. Latest sanitized safe usage evidence: A 21% at 03:25 KST; B/C have no stored safe-usage evidence, so their `live_pending_usage` holds remain despite elapsed cooldown. Two A account-scoped HTTP400 jobs remain `failed_no_retry`, no Capture/response evidence, never resent. Offline credential loader reports three unique A/B/C configs and v26.0; this proves structure only, not B/C token validity or permissions.
+- **운영 진행:** Active five-minute n8n schedule is making bounded progress. Do not start a duplicate manual tick. The direct bounded tick attempt in this session was rejected by automatic approval review; no manual request resulted. Status/failure/quota diagnostics were read-only and emitted no secret values. The n8n scheduled run is independently confirmed by its success execution and durable P6 progress.
+- **커서 복구:** strict explicit invalid-cursor detection / `resume_required` and synthetic max-3-page re-anchor planner are implemented and covered by offline tests. No live cursor invalidation or re-anchor was observed; any actual recovery round remains separate and must preserve approval, 85% cap, cooldown, no retry, 294 roster/lane order, 4 posts/page, and Capture/RAW immutability.
+- **검증:** full offline suite last completed at P6-049: 987 run / 986 PASS / 1 SKIP / 0 FAIL. Current-session targeted recovery/paging/HTTP/n8n suite: 58/58 PASS. Offline credential loader: VALID, Meta calls=0, values redacted. Read-only pilot status: db_writes=0, live_meta_called=false. Current full collection is incomplete; no main merge.
+- **다음:** keep the active n8n workflow running; check it through the isolated user-folder DB and the P6 read-only `--status` command. Never infer B/C eligibility from elapsed cooldown alone. See [active workflow export](../kq3_294_collection/n8n_p6_daily_collection.json), [runner](../raw_v2/p6_n8n_tick.ps1), [n8n tick gate](../raw_v2/three_api_n8n_tick.py), and [cursor planner/tests](../raw_v2/three_api_paging_recovery.py).
+
+### P6-050 — 2026-10-22 · 예약 A lane 수집 진행 재확인
+- **관측:** 03:10 KST read-only status at 179 receipts / 716 observations / 532 unique posts; daily A 76 done / 2 leased / 216 pending; B/C each 0 done / 294 pending. Compared with 03:08: +3 receipts / +12 observations / +3 A pages. n8n PID 20464 alive.
+- **안전 상태:** A lane unhalted. B/C remain `live_pending_usage` held despite expired ready_at; no reset. A account ordinals 32 and 61 remain HTTP400 `failed_no_retry`, with no Capture or response evidence and no automatic retry. Status/failure diagnostics made zero writes and zero Meta calls.
+- **완료도:** The scheduled A collection is progressing but all 294 accounts are not complete. Latest full offline suite remains P6-049: 987 run / 986 pass / 1 skip / 0 fail. No live cursor invalidation observed; runtime cursor recovery detection and separate re-anchor execution remain distinct.
+
+### P6-049 — 2026-10-22 · 전체 오프라인 회귀 및 예약 수집 재확인
+- **검증:** 저장소 루트 import를 보장하는 `$py -m tests.run_offline` 실행에서 987 tests, 986 PASS, 1 SKIP, 0 FAIL, exit 0. Graph error redaction/transport/manual-pilot/n8n cursor error regressions 포함 targeted 155/155 PASS; 수정 파일 py_compile PASS. 이전 직접 파일 경로 실행은 `src`가 sys.path에 없어 `test_collection_schedule` import error를 냈으며, `python -m unittest tests.test_collection_schedule` 15/15 및 올바른 모듈 방식 full suite로 해소했다.
+- **예약 진행:** 03:08 KST read-only: P6 total 176 receipts / 704 observations / 520 unique posts; daily A 73 done / 2 leased / 219 pending; B/C each 0 done / 294 pending. n8n PID 20464 remains alive. A lane `halted=0`; B/C `halted=1`, reason `live_pending_usage` despite expired ready_at; no manual reset because fresh usage evidence is not available. The read-only status check did not call Meta or write DB.
+- **실패 바인딩:** A account ordinals 32 and 61 have HTTP 400 `failed_no_retry`, no Capture/response evidence; `automatic_retry_allowed=false`; neither request was resent. Exact code/subcode is unavailable in this diagnostic, so neither is attributed to auth, permission, field, target, or cursor.
+- **완료도/제약:** The schedule is collecting A pages, not all 294 accounts. B/C remain held. No live cursor invalidation observed. Strict invalid-cursor detection and `resume_required` persistence are implemented, but the separate new-page fetch/overlap/replacement-cursor recovery runner is not production-wired. Never claim real cursor recovery or full live collection success from these offline tests.
+
+### P6-048 — 2026-10-22 · 명시적 커서 오류 런타임 분류 및 재개 요구 기록
+- **근본 원인:** GraphHTTPClient는 토큰 노출 방지를 위해 비성공 응답에서 `code`/`error_subcode`만 남기고 Meta `message`를 버렸다. 따라서 일반 HTTP400과 명시적 cursor invalid 응답은 모두 `http_error`가 되어 운영 진단에 `resume_required`가 나타나지 않았다.
+- **최소 수정:** 원문 메시지를 저장하지 않고, HTTP400 + Graph code 100 + 명시적 `invalid/expired/stale cursor` 문구가 모두 일치할 때만 정규화된 boolean `cursor_invalid` marker를 추가한다. `MetaTransport`는 이 marker를 typed `cursor_invalid` failure로 바꾼다. 기존 journal에 category/outcome이 영속화되며 읽기 전용 `--failures` 결과에서 `failed_no_retry` intent에만 `recovery_status=resume_required`를 파생한다. 다른 요청/인증/권한 오류는 기존 분류 `operator_review`로 남는다.
+- **중단 동작:** 실패 요청은 `failed_no_retry`로 남고 serial tick 예외로 중단된다. 어떠한 retry 또는 first-page fetch도 여기서 시작하지 않는다. Recovery planner와 3-page 상한은 별도 승인 라운드에서만 사용한다. 새 coordinator schema/RAW/Capture 변형은 없다.
+- **n8n 실패 출력:** 승인된 live 실행 중 예외가 나면 전송 여부를 입증하지 못하므로 `live_meta_called=false`로 잘못 기록하지 않는다. `live_meta_called=null`, `live_meta_call_status=unknown_after_live_error`로 바꾸고 오프라인 테스트로 고정했다.
+- **검증:** Graph error sanitization, transport classification, isolated manual-pilot failure journal, serial step, runtime contract, paging/recovery, n8n tick, handoff guard 합계 155/155 PASS; py_compile PASS. 모든 HTTP는 가짜 sender; Meta/운영 DB/RAW/Capture 호출·변경 0건.
+- **한계:** Meta cursor 오류 문구는 현재 살아있는 응답으로 확인하지 못했다. locale/문구 변형은 자동 분류하지 않고 `operator_review`로 fail-closed한다. 실제 새 페이지를 조회해 기존 ID와 연결하고 새 커서로 재개하는 production runner 및 live recovery는 여전히 미구현이다. 현 시점 A44 done/1 leased/249 pending, 전체 receipts147/observations588/unique442; B/C는 `live_pending_usage` hold 유지.
+
+### P6-047 — 2026-10-22 · 예약 실행 진행 확인 및 레인 게이트 보존
+- **관측:** 02:10 KST 읽기 전용 상태에서 durable receipts 144, 전체 post observations 576, unique posts 438; 오늘 A done 41 / leased 1 / pending 252, B/C done 0 / pending 294. 이전 관측(138 receipts, A 35) 이후 예약 스케줄 구간에서 +6 receipts, +24 observations가 확인됐다. n8n loopback 프로세스 PID 20464는 계속 존재한다.
+- **레인 게이트:** A `halted=0`. B/C `halted=1`, reason `live_pending_usage`; 각 `ready_at`은 이미 지났지만 별도 최신 quota 증거가 없으므로 hold를 해제하지 않았다. 조회 출력은 현재 usage percentage를 제공하지 않았다.
+- **실패 바인딩:** A의 account-scope HTTP400 한 건은 `failed_no_retry`, `has_capture=false`, `has_response_evidence=false`, `automatic_retry_allowed=false`; 재전송 금지 유지.
+- **안전/완료도:** 해당 점검은 SQLite mode=ro, DB writes=0, Meta requests=0. 수치는 예약된 라이브 진행을 보여주지만 294계정 완료가 아니다. Cursor invalidation은 관측되지 않았고, recovery planner는 오프라인 전용이며 운영 recovery runner는 미구현이다. A만 정책 게이트로 계속 진행; B/C는 fresh usage 확인 전 보류.
+
+### P6-045 — 2026-10-22 · n8n tick 처리량을 정책 상한 3페이지로 조정
+- **근거:** 실제 수동 1페이지 실행과 n8n 스케줄 1페이지 실행이 성공했고, 이후 연속 스케줄에서도 추가 페이지가 영속 수집됐다. n8n이 계속 작동 중인데 tick당 1페이지만 실행하면 전체 294계정 목표가 불필요하게 늘어진다.
+- **수정:** adapter 기본값과 PowerShell launcher를 tick당 최대 3페이지로 설정. n8n Schedule Trigger는 매 5분이며, P6 coordinator는 각 response 뒤 85% 사용량/쿨다운 상태를 확인하고 제한에 도달하면 즉시 중단한다. Cursor recovery는 이 자동 tick에 포함되지 않는다.
+- **검증:** `tests/test_three_api_n8n_tick.py`에서 launcher 상한 3을 확인하고 targeted 76개 오프라인 테스트를 재실행. 연속 스케줄 tick에서 3페이지 처리 및 준비된 작업 2페이지 처리 사례를 확인했다. 현재 확인 기준 오늘 32페이지 / 128개 신규 관측, 135 durable receipts / 540 observations / 435 unique posts; latest successful-response usage 19%. A의 계정 범위 HTTP400 한 건은 `failed_no_retry`로 영속 바인딩됐고 재전송되지 않았다. B/C는 계속 `live_pending_usage` hold. 별도 오프라인 진단에서는 B/C 토큰 및 ID 형식·서로 다른 값·P6 매핑 일치가 확인됐으나 실제 토큰 유효성/권한은 검증되지 않았다.
+- **경계:** 294계정 전체 수집과 B/C 사용량 확인은 여전히 미완료. 매 tick 최대 3페이지이지 한 번에 무제한 수집이 아니다. Legacy 49건과 cursor recovery는 미수정/미실행.
+
+### P6-044 — 2026-10-22 · n8n KST scheduler와 P6 단일 tick 연결 준비
+- **변경:** `src/collection_schedule.py`를 현재 작업 브랜치에 반영하고, `raw_v2/three_api_n8n_tick.py`가 일정 판단·읽기 전용 coordinator quota/hold 확인·명시적 live gate 뒤 기존 `run_manual_pilot`을 호출하도록 연결했다. PowerShell launcher와 비활성 5분 n8n workflow export를 추가했다. n8n CLI 테스트 실행을 위해 schedule trigger와 함께 `Execute Workflow Trigger`도 둔다.
+- **안전:** 각 tick은 기본 1페이지, 상한 3페이지다. Unknown Capture intent는 `manual_review`; B/C hold/cooldown은 날짜가 바뀌어도 이어진다. 토큰은 파일에서 프로세스 메모리로만 로드되고 출력/상태파일에는 기록되지 않는다. 시작 기준시각은 커밋된 Capture→RAW 성공 결과의 검증된 응답시각만 원자적으로 저장한다. cursor recovery는 자동 스케줄 대상이 아니며 별도 승인과 3페이지 상한을 유지한다.
+- **검증:** schedule, n8n adapter, manual pilot, paging, recovery, credential diagnostic, handoff guard **76/76 PASS**; Python compile PASS. n8n 2.44.5 loopback runtime, import and published schedule verified. Initial CLI issues (required Execute Workflow Trigger, default disabled Execute Command node, Windows non-ASCII path, duplicate official roster candidates) were fixed without issuing Meta requests; `NODES_EXCLUDE` is restricted to exclude only Local File Trigger, enabling Execute Command. Manual CLI execution and first five-minute schedule execution both succeeded, each capped to one page. Read-only P6 verification: current-day 2 pages / 8 post observations; 105 durable receipts total / 420 observations / 413 unique posts; latest HTTP 200, safe usage 0%; A open, B/C still `live_pending_usage` held. The first-success timestamp was persisted only after the manual page's Capture→RAW commit.
+- **운영 경계:** This verifies bounded live collection and the active local schedule, not full 294-account completion, B/C credential validity, or live cursor recovery. B/C holds were not reset; no automatic retries or recovery runs. Old inactive duplicate drafts may exist in the isolated n8n local DB from CLI re-import; only the final corrected workflow is published. Local n8n must remain running for scheduled ticks and currently is bound only to 127.0.0.1.
+- **다음 단계:** leave local n8n running so bounded ticks continue; monitor usage gates, B/C quota verification, and completion of eligible accounts. Read-only status command from the repository root: `$py='C:\Users\haein\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'; & $py raw_v2/three_api_manual_pilot.py --workspace (Join-Path $env:LOCALAPPDATA 'OHORA_P6_PILOT') --status --day (Get-Date -Format yyyy-MM-dd)`. Cursor recovery remains separate and requires operator approval. No user-facing or Git credential values were written. Current feature branch is pushed; `main` was not merged and its handoff index has not been synchronized to avoid violating the no-main-merge instruction.
+
+> 최초 작성: 2026-10-21 · 범위: OHORA Trend Catcher p6의 확인 가능한 Git 이력, `STATUS.md`/`HANDOFF.md` 기록, 해당 대화에서 확인된 CI 로그 및 사용자 보고.
+>
+> **목적:** 지금 성공/실패한 실험 모두를 미래의 레거시 분석, 재설계, API 증설 및 인수인계에 재사용한다. **완전한 전수 감사 기록이 아니다.** 문서화되지 않은 과거 작업은 Git/Actions/기존 인수인계 자료를 대조하여 계속 보강한다.
+>
+> **위계:** [동결 공지](../DESIGN_FREEZE_NOTICE.md) 및 [최종 수집 설계](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md)가 승인된 정책의 기준이다. 이 문서는 정책·구현 완료·운영 승인을 대체하지 않는다. 설계 원문은 수정하지 않는다.
+>
+> **기본 구분:** 사용자 보고 / 코드로 확인 / CI로 검증 / 미검증 가설 / 후속 작업. 서로 혼동하지 말 것. CI 성공은 기록된 **특정 commit SHA**에만 유효하다.
+
+### P6-035 — 2026-10-21 · after-only cursor 종료 오판 및 무손실 재앵커 계획
+
+- **증상·원인:** `three_api_paging.validate_page_edge` returned `after` only when `paging.next` existed, and marked any no-next response terminal. `three_api_meta_normalizer.normalize_meta_page` retained cursor data only when `next` existed. Thus a full 4-item Business Discovery page with `paging.cursors.after` but no `paging.next` lost the cursor and was marked terminal. A full page with no cursor had also been treated as terminal despite ambiguity.
+- **수정:** `after` without `next` is now `cursor_candidate`; `paging.next` is never persisted raw; short (<4) page without cursor is `terminal_verified`; full page without usable cursor is `pagination_ambiguous`; an empty page with a cursor fails closed. `raw_v2/three_api_paging_recovery.py` adds (a) read-only classification of existing terminal+after evidence with Capture/RAW/digest chain checks and cursor redaction to SHA-256, and (b) separate recovery-round re-anchoring from newest to oldest with a hard 3-page bound. It compares prior media IDs, preserves duplicate observations but dedupes the analysis list, uses a new returned cursor only after an existing-ID overlap, and marks `coverage_gap` when no overlap/continuation proof is available. It never confirms deletion, retries an existing request, writes a DB, or sends HTTP. Exact cursor error category must be provided by caller; generic HTTP 400 stays operator review.
+- **수정 commit:** `7632788`.
+- **49-row status:** Read-only local inspection of `%LOCALAPPDATA%\OHORA_P6_PILOT\p6_pilot_raw.sqlite` found 97 RAW receipts/contract receipts/request logs/query observations. It has no `response_evidence` or `page_evidence` table; saved receipt payload is normalized data without original paging. Therefore the 49 actual Capture/RAW/request/cursor links and their digest agreement cannot be established from the accessible pilot DB. No actual repair was applied. A synthetic 49-row terminal+after plan was produced with zero mutations and zero network requests; all 49 were marked `cursor_candidate_review_required` in simulation only.
+- **Additional user requirement:** after a separately approved new round, latest→older exploration is limited to three pages. A matched old ID plus valid new cursor gives `resume_ready`; missing/deleted boundary post can be bridged by a neighboring known ID; no overlap by the cap remains `coverage_gap`. Quota 85%/cooldown, frozen roster/lane allocation, page limit 4, and no failed-request retry remain unchanged. This is an offline planner, not a production recovery runner.
+- **Tests:** `tests/test_three_api_paging.py`, `tests/test_three_api_meta_normalizer.py`, `tests/test_three_api_paging_recovery.py`. Latest targeted run: 29 paging/recovery + 11 normalizer = **40 PASS**. Full `tests/run_offline.py` discovered 958 tests (before one final page-cap case) and is in progress at time of this entry; update exact final outcome before handoff. No Meta call or operating DB write.
+- **Unresolved:** Actual original 49 safe response bodies, Capture hashes, RAW receipt links, and coordinator terminal rows need their correct local store(s) to be available for a read-only audit. Until then their recoverability and exact count are unverified. A new Meta recovery round requires explicit user approval.
+- **Rollback:** Revert only the paging interpretation/planner/tests/docs on this feature branch. No operational artifact needs rollback; never patch existing terminal rows by inference or change immutable Capture/RAW evidence.
+
+### P6-036 — 2026-10-21 · page-limit 회귀 fixture가 terminal 근거를 잘못 구성
+
+- **실패 증거:** `test_anchor_on_third_page_does_not_dispatch_a_fourth_page` 최초 실행에서 expected `page_limit_reached`, actual `terminal_verified`로 1건 실패.
+- **확정 원인:** 테스트의 세 번째 응답에 게시물 3개와 cursor 없는 paging을 넣었다. 이 응답은 규칙상 4개 미만·후속 표시 없음이므로 `terminal_verified`가 맞으며, 코드 결함이 아니었다.
+- **수정:** fixture를 4개 게시물+유효 after cursor로 바꿔 세 페이지째에도 후속 후보가 있는 경계를 구성. 이제 검증 대상이 정확히 “세 번째 page 뒤 page4 dispatch 금지”다.
+- **변경/검증:** `tests/test_three_api_paging_recovery.py`만 수정. Fixture 수정 후 최신 paging/recovery targeted 29/29 PASS, combined with normalizer 40/40 PASS. Meta/운영 DB/RAW/Capture 영향 없음.
+- **수정 commit:** `7632788`.
+- **롤백:** 해당 synthetic fixture만 되돌려도 운영 데이터 영향 없음. 코드의 full-page ambiguous/short-terminal 판정은 유지한다.
+
+### B/C 인증 설정 비교 (오프라인) — 2026-10-21
+
+- **정적 호출 방식:** P6 three_api_manual_pilot.py는 P6_META_TOKEN_B/C 및 P6_META_IG_ID_B/C를 현재 프로세스 환경에서 읽고, 페이지당 단일 Graph GET을 Bearer 헤더로 보낸다. RAW collector.py는 --env 파일에서 META_ACCESS_TOKEN·META_IG_USER_ID·선택 META_GRAPH_VERSION을 읽고, URL-encoded batch POST 본문으로 요청한다. 양쪽 Graph 버전 기본값은 v26.0; account/media 요청 필드는 완전히 같지 않다.
+- **기존 실측:** P6-033의 사용자 보고에 B 완료 48페이지와 계정별 HTTP 400 세 건이 함께 있다. 오류 응답은 영속 저장되지 않았으므로 토큰 만료·호출자 불일치·권한·필드 거부·특정 대상 계정 오류 중 무엇인지 원본 코드/하위 코드로 판정할 수 없다. 2207013은 일반적인 missing-user 코드 분류를 위한 후속 처리이지, 기존 세 오류에 확인된 코드가 아니다. C 성공/실패 요청은 기록에서 확인하지 못했다.
+- **오프라인 진단:** raw_v2/three_api_credential_diagnostic.py는 지정 폴더의 .env.api_b·.env.api_c만 읽어 P6 프로세스 환경과 토큰/호출자 ID/Graph 버전을 비교한다. 비밀값과 ID를 출력하지 않고 형식 및 일치 여부만 출력한다. 현재 실행 컨텍스트에서는 두 파일과 P6 B/C 환경값이 없어 비교 결과는 unavailable; 실제 토큰 유효성 및 Meta 권한은 확인하지 못했다.
+- **검증 및 경계:** tests/test_three_api_credential_diagnostic.py 8/8 PASS, tests/test_p6_troubleshooting_handoff_guard.py 4/4 PASS, AST compile check PASS. 같은 P6-033 사건의 영어 요약 heading을 구분해 인덱스 검사와 일치시켰다. 합성 설정만 사용했다. Meta 0회, 기존 RAW·DB·CSV·실패 바인딩 및 quota 상태 변경 없음. 결과만으로 B/C 실수집 재개를 승인하지 않으며, 기존 실패 재전송/65분 hold 해제/85% 제한 우회 금지.
+- **후속:** 진단을 실제 인증파일 디렉터리와 그 PowerShell 프로세스에서 실행해 match/mismatch를 확인한다. match도 active token·scope·app mode를 입증하지 않는다. 별도 승인된 live probe 없이 B/C Meta 권한과 실제 필드 호환성은 미확인 상태로 둔다.
+
+
+### P6-034 — 2026-10-21 · 세 레인 공통 인증파일과 P6 메모리 매핑
+
+- **요청 범위/결정:** 한 세트의 로컬 .env.api_a/b/c에서 RAW와 P6를 설정한다. 공통 파일 규격은 META_ACCESS_TOKEN, META_IG_USER_ID, META_GRAPH_VERSION=v26.0. RAW는 --env로 기존 키를 직접 사용하고, P6의 새 --credentials-dir 로더는 P6_META_TOKEN_A/B/C, P6_META_IG_ID_A/B/C, P6_META_GRAPH_VERSION로 메모리 내 매핑한다. 토큰을 코드·명령행 인자·로그로 복사하지 않는다.
+- **검사:** UTF-8 키 집합, 필수값/형식, 각 토큰과 호출자 ID의 A/B/C 중복, v26.0을 확인한다. 심볼릭 링크 파일은 거부한다. 이는 값의 모양과 설정 일관성만 검사하며 토큰 유효성, 토큰-호출자 실제 연결, Meta 권한/앱 모드/쿼터를 증명하지 않는다.
+- **Desktop 결과:** 요청 경로를 재검사했을 때 기존 .env.api_a/b/c가 없었다. 따라서 기존 인증정보를 백업하거나 재사용하지 않고 빈 템플릿 3개만 생성했다. 파일들은 저장소 밖에 있고 **/.env.api_* Git ignore 규칙을 추가했다.
+- **검증:** test_three_api_env_loader.py 9건 중 8 PASS·심볼릭 링크 생성 제한으로 1 SKIP; manual pilot 12/12; credential diagnostic 8/8; handoff guard 4/4. 총 32 PASS, 1 SKIP. Synthetic/offline만 실행했고 Graph HTTP 0회.
+- **안전/미검증:** 운영 DB·CSV·Capture·quota/bindings 변경 없음. 48페이지 B 이력은 과거 관측이며 현재 B/C 자격증명이나 재개 가능성을 증명하지 않는다. live collection, n8n 연결, main 병합 미실행.
+- **롤백:** 코드/테스트/docs/ignore 변경만 이 브랜치에서 되돌릴 수 있다. Desktop 템플릿은 로컬 설정 파일로 유지하며, rollback 시에도 토큰을 Git에 추가하지 않는다. 코드·테스트 구현 commit: 1646629 (문서 동기화는 후속 commit).
+
+### P6-033 — 2026-10-21 · Live pilot 계정별 HTTP400 후 전체 레인 정지와 Meta error_subcode 유실
+
+- **사용자 실측:** 2026-10-21 KST 분리 파일럿에서 `durable_receipts=79`, `posts=316`, A 완료 31, B 완료 48. 일괄 `--max-pages 50` 호출 도중 27페이지 커밋 후 종료. 기존 terminal HTTP400 요청은 계정 ordinal 32(A), 151/152/201(B)의 총 4건. 해당 요청은 `failed_no_retry`, Capture/response evidence 없음. 원본 사용자 데이터는 GitHub에 전송·수정하지 않음.
+- **확정된 코드 원인:** `three_api_graph_http._read_envelope`가 numeric `error_subcode`를 1,000,000까지만 허용해 Meta의 사용자 없음 하위 코드 `2207013`을 삭제했다. `MetaTransport.send`가 모든 비성공 HTTP 상태에 대해 영속 가능한 account error를 던졌고 `LiveSerialStep`은 실패할 때마다 lane을 최소 65분 영속 중단시켰다. `run_bounded_serial_steps`는 첫 예외에서 전체 batch 종료. 계정 차단을 quota 위반과 동치로 해석하는 것은 근거가 없음.
+- **수정(작업 브랜치 전용):** `three_api_graph_http.py`에서 토큰과 free-form 텍스트는 계속 삭제하고 정수 에러 코드/하위 코드 범위만 1e9까지 확장(`a310065`). `three_api_transport.py`에서 **정확히** HTTP400+code110+subcode2207013인 경우를 분류하고, 신뢰되는 quota 헤더가 있으면 상향 반올림한 0~100%만 실패 메시지에 저장(`3f7e146`); 없는 값은 추측 금지. `three_api_live_serial_step.py`에서 성공 이력이 아닌 **영속 실패 증거 + 원래 binding**과 정확히 일치하는 경우만 `account_failed` 반환, 해당 요청 재호출 없음. 오류 사용량 <85%이면 lane 해제, >=85%면 quota 중단, 없으면 기존 65분 hold 유지(`da8c562`, `2473cf2`). 단순 HTTP400, rate/auth/global, outcome_unknown 또는 누락 증거는 절대 자동 건너뛰거나 quota gate 해제하지 않음. `three_api_manual_pilot.py`는 실패 건수를 보고하며 예외시 read-only 누적 RAW 상태만 표시(`7eecb57`, `029717f`).
+- **테스트 작성:** `tests/test_three_api_live_serial_step.py`의 계정 오류/사용량 20, 85, 누락/미확인 HTTP400/배치 결과 mock 안전 테스트(`f5fb57b`). `tests/test_three_api_transport.py`에 subcode2207013과 x-app-usage 21.3% 반올림/헤더 부재 테스트(`e919425`). 모든 테스트는 synthetic in-memory sender, 실제 Meta 0회.
+- **검증 시점:** 코드 HEAD `a310065`에서 GitHub Actions `P6 Frozen Design Guard` 및 `P6 C Contract Offline` **PASS**. `P6 Runtime Integration Offline` 및 `Three API offline tests`는 장부 갱신 직전 진행 중, 최종 판정은 run completion에서 확인. **실제 사용자의 201번 오류가 코드110/2207013이었는지는 미확인**; 기존 실패를 임의 재시도하거나 소급 수정할 근거 없음.
+- **사용자 재개 지침:** 기존 65분 quota hold가 지난 뒤 명시적인 운영자 reset을 거쳐야 한다. 그 전에 `git pull --ff-only`와 오프라인 suite 통과를 확인. 기존 RAW 316건과 4개 immutable 실패 요청을 유지하고, 추가 실호출은 사용자가 별도 승인한 `--live --confirm-owner-approval` 경로에서만.
+- **범위/롤백:** 지정 branch 코드·offline tests·이 장부만 변경. 동결 설계/3 API·limit4·2 rounds/운영 DB/main 미변경. 오류 분류와 bounded driver를 해당 커밋 단위로 revert 가능; 원본 RAW/DB/CSV 재작성 금지.
+
+### English summary for P6-033 — 2026-10-21 · Meta missing-user 400 classification and serial continuation
+
+- **Observed:** User's isolated live pilot returned HTTP 400 for account-specific jobs; immutable failed requests were retained without Capture, while A/B lanes remained held for 65 minutes. The live code could not distinguish a known missing-user error from other 400 responses and stopped the bounded serial driver on any failure.
+- **Confirmed code issue:** Graph HTTP sanitization bounded numeric error subcodes to 1,000,000; Meta missing-user subcode 2207013 was discarded. Live serial step halted its lane before HTTP and only released it after successful RAW commit; a known account failure always left a hold.
+- **Changes:** `a310065` preserves numeric Meta subcodes up to 1,000,000,000 in the sanitized error. `3f7e146` preserves only a conservative integer usage percentage for the exact Meta code=110/subcode=2207013. `2473cf2`/ `da8c562` handle only the exact persisted terminal account failure, never retry its request, and release the lane only with a verified usage percentage below 85; missing/invalid/high usage remains held. `7eecb57` reports the skipped count. Synthetic regression cases were added at `f5fb57b` and `e919425`.
+- **Verification at code HEAD `a310065`:** P6 Frozen Design Guard and P6 C Contract Offline SUCCESS; prior runs for Three API, RAW v2, and Runtime report SUCCESS, while newer overlapping Three API and Runtime runs were CANCELLED by CI concurrency. **Do not call the entire exact-SHA suite fully verified from this mixed result.** No live Meta calls were made by the assistant; user pilot behavior after this patch remains unverified.
+- **Safety:** Frozen A/B/C identities, limit=4, two rounds, 65-minute cooldown policy, immutable failed bindings, RAW, operating DB, and main branch unchanged. The exception applies only to the exact Meta account-not-found error with persisted failure evidence; all other errors remain fail-closed. No automatic cooldown reset was introduced.
+- **Next:** Confirm the exact-HEAD Windows/Linux tests, then user can pull feature branch and run status diagnostics. The user's existing A/B cooldown holds require their original verified expiry and explicit reset; this patch does not clear old holds. If the account 400 error is a different Meta code/subcode, investigate instead of forcing a skip.
+- **Rollback:** Revert only this branch's code/test commits. Never delete/recreate user pilot SQLite or retry immutable failed jobs.
+
+### P6-032 — 2026-10-21 · Windows pilot status SQLite read-only handle leak
+
+- **Observed:** At commit `db110cdd`, [Runtime #39546089085](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39546089085) Linux complete offline suite **915/915 PASS**, C Contract/Three API/Frozen Guard PASS, but Windows `offline-windows (remaining)` **756 tests / errors=1**. The `test_status_is_read_only_and_reports_lanes_without_meta` temporary-directory cleanup raised `PermissionError [WinError 32]` for `coordinator.sqlite`. Other Runtime jobs 11/11 PASS.
+- **Confirmed cause:** `read_pilot_status` and the companion `read_pilot_failures` used `with sqlite3.connect(...) as connection`. Python's SQLite connection context manager controls a transaction but does **not** guarantee `close()`; a lingering handle prevents temporary SQLite deletion on Windows. This is not a Meta HTTP failure or evidence of user pilot DB corruption.
+- **Fix:** Use `contextlib.closing` around both status and failure diagnostic read-only SQLite connections. Preserve `?mode=ro`, no secrets, and the existing failure/usage semantics. Existing Windows regression exercises a real temp SQLite file and cleanup.
+- **Rejected:** Ignoring Windows cleanup errors, deleting/recreating a user DB, changing quota release, or retrying HTTP requests.
+- **Risk/rollback:** Only diagnostic connection lifecycle; no operating DB access, no live Meta calls, no user RAW/451 changes, no scheduler/main/frozen-design edits. Revert this feature-branch diagnostic-only code change if the new exact-SHA tests show regression.
+- **Verification:** New SHA CI pending. The previous `db110cdd` Runtime overall verdict is **FAIL**, despite 915 Linux PASS; do not report full CI completion from that SHA.
+
+### P6-031 — 2026-10-21 · Terminal-bound recovery SQL / Mock fixture CI regression
+
+- **Evidence:** `5d55a1f8` RAW v2 Actions [#39544886165](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39544886165) returned 3 failures and 3 errors, mainly six tests in `test_three_api_live_serial_step.py`. The new mandatory read `SELECT job_id,request_id FROM job_request_bindings` made `Mock.fetchall()` return non-iterable Mock and increased recorded `db.execute` calls.
+- **Cause:** Incomplete mock DB contract and assertions that counted read-only SELECT as a database mutation. `hasattr(Mock, 'fetchall')` is always true for ordinary Mock objects. This was a regression of test fidelity, not evidence of a Meta transport or live SQLite corruption.
+- **Repair (this branch, SHA to be verified):** Keep a mandatory real SQLite terminal-binding read and remove the ineffective `hasattr` fallback; explicitly model an empty iterable SELECT result in mocked tests; assert SQL mutations separately from reads. Add a temporary real-SQLite test with synthetic failed job 451 and a separate B-lane bound job, preserving 451 binding and stale lease, preventing request dispatch, and keeping the 85% quota hold.
+- **Rejected:** Dropping the binding scan, ignoring scan exceptions, deleting/resetting failed job 451, or retriggering failed HTTP. These bypass the immutable no-resend invariant.
+- **Data safety:** Offline code/test only; the real user's pilot DB, 12 posts, API credentials, quota holds and request 451 are not accessed. Real Meta HTTP 0 calls. Frozen design, scheduler and main remain unchanged.
+- **Post-repair regression evidence:** `d5e51b0` [RAW v2 #39545731858](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39545731858): 915 tests run, 2 FAIL, 0 ERROR; all failures in `test_current_handoff_links_survive_chat_restart` for `HANDOFF.md` and `STATUS.md` because new first-line P6-031 summary omitted mandatory `AGENTS.md` in first 2,000 characters. No terminal-scan/451 recovery test failure reported. Fixed both top-level links, plus ledger index/details consistency, without changing collector behavior.
+- **Verification:** Follow-up exact-SHA CI pending; earlier `d5e51b0` is **FAIL**, not PASS. Roll back via normal feature-branch revert of this repair only, after preserving the terminal exclusion safety invariant.
+
+## P6-030 · 2026-10-21 · 실 Meta 파일럿 12건 보존 및 A 레인 편중 해소
+
+- **실운영 관측 — 사용자 직접 실행·보고:** 공식 계정 CSV 294행 preflight 및 분리된 API A/B/C 자격증명 검증 성공. 명시 승인된 단일 페이지 1회, 이어서 2페이지 수동 실행에서 모두 `page_committed`. pilot SQLite 읽기 전용 결과 `posts=12`, `post_observations=12`, `account_observations=3`. 동일 날짜 coordinator에서 `jobs`: A done=3, B done=0, C done=0. 원본 SQLite/응답은 사용자 PC에 있으며 GitHub에서 직접 감사한 데이터가 아님.
+- **원인:** 기존 `LiveSerialStep.step`가 각 단위 호출에 A→B→C 고정 순회하여 A의 신규 페이지1 작업이 남는 동안 B에 기회가 없었음. 동결 배정에서 B는 151~294 계정의 page1, C는 page2 선행 커서가 확보된 계정에만 dispatch 가능. 세 토큰의 등록 자체는 세 API의 실사용 증거가 아님.
+- **수정 (`eae4ce77f92c21540f43f8953e6674a6ffa72914`):** coordinator에 읽기 전용 `dispatch_lane_order(now)` 추가. 기존 quota/lease/immutable binding/cursor proof를 모두 존중하는 `dispatch_ready_diagnostics`로 후보를 제한하고, `dispatch_diagnostics`의 레인별 완료 페이지 수 오름차순으로 선택. 동률은 A/B/C 순서, 작업 자체의 lane·계정·페이지 재배정 없음. 별도 스케줄러, HTTP 자동 재시도 없음.
+- **오프라인 회귀:** 기존 저장소의 mock API 송신 두 호출/별도 프로세스 재개 시 예상 레인을 A→B로 변경. C는 A page1 유효 cursor가 있을 때만 후보, B가 quota로 차단되면 C/A 선택, 882 원래 jobs와 page evidence 유지 시험 추가. **CI (`eae4ce77`):** 3 API, C 계약, 동결, RAW v2 성공; Linux Runtime 성공, Windows 일부 통과/나머지 진행 중으로 최종 전체 성공은 별도 확인 필요.
+- **범위/미검증:** 사용자의 실제 RAW 12건과 로컬 credential은 GitHub에 업로드하지 않음. 코드 변경은 독립 개발 브랜치에만 반영. 사용자가 `git pull --ff-only` 하기 전까지 로컬 실행기는 구버전임. B/C 실 Meta 호출, 294계정 전수·365일 백필, 운영 자동화는 아직 미검증이며 호출 시 사용자 수동 승인·감사 필요. 실험 실패/unknown 전송은 재시도하지 말 것.
+
+## P6-029 · 2026-10-21 · 첫 실수집 파일럿 연결 및 Business Discovery ID 오판
+
+- **문제:** 직렬 수집기가 오프라인 staging evidence만 수용해 원본 Capture/RAW가 실제 커서와 연결되지 않았음. 별개로 Business Discovery 응답의 조회 대상 `business_discovery.id`를 요청 URL의 API 호출자 IG ID와 동일해야 한다고 검사해 정상 Meta 응답을 실패로 오판할 수 있었음.
+- **구현:** `raw_v2/three_api_verified_page_evidence.py`에서 원본 Capture와 영속 RAW receipt를 검증한 후 coordinator 커서를 확정. `three_api_serial_bootstrap.py`로 직렬 runner 구성, `three_api_manual_pilot.py`로 기본 offline 294계정 검증/별도 승인 1페이지(limit=4) 경로 제공. 각 SQLite DB 격리, 비밀값 비노출, no-resend crash recovery 회귀 테스트 추가.
+- **검증:** `ee91ca96`에서 Linux 전체 **902/902**, Windows Runtime 11/11, 3 API/C 계약/동결 검사 모두 성공. Business Discovery ID 계약 2곳 수정 `810b6b8` + `057fc785`, 잘못된 테스트 2건을 사용자명 불일치 테스트로 전환 `a6f1c4f` + `ee91ca96`.
+- **현재 상태:** 원본/RAW/커서의 **오프라인 연결 검증 완료**, 실제 Meta HTTP 호출·운영 DB 변경·main 병합·scheduler 활성화 **없음**. 최신 진단/테스트 `6318a3e`/`cc6ccdd` 이후 CI 재확인 필요. 실 Meta 수집 성공을 주장하지 않는다.
+- **다음:** 공식 로컬 계정 CSV로 preflight, 사용자의 별도 명시 승인 후 1페이지 실수집과 영수증 확인, 이어서 365일 history/backfill 검증. 동일 계정 반복수집의 원본 불변/관측 이력은 지속 확인.
+
+## 빠른 탐색 — 사건 색인
+
+| ID | 분야 | 사건·결정 | 현재 결론 |
+|---|---|---|---|
+| P6-090 | 오프라인 shard 3-way 계약 | stale `remaining` 단일 그룹 주장, 경로 필터 누락 | `74aa66d`; focused 14/14, Windows 3 groups PASS/SKIP; `8763c65` 6/6 core CI SUCCESS |
+| P6-094 | STATUS handoff pointer regression | Windows remaining 1/382 failure; first-2,000-character ledger pointer absent | `046ea88` static pointer check PASS; new-SHA CI pending |
+| P6-093 | HANDOFF/STATUS current index pointer | AGENTS.md 링크가 first-2,000-character guard 밖으로 밀림 | `fa4a023`; focused guard 4/4, same-SHA 6/6 core CI SUCCESS |
+| P6-092 | P50 다음날 최신과거 분리 회귀 픽스처 | CaptureJournal 잘못된 context-manager 사용으로 WinError32 정리 실패 | `ff13186`; focused 7/7, P50 143 PASS/1 platform SKIP; final SHA 6/6 CI SUCCESS |
+| P6-091 | P50 active/backup 상태 불일치 | 운영 재개 증거 미확인; 원인 OPEN | read-only only; canonical DB/backup 확인 후 owner 판단 필요 |
+| P6-089 | P50 21·22일 종료·quota/CI | 별도 원본·일별 164/1,140, 쿼터 안전 경계, P6-089 색인 누락 | 보류 유지·읽기 전용 점검 대기 |
+| P6-088 | P50 수동 3가지 인수검증 | Windows PowerShell, RAW 재시작, 85%·커서·HTTP 불명 안전 정지 | Windows 141/141 PASS; synthetic only |
+| P6-087 | P50 수동 history | PowerShell 원클릭, Capture/RAW 복구, 50계정 공정 순환, 실 Meta 미호출 | 합성 CI PASS; Windows·실 HTTP 미검증 |
+| P6-086 | P50 history 커서 | 앵커 없는 NULL cursor 발행 금지 | 안전 차단 |
+| P6-085 | P50 v3 안전·KST | 테스트 SQLite 핸들, KST cutoff 판정 보정 | 실 HTTP 미검증 |
+| P6-084 | P50 체크포인트 | RAW·Capture 확인 뒤 상태 전이 | 저장 계약 회귀 |
+| P6-083 | Windows fixture | WinError32 잠긴 DB connection 자원 정리 | 재실행 필요 |
+| P6-082 | P50 회귀 | Windows 18 tests 오류 추적 | 일부 fixture 수정 |
+| P6-081 | P50 긴급 수동 실행 | 기존 latest-only 150 jobs 병목 규명 | P6-087 실행기 추가 |
+| P6-080 | n8n 저장 검증 | read-only receipt baseline/delta, 레인 count를 결과·알림으로 전달 | 23/23 focused PASS; actual pilot readback pending |
+| P6-079 | n8n 결과·승인·알림 연동 | live opt-in, structured progress/attention, redacted webhook; 16/16 PASS | inactive export; runtime import/webhook pending |
+| P6-078 | B/C quota 재개 gate | post-cooldown Capture evidence or explicit dashboard attestation; C also requires no-competing-traffic confirmation | B/C not resumed; 69/69 focused offline PASS |
+| P6-077 | 진단/민감정보 | read-only 실패 진단에 숫자 오류 코드·사용률만 노출 | 문자열 원문/재시도 불가, 65/65 PASS |
+| P6-076 | lane/auth 진단 | A code 110/2207013; B usage proof missing; C usage 85%; local credential files structurally valid | A 4건 no-retry; B/C hold 유지; 운영 tick은 자동 검토 차단 |
+| P6-001 | 개발운영 | 병렬 작업·웹 채팅 사용량 소진·원복 어려움 | 격리 브랜치/워크트리·복원지점·인수인계 필요 |
+| P6-002 | 인수인계 | 기획/계약은 Git에 있으나 STATUS/HANDOFF 미동기화 | 두 문서 동시 갱신 필수 |
+| P6-003 | Meta 사용량 | 배치 수집은 빨랐지만 API #4/시간 한도 대기 병목 | 속도보다 예산/쿨다운이 제약 |
+| P6-004 | Meta 데이터 | 일부 Business Discovery username/미디어 타입 조회 실패 | 누락을 성공·VIDEO를 REELS로 단정 금지 |
+| P6-005 | 수집 설계 | 병렬 3레인 의존성과 단계별 커서·RAW | 데이터 안전성은 직렬에서도 필수 |
+| P6-006 | 데이터 계약 | NULL/미요청/빈응답/변경없는 재관측 처리 불일치 | 보존/관측/분석 의미를 분리 |
+| P6-007 | CI | Python unittest import 경로 실패 | discovery 환경 재현 및 검증 |
+| P6-008 | CI·RAW | datetime 객체를 문자열 인자로 사용한 테스트 실패 | 호출 계약에 맞춘 회귀 수정 |
+| P6-009 | CI | Windows 전체 테스트 180초 watchdog 초과·후속 run 취소 | shard 세분화 및 성공 SHA 명시 |
+| P6-010 | 전수검증 | 294번째 계정 누락·재시작·중복 reconcile | 불완전 커버리지 완료 처리 금지 |
+| P6-011 | CI 회귀 | API B 테스트 예상 RAW 4건 vs 실제 1건 | fixture/expected cardinality 일치 |
+| P6-012 | 아키텍처 | 사용자 승인: 3 API 호출 직렬화 | 오프라인 수동 경로만 추가, 실 HTTP 미전환 |
+| P6-013 | 변경 관리 | 잦은 커밋이 in-progress CI를 cancel | 완료 전 CI PASS 주장 금지 |
+| P6-014 | 교대/지식보존 | 사건 기록은 있었으나 새 AI 작업자에 대한 명시적 의무 누락 | AGENTS + 작업 프로토콜에 기록 의무 명문화 |
+| P6-015 | 직렬 회귀/CI | 재시작 테스트 fixture 기본값 오인으로 실제 1건 저장 vs 누락 기대 | 명시적 빈 fixture를 재시작에도 전달 |
+| P6-016 | Catch-up 직렬 | front와 catch-up의 서로 다른 API 제한 상태 명칭으로 fallback 누락 위험 | 두 제한 상태 모두 다음 레인으로 이동 |
+| P6-017 | 동시 기록 충돌 | 두 작업자가 같은 P6-016 사건 번호로 각각 기록 | 사실 통합 + 중복 감지 검사·번호 할당 규칙 |
+| P6-018 | 직렬 성능 | 85% 차단 레인을 건너뛸 때마다 294계정 복구·상태 검사 반복 | 1회 재조정 후 최대 1개 합성 페이지 실행 |
+| P6-019 | 직렬 안전성 | 여러 프로세스가 각자 step_serial을 실행할 수 있음 | synthetic 단계에 OS 프로세스 공통 잠금 추가 |
+| P6-020 | 계약 직렬 경계 | OS 잠금만으로는 계약 기반 요청 예약과 오프라인 전송을 한 구역으로 묶지 못함 | fixture-only bridge·잠금·예약 검증 분리 |
+| P6-021 | CI·인수인계 | 최신 오프라인 Runtime 실패: STATUS/HANDOFF 상단 AGENTS 링크 누락, Windows 8분 watchdog | 문서 링크 복구; Windows orchestrator 실행시간 별도 추적 |
+| P6-022 | Windows CI | 294계정 roster 5개 테스트 480초 초과 | 2/2/1 샤딩, SHA 5dfae40 Runtime 12/12 PASS |
+| P6-023 | 직렬·영속 통합 | fixture-only 직렬 전송 후 Capture/RAW·cursor 확정에 별도 잠금 경계가 없었음 | captured-only page commit을 동일 OS gate에 연결; 8개 격리 SQLite 통합 회귀, CI 판정 대기 |
+| P6-024 | 단일 진입점 설계 | fixture 송신과 페이지·커서 확정을 서로 다른 OS 잠금 구간에서 처리 | 단일 잠금 run_fixture_page_once, 최초 송신/기존 바인딩 replay 분기 및 A/B/C 합성 회귀; 신규 CI 판정 대기 |
+| P6-025 | 직렬 작업선택·사용량 | API 레인 선택과 fixture 송신·정확한 사용량 증거/복구 연결 부족 | 오프라인 job lease + A/B/C turn + pre-send durable quota hold + read-only 진단; 17개 합성 회귀, 신규 CI 판정 대기 |
+
+| P6-026 | 영속 복구·쿼터 | 85% 차단 시 기존 Capture의 HTTP 없는 복구까지 lease 거부 | bound recovery만 quota gate 우회, 신규 dispatch는 차단; CI 미확정 |
+| P6-027 | CI 회귀 | quota 중 bound-only 복구·C page2 선행 조건의 구형 테스트 기대 충돌 | 오프라인 테스트 4건 정정, 새 SHA CI 재검증 필요 |
+| P6-036 | 회귀 fixture | page3의 짧은 응답을 후속 커서가 있는 page-limit 상태로 잘못 만들었음 | fixture를 4개+after로 수정, paging/recovery 29/29 PASS |
+| P6-037 | 문서 인수인계 가드 | 신규 사건 상세는 추가했으나 장부 색인표에서 P6-035 누락 | 색인 보완, 후속 guard 4/4 PASS; 전체 재실행 미수행 |
+| P6-038 | 전체 오프라인 재검증 | P6-037 수정 이후 전체 회귀 결과 및 cross-store 근거 현황 미갱신 | 전체 955 selected exit 0, targeted 40/40; 97 links stored digest 일치, 재계산 및 실제 repair 미실시 |
+| P6-039 | Bounded pilot 중단·인수인계 | C page2가 Capture에 저장됐으나 RAW 미처리; n8n endpoint 미구성 | A durable 2 pages; C capture-only recovery later completed under P6-040; n8n exports inactive |
+| P6-040 | RAW Capture replay 오판 | sqlite3.Row가 tuple과 값이 같아도 직접 비교에서 unequal, 기존 상태를 digest collision으로 거부 | compare `tuple(row)` for post/account states; C capture-only replay succeeds; full offline 956 selected exit 0 |
+| P6-045 | 자동 수집 처리량 | 검증 후에도 n8n tick이 1페이지만 처리해 진행이 지연됨 | 페이지당 quota/cooldown gate를 유지하며 tick 상한 3으로 상향; 76/76 offline PASS, 실제 스케줄 tick 증거 확인 |
+| P6-046 | 커서 무효화 재앵커 | 복구 회귀가 새 커서로 재개할 연결 흐름을 직접 고정하지 않음 | 정상 커서, `resume_required`, 최신 ID 겹침, replacement cursor 및 3-page 제한 회귀 추가; recovery 16 tests |
+| P6-048 | 커서 오류 런타임 분류 | HTTP 비성공 응답 메시지 제거로 invalid-cursor와 일반 400이 같은 진단으로 남음 | 원문 미보존 명시 문구 분류, durable `cursor_invalid`, read-only `resume_required`; 155 offline PASS; live recovery 미구현 |
+| P6-049 | 전체 오프라인 회귀 및 현재 진행 | 직접 파일 실행에서 저장소 루트 `src`를 import하지 못해 하나의 test module 오류 | `python -m tests.run_offline`: 987 run / 986 PASS / 1 SKIP / 0 FAIL, exit 0; A73/176 receipts; B/C usage hold 유지 |
+| P6-050 | 예약 A lane 진행 | 전체 테스트 완료 후 실수집이 실제 계속되는지 새 상태 확인 필요 | 03:10 KST read-only A73→76 / receipts176→179 / observations704→716; B/C hold 및 2 failed_no_retry 유지 |
+| P6-051 | n8n DB·예약 실행 검증 | 표준 n8n 프로필 조회로 P6 활성 상태를 잘못 판단 | 격리 runtime DB에서 P6 active + 03:25 success; 03:26 A85 / 188 receipts; A usage 21%, B/C 증거 없음 |
+| P6-052 | 예약 진척·B 실패 근거 | 격리 n8n active는 확인했으나 B HTTP400의 원인 증거와 현재 상태 갱신 필요 | 03:35 n8n success, A91/194 receipts, usage 18%; B 과거 48 P6 pages + 4 HTTP400 generic sanitized errors; API 방식 차이만 확인, root cause 미확정 |
+| P6-053 | 예약 A HTTP400 | A 예약 tick에서 새 계정 단위 HTTP400 발생 | 03:50: 2 page commits + 1 no-capture/no-response failure; A99/202 receipts, 3 failures all `failed_no_retry`, latest usage 20%; no retry |
+| P6-054 | 예약 A lane 진척·오류 | A 예약 tick에서 네 번째 계정 단위 HTTP400 발생 | 04:10: 2 page commits + 1 new no-evidence failure; A110/213 receipts, 4 failures no-retry, usage 28%; B/C usage holds 유지 |
+| P6-055 | A lane 예약 진척 | A 수집 도중 추가로 진행된 최신 안전 상태를 기록할 필요 | 04:30 n8n success, A122 / 225 receipts / 900 observations / 716 unique; usage 32%, 4 failed_no_retry, B/C holds unchanged |
+| P6-056 | A lane 예약 진척 | 최신 04:50 예약 tick·쿼터 상태 갱신 | n8n success, A134 / 237 receipts / 948 observations / 764 unique; usage 35%, 4 failed_no_retry; B/C holds unchanged |
+| P6-058 | n8n 진척 정체·B/C quota gate | 05:50 예약 실행은 success이나 신규 페이지 없음; B/C fresh usage evidence 부재 | 249 receipts / 996 observations / 812 unique; A146, B/C0; guarded B preflight refused; no reset/live request |
+| P6-059 | 예약 실행 정체 재확인 | 05:55 이후 새 실행·수집 진척 없음, n8n 프로세스 미확인 | 146 captures; B resume gate refused; no mutation/request; scheduler continuation unverified |
+| P6-060 | 예약 tick success·수집 무진척 구분 | 06:00/06:05 실행 success이나 receipt/state 변화 없음 | 146 captures unchanged; B gate refused; no mutation/API; sanitized tick-result diagnosis pending |
+| P6-061 | no_ready_work 원인·telemetry 수정 | A=0 eligible, B/C held; step attempt no longer conflated with Meta request | n8n status no_ready_work, 0 committed, 0 account failures; 8/8 adapter tests; no HTTP/DB mutation |
+| P6-062 | ENV 구조 검증·권한 미검증 구분 | A/B/C files structurally valid, unique, v26.0 | offline loader PASS; token validity/permissions not checked; no Meta request |
+| P6-063 | C lane 증거확인 재개·실제 tick 진척 | safe prior usage 66%, cooldown elapsed; only C gate released | scheduled tick committed 3 pages; new safe usage 0%; total 252 receipts; B/A guards preserved |
+| P6-064 | C lane 연속 예약 수집 진척 | 06:45 and 06:50 ticks each committed 3 pages; usage max 2% | total 255 receipts / 1020 observations / 831 unique; C=6 done, B held |
+| P6-065 | C lane 3회 연속 예약 수집 | 06:45/06:50/06:55 ticks committed 9 C pages; usage max 4% | total 258 receipts / 1032 observations / 838 unique; C=9 done, B held |
+| P6-066 | C lane 4회 연속 예약 수집 | 06:45–07:00 ticks committed 12 C pages; usage max 5% | total 261 receipts / 1044 observations / 849 unique; C=12 done, B held |
+| P6-067 | C lane 7회 연속 예약 수집 | 06:45–07:15 ticks committed 21 C pages; usage max 13% | total 270 receipts / 1080 observations / 877 unique; C=21 done, B held |
+| P6-068 | C lane 10회 연속 예약 수집 | 06:45–07:30 ticks committed 30 C pages; usage max 20% | total 279 receipts / 1116 observations / 910 unique; C=30 done, B held |
+| P6-069 | 커서 무효화 재연결 인수검증 | 신규 요구가 기존 planner/runtime 구현과 오프라인 사례로 충족되는지 확인 | 60 targeted + 4 handoff PASS; full suite 987 PASS / 1 SKIP / 0 FAIL; live recovery 미실행 |
+| P6-070 | 야간 예약 수집 진척 | read-only snapshot confirms C +30 pages since 07:31; B held and four A failures remain no-retry | 309 receipts / 1236 observations / 1017 unique; no Meta call or DB write by status check |
+| P6-071 | n8n 예약 경로 검증 | active P6 workflow의 08:35 trigger success가 C +3 page / +12 observations와 일치 | 1 active + 2 same-name inactive; full collection incomplete; no assistant Meta call |
+| P6-072 | 교차 채팅 인수인계와 emergency 50 경계 | latest emergency history is separate from P6; quota-bucket independence unverified | Preserve separate stores; no simultaneous dispatch or gate reset without quota proof |
+| P6-073 | 예약 tick no-progress 재확인 | 09:00 wrapper success but no page commit; A eligible 0, B/C lanes held | C 85% usage stop/cooldown to 09:45 KST; no reset or live call |
+| P6-074 | 09:05 예약 tick no-progress 재확인 | wrapper success, pilot counters unchanged from 09:00 | A 0 eligible; B/C held; no assistant Meta call |
+| P6-075 | n8n runtime process 부재 — OPEN | active DB row but latest trigger 09:05; no matching process at 10:36 | Cause unknown; no restart/deploy/Meta call; collection halted |
+| P6-057 | 커서 무효화 후 위치 복구 | fail-closed resume_required, 새 페이지 ID overlap, 중복 관측/분석 dedupe와 3페이지 제한 증명 | 오프라인 recovery/reanchor 검증 26 PASS; 실제 Meta 재앵커 미실행; 최초 full suite의 handoff index 누락 수정 |
+| P6-047 | 예약 실행 진행 확인 | n8n 예약 작업의 지속성과 현재 레인 게이트를 다시 확인할 기록이 없음 | 02:10 KST read-only 상태 A 35→41, receipts 138→144; A 진행, B/C usage hold 유지, 실패 요청 미재전송 |
+| P6-044 | n8n KST tick 연결 | 일정판단은 있었으나 로컬 n8n→bounded P6 runner 경로가 없었음 | read-only gate + 명시적 live 플래그 + 활성 workflow; 76/76 offline PASS, 1회 manual 및 scheduled live 성공 |
+| P6-043 | 날짜 전환 시 quota hold 초기화 위험 | manual pilot 날짜별 coordinator가 새 `lanes` 행을 기본 unhalted로 생성 | 새 daily plan seed 전 최신 prior coordinator의 halt/reason/cooldown을 read-only로 승계; malformed state fail-closed; 13/13 manual-pilot tests PASS |
+| P6-042 | 무효 커서 재앵커 인수인계 | 기존 3-page planner가 이미 구현돼 있었으나 신규 요구를 top-level handoff/테스트 인덱스에 명시하지 않음 | invalid cursor → resume_required → known-ID overlap → replacement cursor 오프라인 회귀 추가; production runner/live recovery 미구현 |
+| P6-041 | Bounded live progress / n8n setup | A/B/C gates diverged after safe pilot; n8n CLI/runtime unavailable | bounded A batch 3/3 committed, P6 total 103/412; B/C holds unchanged; Docker service start denied |
+| P6-035 | 페이징·복구 | after-only cursor가 정상 종료 처리에서 소실 | cursor candidate 보존·49건 read-only 계획·3-page ID 재앵커 |
+| P6-034 | A/B/C 인증 설정 | RAW META_*와 P6 P6_META_* 형식 분리 | Desktop 3개 빈 파일 + 오프라인 메모리 매핑 로더; 실 유효성·권한은 미검증 |
+| P6-033 | Meta 계정별 HTTP 400 | P6 pilot에서 B 48페이지 성공과 계정별 400 실패가 공존, 실패 응답 본문 미보존 | 기존 실패의 토큰·권한·대상 계정 원인 미확정; 후속 코드는 미래 subcode 진단만 개선 |
+| P6-032 | Windows 임시 파일 핸들 | 읽기 전용 SQLite context manager의 미닫힘으로 WinError 32 | 연결 명시 종료, 새 SHA CI 검증 대기 |
+| P6-031 | CI SQL Mock·인수인계 | terminal 바인딩 SELECT Mock 반환과 상단 AGENTS 링크 누락 | 코드/테스트 수정 후 RAW 915 중 문서 가드 2건 FAIL; 상단 링크 복구 및 전체 SHA CI 재확인 |
+| P6-028 | CI 사전검증·인수인계 | 294계정 검증 도입 뒤 구형 무효 fixture와 문서 링크 누락으로 Linux/Windows 9건 실패 | fail-closed 검사 순서·모의 명단·인수인계 링크 복구, CI 재검증 대기 |
+
+## 사건별 상세
+
+### P6-028 — 공식 명단 검사 도입 뒤 모의 fixture와 인수인계 CI 회귀 (2026-10-21)
+
+- **증상·증거:** Runtime Actions #39529205568 Linux 870개 테스트 중 failures=7/errors=2; Windows remaining 동일 9건. RAW #39529165958도 실패. 실 Meta/운영 DB 영향 없음.
+- **확정 원인:** 294행 계정 key/username/ordinal 필수검사 후 기존 recovery/no-send 테스트 3건이 빈 객체 294개를 계속 사용하여 후속 게이트를 실행하지 못함. STATUS/HANDOFF 상단 AGENTS.md 링크 밀림, 프로토콜에서 채팅방 인수인계 표현 누락.
+- **수정:** 264c414: A/B/C 및 offline evidence 게이트 우선 확인. 778c5b1: mock recovery/dispatch의 합성 294개를 유효하게. 1db225e: 채팅방 후임자 안내 복구. e236d86/d77bf1d: STATUS/HANDOFF 필수 링크 상단 고정. e3b04a9: RAW/cursor 확정 실패 시 lane halt 유지하는 행동 테스트 추가.
+- **검증:** 최신 SHA의 전체 Linux/Windows, RAW v2, Three API, C Contract, Frozen Guard 완료 전 PASS 미주장. 코드 저장과 CI 성공은 구별.
+- **보존:** 동결 3 API/limit=4/2라운드/85%/65분/원본 불변 유지. 실 Meta 호출·운영 SQLite·스케줄러·main 병합 없음.
+- **남은 리스크:** 운영 Evidence/RAW 저장 포트와 365일 backfill 미연결. fail-closed staging 차단 유지.
+- **롤백:** 기능 브랜치에서 위 변경만 개별 revert, 운영 CSV/RAW/DB를 건드리지 않음.
+
+### P6-027 — P6-026 쿼터 복구 정책 변경 뒤 구형 테스트 기대값 충돌 (2026-10-21)
+
+- **실패 증거:** SHA `10e4b6e8ae517302d3620e3ae4f8006eb39a27dd` [RAW v2 #39526851689](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39526851689)와 [Runtime #39526867524](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39526867524) Linux/Windows에서 아래 4개 주장 중복 실패. RAW 4 FAIL; Runtime Linux 4 FAIL / Windows 일부 실패. 특정 workflow의 pending/cancelled 상태와 구분.
+- **기대/실제 ①:** `test_recovery_ready_diagnostics_are_read_only_and_gate_aware`, `test_recovery_respects_lane_halt_and_verified_cooldown`는 quota 85% 뒤 bound recovery = 0/None 기대했으나 현재 `P6-026` 구현은 1/leased. 정책상 **Capture-only 로컬 복구 허용·신규 HTTP dispatch 금지**가 올바름.
+- **기대/실제 ②:** `test_transport_unknown_outcome_never_clears_durable_usage_hold`는 bound 후보 수 0 기대, 실제 1. 진단값은 **영속 binding과 lease 자격의 수**이지 durable Capture 존재 또는 RAW replay 성공의 증거가 아님. Missing capture는 별도 fail-closed로 남기며 자동 재전송하지 않음.
+- **기대/실제 ③:** `test_quota_halt_on_one_lane_preserves_other_lanes`에서 B 사용량 차단 후 A와 C가 동시에 first-page lease를 받는다고 기대했으나 실제 C=None. 동결 레인 배정상 C는 page2 담당이므로 A/page1 receipt·cursor 없이는 정상적으로 대기해야 함. A lane 신규 dispatch 가능 여부와 C predecessor readiness를 분리 검증.
+- **선택 및 대안:** (A) 정책에 맞춘 네 테스트 정정 **채택**. (B) P6-026 quota recovery 코드를 구형 기대에 맞게 롤백하면 동결 설계의 HTTP 없는 복구와 충돌하므로 **기각**. 설계·API 호출·운영 DB·스케줄러 변경 없음.
+- **수정 범위:** `tests/test_three_api_job_binding.py`, `tests/test_three_api_serial_selection.py`, `tests/test_three_api_live_serial_step.py`. 복구 시 신규 송신 차단과 C 선행 커서 검증을 유지.
+- **검증 계획:** GitHub Actions 최신 HEAD의 RAW v2, Runtime Linux/Windows 12개 shard, Three API, C Contract, Frozen Guard를 각각 판정. **기록 시점 CI 미검증**; 코드 저장을 성공으로 대체하지 않음.
+- **보존·복구:** live Meta 0회, 운영 `collection.sqlite`·CSV·원본 미변경. 실패 시 GitHub 기준 부모 SHA `10e4b6e`에서 이 테스트/문서 변경만 revert. 운영 데이터 롤백 불필요.
+- **재발 방지:** quota halt 이후 dispatch/recovery 기대를 분리하고, 294계정 page2/3 lease 검증 시 upstream page receipt·cursor를 먼저 준비.
+
+
+### P6-001 — 병렬 AI 작업 후 한도 소진 및 원복 위험 (2026-10-19)
+
+- **징후:** 사용자 보고에 따르면 작업반장+A/B/C 병렬 진행 중 웹 ChatGPT 사용량 제한으로 다수 작업이 중단되었고, 통합 과정의 상태와 원복 위치 파악이 어려웠음.
+- **원인 구분:** 여러 작업 세션이 서로 다른 상태를 추적하고 있었음은 보고된 사실. 개별 Git 파일 충돌의 정확한 원인은 여기서 전부 재현하지 않았음.
+- **당시 교훈:** 작업자별 branch 또는 Git worktree 격리, 공통 기준 SHA/상태 저장, 통합 전 CI와 복원 tag·SHA 확보, 가역적 통합, 메인 원본 미변경. `main` 전체를 무조건 지우거나 브랜치 일괄 삭제하지 말 것.
+- **증거:** 기존 [HANDOFF](../HANDOFF.md), [STATUS](../STATUS.md) 및 Git 이력. **사용자 보고 기반** 사건으로 인과의 상세는 미검증.
+- **재발 방지:** 단일 담당이면 불필요한 동시 작업을 피하고, 병렬 작업 시 매 작업자 branch·검수 책임·충돌 복구 순서를 명시.
+
+### P6-002 — 새 채팅방이 최종 계획을 복원하지 못함 (2026-10-19)
+
+- **징후:** 3 API 설계/계약 내용은 별도 파일로 커밋됐으나 `HANDOFF.md`·`STATUS.md` 상단이 따라가지 못해 새 작업자가 최신 계획을 놓칠 위험.
+- **근거:** [AGENTS.md 11~14항](../AGENTS.md)에서 이 실패를 명시적으로 기록함.
+- **조치:** 중요 변경 시 두 문서를 같은 세션에 갱신하고 상단에 구현/검증/미구현/금지 범위를 구분.
+- **재발 방지:** 전문 기록은 이 ledger에, **현재 행동에 필요한 짧은 색인은 STATUS/HANDOFF 상단**에 남김. 메인 병합 없이 feature 브랜치만 갱신했으면 그 사실을 표시.
+
+### P6-003 — Meta 배치가 빨라도 쿼터·1시간 대기가 병목 (2026-10-15~21)
+
+- **징후:** 사용자 실험에서 Meta Batch API는 빠르게 동작했으나 시간 기반 제한 및 Meta error #4 경험. 게시물 20건→5건→최종 `limit=4`로 조정해 API 사용량을 관리.
+- **확인된 정책:** 294계정, A/B/C 호출 주체 3개, `limit=4`, 2 daily rounds, 계정당 최대 3페이지, usage 85% 중단과 65분 최소 제약. [동결 설계](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md).
+- **아직 모르는 것:** 인증 주체별 쿼터가 실제로 독립적인지, 운영 계정 전수 조회 평균시간, 65분 뒤 자동 재개 가능 여부. 속도 산술을 실운영 보장으로 취급하지 않음.
+- **교훈:** HTTP 병렬성으로 해결할 문제가 아닐 수 있다. 기록해야 할 지표는 API별 사용량, ready_at, 성공/실패, 신규/중복, cursor 연속성, 실제 wall time. 반복 #4 즉시 재시도 금지.
+- **후속:** 유효한 quota-group 정책을 확인하기 전에는 독립 API 쿼터를 가정해 전역 중단을 무단 완화하지 말 것.
+
+### P6-004 — Business Discovery 조회·미디어 유형 경계 (2026-10-20)
+
+- **징후:** 사용자 보고상 특정 사용자명 조회에서 Meta OAuthException code 110, subcode 2207013 (`Invalid user id`) 발생; 일반 VIDEO 게시물 테스트 표본이 충분하지 않고 릴스와 일반 게시물의 응답 가능성 차이가 있었음.
+- **조치/판단:** 실패를 게시물이 없다는 뜻으로 확정하지 않는다. IMAGE/CAROUSEL/VIDEO/REELS 유형, 미디어 URL/썸네일/게시물 permalink, reels view count와 미반환 사유를 구별해 데이터 계약에 보존.
+- **증거:** 사용자 보고 및 [동결 설계의 미디어 요구](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md). 전체 유형에 대한 실제 API 성공률 검증은 **미완료**.
+- **재발 방지:** `VIDEO`라고 자동 `REELS` 판정하지 말고, 조회 실패·필드 미반환은 NULL/상태로 남긴다. 미디어 다운로드/프레임 분석은 별도 n8n 단계.
+
+### P6-005 — 세 레인·커서·원본 보존 경계 (2026-10-20)
+
+- **징후:** page2/3은 직전 페이지의 durable receipt와 검증된 cursor가 있어야 하며, 수집 후 원본/체크포인트와 별도 SQLite 커밋을 조정해야 한다.
+- **결정:** [최종 설계](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md)의 영속 단계 `JOB_BOUND → INTENT_DURABLE → RESPONSE_DURABLE → PROJECTED_WITH_RECEIPT → PAGE_COMMITTED → ACKED` 유지.
+- **근본 제약:** transport를 직렬화해도 **서로 다른 DB 트랜잭션·재시작 복구·중복 방지·커서 무결성 문제는 남는다.**
+- **재발 방지:** 원본/receipt 우선, HTTP 없이 replay, unknown outcome 자동 재전송 금지. 증거 없는 성공·coverage 주장 금지.
+
+### P6-006 — 데이터 타입과 관측 의미의 불일치 (2026-10-20)
+
+- **징후:** 설계 검토 당시 `like_count=None`이 계약상 NULL 가능인데 일부 normalizer에서 잘못된 engagement 수치로 거부하는 불일치, followers_count/media_count 요청/수집의 불일치, 미디어 순서 변화 충돌 등이 확인됨.
+- **증거:** [동결 설계 3절](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md#3-목표-정합성과-실제-차이) — 당시 정적 검토·합성 재현 기준.
+- **안전 기준:** `0`/`NULL`/미반환/미요청/실패 구별; 게시시각과 관측시각 별도; 동일 조회 다시 성공해도 별도 관측 기록; URL만 변경됐다고 새로운 디자인 아님.
+- **검증 상태:** **당시 이슈 기록**이며 현재 모든 계층에서 수정·운영 검증됐다는 선언이 아님. 실제 소스·테스트별 확인 필요.
+
+### P6-007 — unittest discovery import 실패 (2026-10-20)
+
+- **징후:** RAW offline GitHub Actions `39399759236`에서 `ModuleNotFoundError` 발생.
+- **원인/수정:** 테스트 discovery 실행 환경 import 구성 오류. 기록상 수정 커밋 `57b150d`, `6d80902`.
+- **증거:** [STATUS.md 해당 CI 항목](../STATUS.md)와 run `39399759236`.
+- **재발 방지:** 단일 파일 직접 실행뿐 아니라 CI와 동일한 unittest discovery 경로로 실행; import 경로를 test-local 우연성에 의존하지 않도록 관리.
+
+### P6-008 — SQLite RAW mirror stage_page 타입 불일치 (2026-10-20)
+
+- **징후:** Three API CI `39401729620`, `39401748522` 실패.
+- **확인된 원인:** 테스트가 `raw_mirror.stage_page`에 `datetime` 객체를 전달했으나 해당 인터페이스는 ISO 날짜 문자열을 요구.
+- **조치:** 계약에 맞춘 수정 `a041893`; 이후 반복 reconcile 관측 중복 방지 `aa16653`, stage fixture 상충 재등록 차단 `17774e9` 회귀 기록.
+- **증거:** [STATUS.md](../STATUS.md) 해당 2026-10-20 CI 복구 항목.
+- **교훈:** 테스트 fixture도 production API/DB 경계와 동일한 인자 타입 계약을 지켜야 한다. 실패한 CI만으로 수집 로직에 버그가 있다고 단정하지 않음.
+
+### P6-009 — Windows shard 실행시간 / CI 취소 (2026-10-20~21)
+
+- **징후:** Runtime Integration의 Windows 테스트 그룹이 기존 watchdog **180초 초과**로 실패한 기록. 이후 `projection` 분리 및 Windows matrix 6그룹, watchdog 480초로 조정.
+- **관련 커밋:** `0d518ab` (projection 분리), `63331ed` (shard 회귀), `f72661c` (Windows matrix/watchdog). 과거 일부 CI는 후속 커밋의 concurrency 설정으로 `cancelled`됨.
+- **교훈:** `cancelled`는 pass도 코드 오류의 확정 증거도 아니다. Linux 통과만으로 Windows 통과를 주장하지 말고, 비싼 294계정 통합 테스트는 shard 시간에 미치는 영향을 계산한다.
+- **후속:** 같은 SHA의 모든 required workflow + Linux/Windows jobs 최종 성공 확인. 과도한 문서 전용 커밋도 최신 CI를 취소시킬 수 있으므로 작업 배치 후 검증.
+
+### P6-010 — 294계정 누락과 재시작·RAW 중복 회귀 (2026-10-20~21)
+
+- **징후:** 마지막 294번째 계정 또는 fixture가 누락되었을 때, 293개 수집을 294개 완료로 표시하면 거짓 coverage 발생. 반복 reconcile이 RAW 행을 늘리는지도 확인해야 함.
+- **관련 테스트/커밋:** `tests/test_three_api_full_roster_batch.py`; `143f31a` (반복 reconcile 중복 방지), `a4f106a` (재시작 누락 계정), `1daad86` (누락 fixture 담당 레인 교정).
+- **상태:** 회귀 테스트를 추가·교정했지만 **각 테스트의 현 시점 최종 CI 통과 여부는 정확한 commit/run을 다시 확인해야 함**.
+- **교훈:** 전체 계정 커버리지·RAW 게시물 수·원본 receipt 수를 별도 확인하고 불완전한 상태에서 catch-up/history 성공을 표시하지 말 것.
+
+### P6-011 — API B 테스트 가정 오류: RAW 4건 예상 vs 실제 1건 (2026-10-21)
+
+- **징후:** Three API offline CI `39490317875`에서 `test_quota_stop_does_not_prevent_other_lane_commits` 실패. `AssertionError: 1 != 4` — 반환 RAW 1건, 테스트는 4건 기대.
+- **근본 원인:** 해당 B lane에 부여한 synthetic fixture는 게시물 **1건**인데 테스트 기대값이 4건이었음. 엔진 자체의 4건 누락으로 판정할 근거 없음.
+- **수정 이력:** `6e6f5cc` 테스트 추가 → `adee960` B lane fixture 보완 → `6e1c6e1` expected cardinality를 1로 수정.
+- **검증:** `6e1c6e1` 기준 Three API offline run `39490490719` **SUCCESS**; 동 커밋의 Runtime은 `cancelled`. 이전 실패와 이후 성공을 혼동하지 않음.
+- **교훈:** `limit=4`는 **최대 요청 개수**이지 API가 항상 정확히 네 개를 반환한다는 뜻이 아니다. fixture 반환 개수와 기대 관측 개수를 일치시킨다.
+
+### P6-012 — 사용자 승인에 따른 직렬 실행 전환 (2026-10-21)
+
+- **변경 동기:** 사용자 실측 판단상 배치 호출의 처리시간은 충분하고, **API 사용량 소진 후 한 시간대 대기**가 병목. API 추가 때 동시성 관리 비용도 피하고자 요청 순서를 직렬화하도록 명시 승인.
+- **범위:** A/B/C 3개 호출 주체, 기존 할당, `limit=4`, 2라운드, RAW/커서/복구 안전성을 유지. 동시 발송을 제거하되 불확실한 응답 재전송·쿼터 정책은 완화하지 않음.
+- **구현:** `raw_v2/three_api_daily_orchestrator.py`의 **synthetic manual** `step_serial(now=...)` (`ddb7abb`); 테스트 `1d98e02`, `STATUS.md`/`HANDOFF.md` 동기화 `d48fd7d`, `5bcff81`.
+- **현재 제한:** **실 Meta HTTP 호출 경로 또는 운영 스케줄러가 직렬화된 것은 아님.** `step_serial`은 한 호출에서 최대 한 합성 페이지를 처리하며, 여러 프로세스 사이의 실제 HTTP 동시 실행을 막는 전역 잠금은 아직 없다. `front_fixture_missing`/복구 실패는 교차 레인 재시도의 근거가 아니므로 결과를 노출·중단. 따라서 실운영 연결 전에는 실제 호출 경로의 동시 실행 방지와 데이터/쿼터 증거를 별도로 검증해야 함.
+- **2026-10-21 후속 설계 결정:** A만 먼저 반복 처리하면 B/C가 불필요하게 지연되므로 **성공한 synthetic 페이지마다 A→B→C 순환**하고 마지막 성공 레인을 격리 source SQLite의 `offline_serial_turn`에 기록해 재시작 후에도 순서를 이어감 (`db32b06`). 대안은 항상 A 우선(간단하지만 레인 편중) 및 프로세스별 메모리 커서(재시작 시 우선순위 초기화)였으며 모두 채택하지 않음. 기존 계정/페이지 A/B/C **고정 배정과 커서 선행 증거는 변경하지 않음**. `front_lane_unavailable` 및 catch-up의 `lane_blocked`는 다음 레인으로 넘어가되, 실패한 fixture나 복구는 사용자 검토용으로 정지. 신규 회귀 `1be6e01`, `3b039fb`(Catch-up). **최신 SHA 전체 CI 결과 확인 전이며 라이브 검증 아님.**
+- **검증:** `5bcff81` CI 기준 Frozen Design Guard / C Contract **SUCCESS**, Three API / Runtime 확인 당시 `in_progress`. 이후 완료 결과 별도 확인 필요.
+- **되돌리기:** 이력 보존 상태에서 feature branch의 `step_serial` 코드·테스트만 역커밋 가능. **사용자 RAW나 운영 DB를 원복 목적으로 덮어쓰지 않는다.**
+
+### P6-013 — 지속적인 작은 커밋으로 CI 실행 취소 (2026-10-20~21)
+
+- **징후:** 신규 테스트/문서 커밋이 잇달아 push되면서 이전 `queued/in_progress` CI 실행이 concurrency 정책상 `cancelled`되고 최종 승인을 위한 녹색 SHA를 확보하기 어려움.
+- **근거:** 기존 [STATUS.md](../STATUS.md) 및 GitHub Actions에서 `143f31a`/`a4f106a` 등 후속 실행 취소 관측.
+- **대응:** 변경사항을 의미 있는 묶음으로 커밋한 다음 CI를 완료까지 관찰. 문서 상태에 완료/실패/취소/진행 중을 따로 기록. 전체 오프라인 검증이 끝나기 전 실제 Meta API 운영 준비 완료로 표현하지 않음.
+
+### P6-014 — 새 채팅방 작업자에게 기록 의무가 전파되지 않음 (2026-10-21)
+
+- **징후:** p6 `STATUS.md`/`HANDOFF.md`와 새 ledger는 존재했지만, **`AGENTS.md`와 `docs/AI_WORK_UNIT_PROTOCOL.md`에 모든 후속 AI가 사건/설계결정을 갱신해야 한다는 명령이 명시되지 않았음**. 새 채팅방이 문서를 찾아 읽더라도 기록을 생략할 여지가 있음.
+- **추가 발견:** `docs/RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md`라는 **RAW v2.1의 기존 상세 트러블슈팅 문서가 이미 존재**함. 새 p6 ledger는 그 기록을 대체하거나 '프로젝트 최초 트러블슈팅'이라고 주장해서는 안 됨.
+- **수정:** [AGENTS 의무 규칙](../AGENTS.md) 추가 (`f10fe06`), [N-unit 교대 절차](AI_WORK_UNIT_PROTOCOL.md) 추가 (`765a6ef`); 본 장부에 OPEN·해결·CI 구분 및 신입 작업자 필독 체인을 유지.
+- **검증:** GitHub 파일 업데이트 결과 커밋 확인; 실제 새 채팅방/타 에이전트가 수행하는지는 **미검증**. 규칙은 사회적·절차적 구속이며 GitHub가 기록 누락을 자동 감지·강제하는 것은 아님.
+- **재발 방지:** 시작 전 `AGENTS → 현재 브랜치 HANDOFF/STATUS → p6 ledger → RAW v2 chronology` 조회, 사건 발생 때 본 장부 갱신, 세션 종료 전 저장소 재조회; 기록 실패 시 미반영 명시. 미래에 CI/PR로 기록 검증을 강화하려면 별도 신뢰성 검토가 필요함.
+- **롤백:** 기능·운영 데이터와 분리된 문서 변경이므로 승인된 경우 해당 문서 커밋만 revert. Frozen 설계와 기존 사고 이력은 보존.
+
+### P6-015 — 직렬 재시작 회귀 테스트의 fixture 경계 오류 (2026-10-21)
+
+- **증상/CI 증거:** `1be6e01`의 Three API workflow run `39493808092`, test `test_serial_missing_fixture_does_not_advance_durable_turn` 한 건 **FAIL**. 기대 `(A, front_fixture_missing)`, 실제 `(A, front_committed)`.
+- **확인된 원인:** 재시작 fixture 전달에서 `self.create()`를 호출해 테스트 기본 사전(계정 1 첫 페이지 데이터 포함)이 적용됐다. 첫 실행의 의도적인 빈 fixture(`front={}`)가 재시작에는 전달되지 않았음. 실제 수집 엔진의 잘못된 API 호출/데이터 누락으로 볼 근거 없음.
+- **수정/예방:** 재시작 호출을 `self.create(front={})`로 명시 (`cd6a1ff`). 동일 증상 재현 때 코드 수정 전에 fixture·mock·expected cardinality부터 확인하고, 런타임 버그와 분리할 것.
+- **데이터 영향:** 합성 독립 SQLite만 사용; 실 Meta 호출·운영 RAW 변경 없음.
+- **검증 상태:** 위 SHA의 이전 CI 실패는 확정. 수정 뒤 신규 CI는 이전 실행 일부가 `cancelled`됐으며 최종 실행 결과는 별도 확인 필요. `cancelled`를 PASS로 표기하지 않음.
+- **롤백:** 신규 synthetic 회귀 테스트 수정을 해당 커밋 단위로 revert 가능. 사용자 DB/CSV/원본은 절대 덮어쓰지 않는다.
+
+### P6-016 — 직렬 Catch-up에서 차단된 레인 이후 B/C 가용 API로 이어지지 않음 (2026-10-21)
+
+- **증상/발견:** `OfflineDailyOrchestrator.step_serial()`은 front 단계의 `front_lane_unavailable`만 다음 레인으로 건너뛰도록 구현되어 있었다. 반면 실제 Catch-up runner는 동일한 quota/cooldown 조건을 `lane_blocked`로 반환한다. 따라서 Catch-up 단계에서 A가 85% 사용량으로 중단돼도 B/C의 가용 여부를 시도하지 않는 **오프라인 제어흐름 결함을 정적 검토로 발견**했다. 실 Meta 장애를 관측했다는 뜻이 아니다.
+- **확정 원인:** 서로 다른 두 단계의 레인 불가 상태 이름을 직렬 wrapper가 하나로 통일하지 않음. 할당 계정 변경이나 cursor 오류가 아닌 상태 매핑 누락.
+- **수정:** `lane_blocked`도 다음 레인으로 진행하도록 제한적인 상태 분기를 확장 (`1e93561`). `front_fixture_missing`·`recovery_blocked`·`payload_projection_blocked`는 자동 우회하지 않는다. 기존 A/B/C 작업 배정, `limit=4`, 원본/증거·커서 불변.
+- **회귀 증거:** [`tests/test_three_api_serial_catchup.py`](../tests/test_three_api_serial_catchup.py) (`3b039fb`)에서 A만 차단→B 적용, A/B 차단→C 적용, 3레인 모두 차단→RAW·catchup 증거 0 유지의 3개 합성 시나리오를 작성. **작성됨 ≠ CI 통과**. 최종 해당 SHA의 CI/Windows 완료 상태는 별도 확인.
+- **데이터 영향:** 독립 synthetic SQLite만, HTTP/Meta·운영 원본·main 병합 없음. 운영 스케줄러에는 아직 연결하지 않음.
+- **추가 관련 검증:** front/RAW 재시작·잘못된 B fixture 차단 회귀는 `e1ad01f`에 별도로 기록되어 있다. 이 사건의 직접적인 Catch-up fallback 검증과 구분한다.
+- **미해결/예방:** 레인 사용량 독립성 미검증, 현재 오프라인 직렬 경로는 블록된 각 레인을 다시 호출하며 reconcile 비용이 발생한다. 추후 최적화 시 성공한 RAW 영수증/커서 순서 훼손 방지. 기술적 기록 발견성 보강 테스트 [`test_p6_troubleshooting_handoff_guard.py`](../tests/test_p6_troubleshooting_handoff_guard.py) (`b83d66c` 및 정규식 수정 `cfcc663`) 추가.
+- **안전한 롤백:** 기능 `1e93561`과 합성 회귀 `3b039fb`를 단독 revert할 수 있으나 임의 운영 DB 되돌리기 금지. 원인과 해결 기록은 유지.
+
+### P6-017 — 여러 AI 작업자가 P6-016 번호를 동시에 사용한 인수인계 충돌 (2026-10-21)
+
+- **증상:** 같은 개발 브랜치에 병행 작업이 진행되는 동안 서로 다른 작업자가 Catch-up fallback 문제를 각각 `P6-016`으로 기록해, 사건 색인과 상세 항목에 **동일 ID가 2회 존재**함. 사건 장부의 검색·번호 참조·이후 레거시 추적을 왜곡할 수 있음.
+- **확정 원인:** 사건 번호를 할당할 때 동시 작성자 사이에 원자적 ID 예약이 없었고, 최종 문서 기준의 유일성 검사를 커밋 전에 하지 않음. 두 항목은 같은 원인/수정 흐름을 설명하는 중복 서술이었음.
+- **조치:** 기술적 원인·회귀는 기존 `P6-016`으로 통합. 중복 상세 내용에 있던 관련 front/RAW 재시작 테스트 `e1ad01f`의 참조도 P6-016에 보존. 두 번째 사건 번호 `P6-017`은 **이 문서 충돌 자체**를 기록하는 데 사용해 구별한다. 관련 방지 테스트: `tests/test_p6_troubleshooting_handoff_guard.py` (`b83d66c`, `cfcc663`)의 색인/상세 중복 검사.
+- **검증:** 동일 브랜치의 문서를 재조회해 001~017 ID 중복 0·색인/상세 일치 여부를 확인해야 한다. Python CI/Windows 전체 완료 여부는 별도 확인 전이며, 녹색 성공으로 간주하지 않는다.
+- **후속 규칙:** 사건 신규 생성 직전 항상 최신 feature ledger를 GitHub에서 다시 읽고 번호 중복을 확인한다. 저장 충돌이 나면 **새로운 번호를 임의 재사용하지 말고** 최신본과 병합해 재시도한다. 파일별 SHA 조건 확인만으로 의미상 중복을 막을 수는 없으므로 최종 장부의 유일성 검사도 실행한다.
+- **영향/롤백:** 지침·문서상의 번호 충돌. Meta HTTP/운영 RAW·DB 변경 없음. 과거 실패·해결의 사실 기록을 삭제하지 않고 하나의 사건에 보존한다.
+
+### P6-018 — 직렬 fallback 중 중복 294계정 reconcile 처리 (2026-10-21)
+
+- **발견:** 기존 `step_serial()`이 `A→B→C` 상태 조회마다 `step(lane)`을 호출해, 앞선 API가 85% usage 또는 65분 쿨다운으로 unavailable일 때도 매번 전체 원본/ledger/RAW 재조정과 294계정 상태 검사를 다시 수행함. 추론된 오프라인 처리 병목이며 실 Meta 지연 시간의 측정값은 아님.
+- **원인:** `step()`이 개별 안전 함수로 자체 reconcile을 필수 실행하는데 직렬 wrapper가 이를 세 번 호출했기 때문.
+- **개선:** 기존 `step()`의 외부 안전 계약은 유지하면서, 내부의 단계 선택을 `_step_with_phases()`로 추출(`40c1e89`). 직렬 `step_serial()`은 최초 **1회** `reconcile()` 수행 후 해당 일관된 action snapshot으로 순서대로 레인 하나만 실행(`3850f3f`). 실패/원본 불일치는 다음 레인으로 넘기지 않음.
+- **회귀:** 합성 Catch-up B/C quota fallback에서 reconcile 호출 수=1과 복구 exception 때 RAW/커서 무변경 검사 `9d4d7f6` (`tests/test_three_api_serial_catchup.py`). CI PASS는 **해당 SHA 실행 결과 확인 전까지 미확정**.
+- **경계/롤백:** Meta API·사용자 DB/CSV 원본·동결 설계/main 미변경. 위험하면 `40c1e89`, `3850f3f`를 feature branch에서 revert하되 기존 원본 파일은 건드리지 않음.
+
+### P6-019 — 직렬 wrapper만으로는 프로세스 간 동시 실행을 막지 못함 (2026-10-21)
+
+- **발견:** `step_serial()`의 순차 `for`문은 **하나의 Python 호출** 안에서만 동시 실행을 제거한다. 독립 채팅방/작업자가 각각 별도 프로세스로 같은 SQLite를 열고 tick을 실행하면 상호간 직렬성이 보장되지 않는 아키텍처 위험이 있었다. 실제 다중 프로세스 데이터 손상은 관측하지 않았음.
+- **대안 판단:** `BEGIN IMMEDIATE`를 전체 RAW·control 다중 DB 작업 동안 점유하면 내부 nested SQLite transaction 및 단계별 무결성 복구와 충돌하기 쉽다. 원자적 파일 생성 플래그는 crash 후 남은 파일의 안전한 해제 절차가 어렵다. **OS-owned 파일 잠금**은 프로세스 종료 시 자동 해제되며 DB별 전역 잠금 경계를 제공하므로 채택.
+- **구현:** `raw_v2/three_api_serial_lock.py` (`f5bc1b3`)에 POSIX `flock`/Windows `msvcrt.locking` 비차단 lock 추가. 같은 synthetic coordinator DB의 `step_serial()` **및** 기존 `step()`를 공통 lock decorator로 보호(`5defcb4`); 이미 실행 중이면 `serial_busy`, 새 RAW 저장/커서 승격·공정성 turn 갱신 없음. 잠금 파일 자체는 남을 수 있지만 잠금 권한은 OS가 소멸시키므로 수동 stale-file 삭제 금지.
+- **회귀:** `tests/test_three_api_serial_lock.py` (`5e11b76`, `a9ce108`)에서 동일 DB 중복 lock 차단, 예외 후 lock 해제, 다른 DB 독립성, 잠금 중 수집/RAW 불변, 별도 **자식 프로세스 lock 차단 및 해제 뒤 성공**을 테스트하도록 작성. 프로세스가 lock을 보유한 채 `os._exit(17)`로 비정상 종료해 Python `finally`가 생략돼도 **운영체제 잠금이 자동 해제**되는지 확인하는 회귀(`22a9773`)를 추가했다.
+- **한계:** 이 잠금은 **새 synthetic 오케스트레이터의 두 entrypoint에만 적용**한다. 다른 legacy/운영 수집기나 향후 전송 adapter가 같은 gate를 사용한다고 가정하면 안 된다. 실제 Meta 3 API 호출 런타임 직렬화는 여전히 별도 작업/검증이 필요하다. 실 API별 quota 격리는 미검증.
+- **검증/롤백:** 현재 테스트/가드 코드 GitHub 커밋 반영, 오프라인 CI 최종 판정 대기. 필요 시 feature commit만 되돌리고 운영 데이터/동결 설계/main 병합 절대 변경 금지.
+
+> **P6-019 추가 회귀 (2026-10-21):** 동일한 control DB 경로를 `nested/../source.sqlite`처럼 별칭으로 표현해도 잠금을 우회하지 못하는지, lock 파일이 디스크에 남아도 다음 실행이 정상 재획득하는지 검사 2건을 `tests/test_three_api_serial_lock.py`에 추가(`67e5aa3`). 코드로 확인한 경로 정규화 `Path.resolve()` 동작을 대상으로 하며, **새 SHA CI 검증 전**이다. 잠금 파일을 지우는 stale-file 복구는 의도적으로 수행하지 않는다.
+
+> **P6-019 CI 회귀 연결 (2026-10-21):** 이전 `p6-runtime-integration-offline.yml`의 push/PR path 필터가 새 `three_api_serial_lock.py` 및 두 serial 회귀 테스트 파일을 누락했다. 이 때문에 해당 파일만 수정할 때 Runtime CI가 시작되지 않을 수 있었다. 두 path 필터에 3개 파일 추가(`c982a47`), Linux `py_compile`에 lock/serial tests 추가(`6300ee0`), 새 두 모듈을 Windows `orchestrator` shard로 명시 배정(`d81b09e`). **workflow 변경 자체가 테스트 PASS를 의미하지 않는다.** 소켓 차단 전체 `tests/run_offline.py`는 이미 discovery로 새 테스트를 찾으며, SHA별 Actions 최종 결과는 별도 확인할 것. 이전 도구 안전 검사 차단은 변경 내용을 축소·재검토한 뒤 이 단계에서 해결됐다.
+
+### P6-020 — 오프라인 직렬 계약 경계와 실제 HTTP 송신 분리 (2026-10-21)
+
+- **발견/위험:** 기존 `step_serial()`은 synthetic page 수집 전용이고, `ThreeApiContractExecutor`·`JobRequestBindingStore`의 계약 기반 요청 예약과 공통 OS lock 경계가 연결되지 않았다. 서로 다른 진입점의 직렬성을 혼동하면 Meta 송신 중복을 허용할 수 있다. 실제 운영 중복 송신을 관측한 것은 아님.
+- **설계 선택:** `raw_v2/three_api_serial_contract_bridge.py` (`fabdb8a`)에 격리 control DB lock을 획득한 상태에서 **기존 영속 request binding → contract executor** 순서로 단일 합성 요청을 넘기는 `OfflineSerialContractBridge` 추가. 임의의 `offline_fixture_only=True` 마커만으로 우회할 위험을 줄이기 위해 **정확한 `OfflineFixtureTransport` 타입만** 허용하도록 강화(`9a3e004`). 외부 네트워크 sender/토큰/스케줄러 생성 기능 없음.
+- **거부 정책:** 시간대 없는 `now`, A/B/C 레인 불일치, history 전송, 다른 coordinator의 binding, 이미 다른 프로세스가 lock을 보유한 경우 실행 금지. lock 경합 시 `serial_busy` 반환. 불명확한 HTTP 결과 자동 재송신 없음.
+- **회귀:** `tests/test_three_api_serial_contract_bridge.py` (`4400798`, `bced22b`)에 합성 단일 요청, 잠금 경합, 비fixture 전송 거부, `fetch` 속임수 거부, 레인/History 거부, 시간대·coordinator 검증 7건. Runtime CI path·Linux compile(`067519e`)과 Windows orchestrator shard(`075673a`) 연결. **새 SHA의 CI 최종 통과 여부는 확인 전까지 미확정.**
+- **미해결:** 이 경로는 mock binding과 in-memory fixture 기반의 오프라인 안전 어댑터일 뿐, 실제 `JobRequestBindingStore`→`CaptureJournal`→`ContractRawWriter`의 통합 end-to-end 검증 및 실제 Meta `GraphHTTPClient` 직렬 연결이 아니다. quota 사용량 독립성, 장애 후 복구, 294계정 전수 검증은 별도. 운영 DB·main·동결 원문 불변.
+- **예방/롤백:** 실제 live entrypoint 승인 전에 OS lock 경계·영속 예약·RAW receipt·HTTP 불확실 결과 차단을 통합 테스트하고, 실 Meta 호출/운영 DB 변경은 별도 승인. 문제 시 관련 feature commit만 revert하고 기존 RAW/커서는 보존.
+
+### P6-021 — CI 최신 실패 판정: 인수인계 링크 누락 및 Windows 장시간 실행 (2026-10-21 KST)
+
+- **증상/확정 근거:** feature SHA `bcb335dc687950754ee221bc5ebd847483e898f6`의 [Runtime Integration Offline #39499556675](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556675)은 **completed/failure**. Linux 792 tests 중 2건 실패; Windows remaining 667 tests 중 동일 2건 실패; Windows orchestrator는 8분 watchdog timeout. 세 그룹의 정확한 결과를 완료/성공으로 바꿔 적지 않는다.
+- **인수인계 결함 확정:** `tests/test_p6_troubleshooting_handoff_guard.py::test_current_handoff_links_survive_chat_restart`가 STATUS.md 및 HANDOFF.md의 **맨 앞 2,000문자** 안에서 `AGENTS.md`와 `docs/P6_TROUBLESHOOTING_LEDGER.md`를 찾도록 강제한다. 여러 상단 요약을 추가하면서 `AGENTS.md` 링크가 잘려 두 파일 각각 AssertionError가 발생했다. 원인은 실행 코드/RAW 변조가 아니라 상단 탐색 규칙 미준수.
+- **수정 전략:** STATUS/HANDOFF 첫 문단 앞에 짧은 필독 연결 인덱스를 각각 넣고 최신 CI 실패와 Meta/운영 DB·main 미변경 상태를 구분한다. 테스트 자체를 느슨하게 하거나 테스트를 제외하지 않는다.
+- **Windows 별도 문제:** [Runtime #39499556675](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556675) Windows orchestrator 70개 테스트를 실행하다 8분 timeout. 마지막 로그 `test_p4_three_db_audit_staged_receipt_is_not_auto_promoted` 다음 stack trace는 `three_api_evidence.py::commit_page`에서 실행 중이었음을 보여준다. **데드락·논리 결함으로 확정하지 않는다.** Windows 전체 테스트가 지속적으로 10초 이상 걸리는 항목 다수 포함, 원인(실행시간/잠금/파일 I/O) 정밀 측정은 별도.
+- **이미 확인된 통과:** 같은 SHA의 [Three API #39499556645](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556645), [C Contract #39499556483](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556483), [Frozen Guard #39499556744](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39499556744)는 SUCCESS. 이는 **Runtime 성공 증거가 아님**.
+- **예방:** 새로운 STATUS/HANDOFF 상단을 편집하면 반드시 동일한 cross-chat 링크 검사를 Linux/Windows에서 실행한다. CI가 실패하면 로그상 실패 위치·SHA를 적고 이전 성공 체크를 새 SHA의 결과로 사용하지 않는다.
+- **미해결/검증:** 문서 수정 후 새로운 SHA에서 `python -m unittest discover -s tests -p 'test_p6_troubleshooting_handoff_guard.py' -v` 및 전체 Runtime CI 확인. Windows timeout은 별도 작업으로 원인 측정·shard/timeout 변경 대안 비교 후 안전한 최소 변경. 해결 전 Runtime 최종 PASS를 주장하지 않는다.
+- **롤백:** 상단 필독 인덱스와 이 사건 추가만 feature branch에서 revert 가능. 동결 설계·운영 collection.sqlite/RAW/CSV·main/Meta HTTP 변경 없음.
+
+> **P6-021 후속 원인·최소 수정 (2026-10-21, 신규 CI 검증 대기):** Windows #39499556675의 `orchestrator`는 70개 중 약 30개 합성 테스트를 통과한 시점에 480초 watchdog에 도달했다. 로그상 여러 SQLite 테스트가 각각 약 12~28초 소요되어 단일 그룹의 소요시간이 예산을 초과한 근거가 있다. 마지막 `commit_page` stack은 시간 초과 당시 실행 위치이며 데드락/원본 결함이라는 확정 근거는 아니다. 대안 A) watchdog만 900초로 상향하면 CI 지연과 실제 정지 탐지 지연이 커진다. **채택 B)** `tests/run_offline.py`에서 4개 오케스트레이터 그룹에 전체 unittest ID의 안정적인 CRC32으로 배정, Windows matrix에 3개 작업을 더해 기존 그룹과 병렬 실행. `tests/test_offline_shards.py`에서 1회씩 정확하게 배정·전그룹 비어 있지 않음·발견 순서 독립성 검증. 전체 테스트와 watchdog 480초는 그대로 보존한다. 신규 코드의 Linux/Windows CI는 실행 결과를 확인해야 하며 합성 전수 PASS나 성능 개선을 사전 주장하지 않는다. 변경 범위는 테스트 실행기/테스트/CI 워크플로뿐이며, 실제 Meta/운영 DB/main·동결 설계 불변. 롤백은 본 변경의 CI/테스트 샤딩 항목만 revert하고 운영 원본은 복원 대상으로 삼지 않는다.
+
+### P6-022 — Windows full-roster CI 480초 초과 / 3그룹 분리 (2026-10-21 KST)
+
+**사건 증거·대안·검증:** [Runtime #39504471845](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39504471845)에서 Linux 및 Windows 9개 중 9개 작업이 성공하고 `offline-windows (roster)`만 실패했다. roster 5개 테스트 중 4개 PASS, 5번째 실행 중 `Timeout (0:08:00)!` 발생. 앞선 테스트가 각각 약 94~132초를 소요한 것이 확인되며, stack `three_api_coordinator.py::lease`는 제한 시점 실행 위치일 뿐 데드락 확정 증거는 아니다. 대안 A) watchdog을 900초로 늘리면 정지 탐지가 늦어진다. **채택 B)** `tests/run_offline.py`의 알려진 5개 294계정 fixture를 `roster`/`roster-2`/`roster-3`에 2/2/1 분리, 신규 테스트는 기본 roster로 fail-visible 배정. `tests/test_offline_shards.py`에서 전수·중복 없는 배정 회귀, Windows CI matrix에 2그룹 추가. 기존 480초 감시·소켓 차단 유지. 커밋 `c7038c2`, `e2f6ad8`, `526736a`. **검증 완료:** commit `5dfae4007a4abcfc0f7b148fcd93e6a4695c384e`의 [Runtime #39510506884](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506884) Linux 1/1, Windows 11/11, 총 12/12 성공. [Three API #39510506964](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506964), [C Contract #39510506960](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506960), [Frozen Guard #39510506972](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39510506972) 모두 같은 SHA에서 성공. **P6-022 오프라인 CI 병목 해결 판정.** 실제 Meta 운영 성공 판정 아님. 실 Meta/운영 DB/CSV/main 불변.
+
+### P6-023 — fixture 직렬 수집→Capture/RAW→커서 확정의 단일 잠금 경계 (2026-10-21 KST)
+
+- **관찰·범위:** 기존 `OfflineSerialContractBridge.dispatch_fixture_once`는 OS 잠금 안에서 영속 JobRequestBindingStore 예약 후 fixture 전송→Capture→RAW까지 수행한다. 그러나 해당 객체에는 수신 뒤의 `PageEvidenceStore.commit_page`까지 동일 serial gate 아래 검증하는 public 경로가 없었다. 기존 `JobRequestBindingStore.commit_captured_page`를 별도로 호출하는 것은 가능했으나 bridge 차원의 직렬 경계와 end-to-end 검증은 부족했다. **실제 동시 커서 오염 사례가 관측된 것은 아니며, 사전 통합/안전성 보강 결정이다.**
+- **채택·대안:** `raw_v2/three_api_serial_contract_bridge.py`에 `commit_captured_fixture_page` 추가(`918dd35`). 이미 저장된 durable Capture/RAW 포트를 실행기로부터 재사용하고, 동일 coordinator SQLite OS gate 잠금·유효 레인/시간대·정확한 `OfflineFixtureTransport` 타입·잠금 대기 중 포트 바꿔치기 여부를 검사한다. 기존 `bindings.commit_captured_page`의 request digest·lease·RAW receipt·cursor 선행 증거 검증을 재사용한다. **HTTP 전송/신규 intent 생성/재시도는 이 메서드에서 일절 수행하지 않는다.** 대안인 새 live runner 일괄 구현은 미승인 네트워크/DB 위험과 테스트 범위 확대로 배제; 모든 단계 하나의 SQLite 트랜잭션으로 합치기는 이미 분리된 durable DB 경계와 충돌하므로 배제.
+- **테스트:** `tests/test_three_api_serial_contract_bridge.py`에서 실제 격리 coordinator+capture+합성 RAW SQLite, 원래 request binding·executor·fixture transport·page evidence 경로를 사용하는 테스트 5개(`6eb1040`) 추가: 성공 후 페이지 확정, capture 없는 완료 금지, OS gate 점유 중 거절/해제 후 확정, transport 교체 거절, SQLite 파일 재오픈/expired lease recovery 시 두 번째 송신 0. 이후 3개(`e01ae62`) 추가: 잘못된 응답의 안전한 수신 증거 보존·재발송 차단, RAW acknowledgement 중단 이후 재확정, 검증된 cursor로 C레인 page2 unlock. 실호출 없음.
+- **검증 상태:** 코드 커밋 `918dd35df1dd12895a99eb0ad17e38c5ec202521`, 테스트 최종 변경 `e01ae625086b62dff5c9e62bd3bdd46085dc42ef`; **이 단계에서는 신규 HEAD 전체 CI 결과 미확정**. 이전 녹색 `58971b3`의 [Runtime 12/12](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39514325379)는 새 코드 통과 근거가 아니다. 새 SHA의 Linux/Windows Runtime 및 Three API·C Contract·Frozen Guard 결과를 확인해야 한다.
+- **보존 위험·잔여 차단:** fixture 전용이며 운영 자격증명·Meta Graph·운영 SQLite/CSV/RAW·scheduler·main에 접근/변경하지 않는다. 실제 live-transport serial gate·한도 독립성·운영 파일/백업·365일 History 연결은 **미구현/미검증**. Capture 없는 예약은 재송신하지 않고 operator review에 남는다. 응답 수신과 RAW 확정은 여전히 별도 DB이며 중간 실패가 가능하나, durable capture 기반 replay로 복구한다.
+- **롤백·재발 방지:** feature branch에서 신규 commit path/테스트만 revert, 기존 원본/운영 DB를 덮거나 재설정하지 않는다. 신규 직렬 컴포넌트는 transport send·capture 영속화·RAW receipt·page/cursor 확정을 나누어 회귀, 재시작 후 `transport.calls=0` 확인을 필수로 한다.
+
+> **P6-024 CI 후속 확인 (2026-10-21 KST):** `e517436f8bd259f4ccd3826f630e73b7f2a08461` [Runtime #39519036382](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036382) `completed/success` Linux 1 + Windows 11 = 12/12; [Three API #39519036531](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036531), [C Contract #39519036478](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036478), [Frozen Guard #39519036411](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036411) 동일 SHA `completed/success`. 이 판정은 이후 P6-025 변경에는 소급하지 않는다.
+
+### P6-024 — fixture-only 단일 직렬 진입점에서 binding→Capture/RAW→커서 원자적 직렬화 (2026-10-21 KST)
+
+- **관찰·원인 분리:** P6-020/023의 `dispatch_fixture_once`와 `commit_captured_fixture_page`는 각각 OS 직렬 잠금을 보유했지만 **수신과 커서 확정 사이에는 잠금 해제 구간**이 존재했다. 바인딩으로 이중 HTTP는 차단했으나, 전체 작업을 한 차례의 serial gate 안에서 실행하는 사전 합격 조건은 충족하지 않았다. **실제 데이터 손상·경합 장애는 관측되지 않았고, 아키텍처 연결 보강이다.**
+- **채택한 최소 변경:** `raw_v2/three_api_serial_contract_bridge.py`에 `OfflineSerialContractBridge.run_fixture_page_once(job, request, evidence, now=...)` 추가(`98416ee`). 정확한 `OfflineFixtureTransport`, `CaptureJournal`, `ContractRawWriter`, 동일 coordinator에 연결된 `PageEvidenceStore`, timezone-aware now, lane/phase/lease를 검사한다. **단일 OS gate 안에서** 요청 binding을 조회해 최초라면 `dispatch_once`가 영속 예약→fixture 1회 송신→Capture/RAW를 수행하고, 예약이 이미 있으면 **전송 단계를 건너뛴다**. 마지막에 기존 `commit_captured_page`로 RAW 영수증 및 선행 cursor를 검증하고 page evidence를 커밋한다. 중단됐으나 Capture가 없는 예약은 재송신하지 않고 실패 차단한다. 기존 분리 API는 레거시 호환을 위해 그대로 둔다.
+- **대안·제약:** 기존 두 메서드를 중첩 호출하면 nonreentrant OS lock에서 실패하므로 단일 gate 안의 원자적 *진입* 메서드로 구성. 여러 SQLite DB의 commit 자체를 하나의 트랜잭션으로 합칠 수는 없으며, 차단 후 영속 Capture 기반 재개를 유지한다. job 선택/로스터·쿼터 판단은 호출자 역할로 남고, 이 메서드는 **API 레인 회전 스케줄러가 아니다**.
+- **합성 검증 추가:** `tests/test_three_api_serial_contract_bridge.py` `629e758` 7개 사례: 최초 fixture 한 번만 송신, 기존 capture replay no-send, RAW/커서 commit 중단 후 복구, Capture 없는 기예약 상태 송신 0, OS gate 경합 거절, 실제 cursor commit까지 lock 유지, 다른 coordinator evidence/가짜 transport 거절. `cf25395` 2개 사례: 고정 A(계정1 page1)→C(page2) 연속 커서와 고정 B(계정151 page1) 신규 작업을 각각 단일 진입점으로 확인. 합계 **9개 테스트 작성**; 실행 성공은 별도 CI 확인.
+- **검증 근거·진행:** 코드 `98416ee0d613f26aa71f767f94d04b419216afe5`, 테스트 `629e75846f997440b8bca1cf030264330072ca01` / `cf25395e90da0ef9ef71dcfbf7b5321733e41e4b`. **기록 시점 최신 전체 CI PASS 미확정**, 변경 SHA와 최종 문서 HEAD가 다르므로 새 Runtime Linux·Windows와 Three API/C Contract/Frozen Guard가 정확한 최종 SHA를 완료할 때만 PASS로 변경. 이전 `b2272de` 성공을 새 코드 성공으로 대용하지 않는다.
+- **안전 경계·잔여 작업:** 단일 tick 처리 자체가 fixture-only이고 `MetaTransport` 및 인증 credential을 받지 않는다. 실 Meta 3 API 호출/독립 쿼터 검증, 294계정 실시간 스케줄 자동선택, 운영 DB/CSV, 365일 History, 배포, `main` 병합은 **미구현·미승인**. 테스트 작성은 운영 데이터 검증이 아니다.
+- **롤백/회귀 방지:** feature 브랜치의 `98416ee`/추가 회귀만 git revert; 운영 원본/토큰/수집 이력은 건드리지 않는다. 후속 개발자는 작업 성공과 중간 중단·중복 발송 0·실패 차단을 별도 검증하고, 85% usage 차단·최소 65분 규칙을 새 runner에서 우회하지 않는다.
+
+### P6-025 — 3 API fixture 직렬 선택·85% quota 회복가능 영속 게이트 (2026-10-21 KST)
+
+- **확인된 기존 공백:** P6-024의 `run_fixture_page_once(job, request, evidence)`는 호출자가 이미 lease/job을 선택해야 했다. 따라서 3개 A/B/C 레인 선택, quota 사용량 기록, durable fairness 순서, 기존 bound capture 복구 우선권은 아직 단일 실행 진입점에 연결되지 않았다. **운영 결함이 발생했다는 보고가 아니라 사전 구현 부족 사항이다.**
+- **구현·선택 정책:** `raw_v2/three_api_serial_contract_bridge.py`에 `step_fixture_serial(fixtures, evidence, now, lane_order)` 추가(`9829596`). **정확히 1개의** 합성 coordinator job을 동일 OS lock 아래 lease→증거 검증→영속 binding→fixture response→Capture/RAW→receipt→cursor로 진행. 초기 순서 A/B/C, 성공 레인 `offline_contract_serial_turn`에 SQLite 보존, 재시작 후 성공한 레인 다음부터 순환. `lease_for_recovery` 우선 → `lease_for_dispatch`; 기존 binding은 원래 Capture를 읽고 **전송 0**, Capture 없으면 operator review 차단. `PageEvidenceStore`의 선행 cursor가 없는 page2/3은 Coordinator가 lease하지 않는다. 잘못됐거나 없는 fixture는 **binding·전송 전** 해당 미사용 lease만 원복 후 fail-closed 처리. `limit=4`는 RequestEnvelope/RequestSpec 기존 계약 검증을 사용하며 공식 294계정 리스트·원본 RAW 입력은 하지 않는다.
+- **quota 사고 차단 개선:** 사용량 안전증거가 유실되는 프로세스 강제 종료를 고려하여 **send 직전** lane에 `fixture_pending_usage` / `halted=1` / 최소 65분 `ready_at`을 영속 기록(`ed09b97`). 정상적인 **safe response + durable Capture**의 verified usage가 85 미만인 경우에만 임시 보류를 해제(`5b90f1f`), 85 이상이면 `usage_limit`, 사용량 누락·전송 결과 불명·schema 실패·Capture 미영속이면 `missing_usage`로 65분 이상 차단. 단순 시간 경과로 자동 해제하지 않고 명시적 operator `reset_after_verified_cooldown`을 유지한다. 이 규칙은 실 Meta quota 독립성을 증명하지 않는다.
+- **진단·테스트:** `fixture_tick_diagnostics(now)` read-only(`7e6a00a`): 레인 차단 사유/해제 가능시각/신규 lease 후보/복구 lease 후보/마지막 성공 레인 조회, 무인 실행·Meta 호출·수집 변경 없음. `tests/test_three_api_serial_selection.py`의 **17개 합성 회귀 작성**(`9dafe40`, `ac946dc`, `011ae6f`, `153160c`): A→B→C cursor 연결, 85%와 무사용량 차단, 예외 응답 재전송 금지, 영속 Capture 재시작 replay, 잃어버린 fixture lease 원복, 잠금 경합, 65분 후에도 operator reset 전 차단, 전송 중 선차단 관찰, schema 실패 시 차단 유지, 무변경 read-only 진단. 신규 테스트가 Windows `remaining` 480초 그룹에 누적되지 않도록 `tests/run_offline.py`(`6b8dd9a`)의 4개 orchestrator CRC32 shard에 분산하고 `tests/test_offline_shards.py`(`c5cf881`)에 배정 회귀 추가, `p6-runtime-integration-offline.yml`(`c8c2350`)에 테스트 파일 path trigger/compile 포함.
+- **검증 상태:** 변경된 모든 커밋은 `codex/p6-readiness-hardening-20261019` 개발 브랜치에만 존재하며 본 장부 작성 시점 최종 HEAD의 **전체 Runtime Linux/Windows 12개 및 3 API/C Contract/Frozen Guard 결과는 미확정**. 이전 `e517436` [Runtime #39519036382](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39519036382) 12/12 PASS는 이 변경 전 증거. 최신 HEAD의 실제 Actions 결과로 판정할 것; 이전 run의 queued/cancelled는 성공으로 간주하지 말 것.
+- **위험·미구현:** 수동 fixture dict만 사용하고 실제 Meta 전송, 가동 중 API 주체 인증/독립 quota, 운영 DB·RAW/CSV, 원본 294계정 실계정 ID fingerprint, 2라운드/365일 History 자동 정책, 스케줄러, `main` 병합에 연결되지 않았다. quota 분리는 **합성 상태 모델**일 뿐 Meta 비즈니스 자격증명별 quota 분리를 입증하지 않는다. 서로 다른 영속 DB 사이를 단일 원자적 트랜잭션이라고 주장하지 말 것.
+- **롤백·재발방지:** feature branch의 `step_fixture_serial`, `fixture_tick_diagnostics`, 새 합성 테스트 및 샤딩 경로만 순차 revert, 동결 원문·운영 원본 RAW/CSV/DB는 건드리지 말 것. 합성 fixture 없이도 bound Capture는 복구 가능해야 하고, 실제 HTTP의 send 재시도는 별도 승인·재검증 전까지 불허한다.
+
+## 새 사건을 추가할 때의 고정 서식
+
+```markdown
+### P6-NNN — 짧은 제목 (발생일/KST)
+- 증상·최초 발견 경로:
+- 사용자 영향·보존 위험:
+- 재현 조건/명령 (토큰·PII·사용자 RAW 제외):
+- 확정 원인 / 미확인 가설:
+- 해결 방법과 대안 배제 이유:
+- 수정 파일·commit SHA·PR:
+- 검증: 테스트명, CI run ID, 정확한 SHA, PASS/FAIL/CANCELLED/PENDING:
+- 남은 리스크·후속 조치:
+- 롤백 방법 (원본 DB/CSV 덮어쓰기 금지):
+- 재발 방지 규칙:
+```
+
+## 미래 개발자가 지킬 규칙
+
+1. **코드보다 재현 조건이 중요하다.** 같은 에러를 새 이름으로 다시 고치지 않도록 에러 메시지, 원인, 검증 commit을 연결한다.
+2. 비밀·토큰·사용자명/식별 데이터·원본 RAW payload는 문서에 직접 붙이지 않는다. 이 기록은 public repository에서 볼 수 있다고 가정한다.
+3. 새 아키텍처가 도입돼도 구 버전의 오류/우회 방법과 대안 비용을 삭제하지 않는다. 사건은 append 또는 상태변경으로 이어 쓰고, 기존 서술은 근거 없이 덮어쓰지 않는다.
+4. **설계 결정(왜?)**, **구현 상태(무엇이 실제로 동작?)**, **검증 증거(어느 SHA에서 통과?)**를 분리한다.
+5. 오프라인 테스트 성공 ≠ Meta API 실제 운영 성공 ≠ 원본 데이터 무결성 보증. 금지된 실호출/운영 DB 편집/main 병합은 별도 명시 승인 필수.
+
+## 참고할 원본
+
+- [현재 상태](../STATUS.md) · [인수인계](../HANDOFF.md) · [개발 규칙](../AGENTS.md)
+- [동결 기준](../DESIGN_FREEZE_NOTICE.md) · [최종 설계](P6_FINAL_COLLECTION_DESIGN_2026-10-20.md)
+- [AI 작업단위 규칙](AI_WORK_UNIT_PROTOCOL.md)
+- [기존 RAW v2.1 트러블슈팅 상세 연대기](RAW_V2_2026-10-19_TROUBLESHOOTING_CHRONICLE.md) · [오류 대응 SOP](RAW_V2_ERROR_HANDLING_RUNBOOK.md)
+- [Git 커밋 기록](https://github.com/hibi89/ohora-trend-catcher/commits/codex/p6-readiness-hardening-20261019)
+- [GitHub Actions](https://github.com/hibi89/ohora-trend-catcher/actions) · [Draft PR #6](https://github.com/hibi89/ohora-trend-catcher/pull/6)
+
+
+### P6-026 — Quota gate blocked local Capture recovery (2026-10-21)
+
+- **Confirmed in code:** Coordinator.lease checked lane.halted/ready_at before filtering bound-only jobs; a 85% usage stop therefore denied both first-time HTTP dispatch and capture-only recovery.
+- **Fix:** `3a271e1` makes the lane gate apply only to non-bound-only leases; recovery still requires an existing immutable job binding and an eligible lease, and the runner still refuses to resend when Capture is absent.
+- **Regression:** `ee3ed6c` and `414e189` add isolated SQLite quota/lease tests. The blocked lane must refuse new dispatch while a pre-bound page remains recoverable; a different lane can continue. The test does not make a real Meta request.
+- **Verification:** GitHub commits confirmed; full CI on latest documentation HEAD remains unverified. Do not claim production readiness or new-post collection success.
+- **Policy:** Frozen 3 callers, limit=4, 2 daily rounds, 65-minute minimum cooldown and immutable RAW unchanged; no operational DB, scheduler, main merge or Meta call.
+
+### P6-037 — 2026-10-21 · 신규 페이징 사건의 장부 색인 누락
+
+- **실패 증거:** 전체 offline 실행 954 tests, 1 failure / 1 skip. 실패는 test_incident_index_matches_unique_detailed_records: 상세 사건 set에는 P6-035가 있으나 index table에는 없었다.
+- **확정 원인:** P6-035/036 상세 내용을 작성했지만 중앙 P6 incident index 표에 두 사건을 추가하지 않았다. 코드·페이징 기능 실패가 아니다.
+- **수정:** index 표에 P6-035/036을 등록했고 별도 P6-037을 추가해 이 절차 회귀도 기록했다.
+- **수정 commit:** `7632788`.
+- **후속 검증:** 수정 후 test_p6_troubleshooting_handoff_guard.py 4/4 PASS, paging/recovery 29/29 PASS, normalizer 11/11 PASS. 전체 954개 실행은 수정 후 반복하지 않았다. 이전 전체 결과 952 PASS / 1 FAIL / 1 SKIP이며 전체 재실행은 미검증이다.
+- **안전·롤백:** 문서 색인만 수정. Meta·운영 DB/RAW/Capture/quota 상태 변경 없음. 문서 수정은 필요한 경우 표 행만 되돌릴 수 있으며 상세 사건 기록을 삭제하지 않는다.
+
+### P6-038 — 2026-10-21 · 전체 오프라인 재검증 및 cross-store 증거 경계
+
+- **재검증:** `tests/run_offline.py` selected 955, exit code 0. 직접 실행한 `test_three_api_paging.py` 16/16, `test_three_api_paging_recovery.py` 13/13, `test_three_api_meta_normalizer.py` 11/11: **40/40 PASS**.
+- **기존 증거 읽기 상태:** 앞선 read-only cross-store join에서 페이지/응답/Capture/RAW receipt 97개 연결과 저장 digest 필드 equality가 확인되었고 lane 집계는 A=49, B=48이었다. 이 확인은 cryptographic body/Capture digest 재계산을 포함하지 않았고, 기존 문서가 지칭한 49개 대상과도 일치 여부가 확인되지 않았다. 따라서 연결·무결성 전체 검증 또는 복구 가능 판정으로 취급하지 않는다.
+- **미실시:** 기존 coordinator/Capture/RAW DB는 수정하지 않았고, 별도 복구 라운드나 Meta 호출도 실행하지 않았다. 기존 failed-no-retry 요청을 재전송하지 않았으며 3페이지·85%·쿨다운 정책을 바꾸지 않았다.
+- **Git:** 이 기록은 기존 작업 브랜치에서만 관리한다. 인증파일·토큰·계정 ID, 사용자 RAW는 포함하지 않는다. main 병합은 하지 않는다.
+- **다음:** 연결된 세 DB의 읽기 전용 digest 재검증과 원래 49건 대상 식별은 여전히 선행 조건이다. 실제 재탐색/수집은 별도 승인된 recovery round와 quota gate 아래에서만 수행한다.
+
+### P6-039 — 2026-10-21 · bounded live pilot partial progress and n8n blocker
+
+- **범위:** `three_api_manual_pilot.py` only; official 294-account roster, credentials directory stored locally, maximum 3 steps in the first invocation and 1 in a follow-up. No main/legacy collector DB used.
+- **Durable result:** Two A pages were committed after the prior 97-receipt status, resulting in 99 durable receipts and 396 posts/observations. This is partial live collection, not full 294-account completion.
+- **Unprocessed Capture:** A C page2 bound response produced HTTP 200 safe evidence, 4 media items, a recomputed-valid response digest, a recomputed-valid Capture digest, and matching response/Capture cursor. It has no RAW receipt and remains an unprocessed Capture under a `live_pending_usage` lane hold. The run stopped safely; no further attempt was made. Do not resend this bound request. Root cause of the first runner exception is not established; stored evidence is internally valid but RAW promotion has not been verified.
+- **Existing B failures:** Four B HTTP400 jobs remain `failed_no_retry`; B `live_pending_usage` hold remains. No cooldown/usage reset performed. Do not retry them.
+- **Quota and calls:** No hold was manually cleared and no 85% threshold bypassed. The runner's first failure summary exposed `live_meta_called=unknown`; actual request count from that summary is therefore not asserted. No further live call after post-run evidence review.
+- **n8n:** No local n8n process, CLI, or listener on 5678. The two checked export JSON files are inactive, two-node drafts, without credentials or webhook trigger. No activation/connection performed.
+- **Next safe actions:** After lease expiry, diagnose C RAW promotion using only its existing immutable Capture and an HTTP-disabled path; maintain C usage hold unless verified safe usage permits normal gate release. Reconcile B credentials/permissions/fields offline; existing failed requests stay excluded. n8n needs a reachable instance, user-approved credential binding, and a workflow that consumes verified P6 RAW output. Continue only on this branch, no `main` merge.
+
+### P6-040 — 2026-10-21 · SQLite Row/tuple false digest-collision during Capture replay
+
+- **증상:** A C page2 response had valid safe response digest and immutable Capture digest, 4 posts and a cursor matching the captured response, but remained unprocessed without a RAW receipt. Replaying its Capture through the production RAW projection stopped safely before coordinator completion.
+- **확정 원인:** `raw_v2/three_api_observation_versions.py::_write_state` fetched `sqlite3.Row` values then compared the Row object directly with a tuple. In production `collector.connect` sets `row_factory=sqlite3.Row`; the same stored state therefore compares unequal to its equal tuple, raising a false `Account state digest collision` (and similarly affected post states). Existing offline tests used tuple rows and missed it.
+- **최소 수정:** convert both fetched rows to tuples before comparing persisted state JSON. Added `test_unchanged_recheck_reuses_states_with_sqlite_row_factory`.
+- **증거:** The immutable C Capture failed `write_capture` in a read-only-source/in-memory clone of the current pilot RAW, tracing to `_write_state` account-state comparison. After the fix, the same Capture successfully wrote and validated a receipt in that memory clone. Then, after the existing lease naturally expired, one bounded runner step returned `recovered_pages=1`; no Meta HTTP was needed. Read-only postcheck: 100 durable receipts / 400 posts; the C Capture is processed and its RAW receipt digest validates. C lane remains held at `live_pending_usage`; no manual reset.
+- **검증:** full `tests/run_offline.py` 956 selected, exit 0; P2 observations 15/15, RAW writer 14/14, paging recovery 13/13, handoff guard 4/4. No real cursor invalidation was observed, so the re-anchor flow remains synthetic/offline-only.
+- **커밋:** `28612ec` code/test. Handoff documentation is in the following docs-only commit.
+- **보존/다음:** Existing RAW source DB/CSV/Capture untouched; only new verified P6 pilot observations were appended. B's four and A's one `failed_no_retry` jobs remain excluded. Reconcile credential/permission/field cause for existing HTTP400s offline; n8n remains unconnected because no local server/daemon is available. Do not retry or manually release usage hold.
+
+### P6-041 — 2026-10-21 · bounded A progress and unavailable n8n runtime
+
+- **Bounded live result:** With the read-only preflight showing lane A open and B/C held, one `--max-pages 3` invocation completed all 3/3 page steps. Postcheck: 103 durable receipts / 412 post observations; A=54 done, B=48, C=1. No jobs for B/C were dispatched and all previously failed requests remain `failed_no_retry`.
+- **Safety:** This was the final live batch in this work session. No further API request was made, no lane hold was manually cleared, and existing production RAW files remain unchanged. The P6 pilot store contains only verified append observations. Continue future calls only after the required cooldown and fresh usage gate.
+- **n8n runtime check:** No n8n CLI/process/local listener. Docker CLI and service are installed, but the daemon was unavailable. A user-authorized attempt to start the service failed with Windows service permission denial; no container/data was created. Existing two exports remain inactive 2-node manual-trigger/execute-command drafts without credential refs or webhook trigger. Automation integration remains incomplete.
+- **Git:** This state and the preceding P6-040 fix are documented on `codex/p6-readiness-hardening-20261019`; branch push/remote SHA verification follows this docs commit.
+- **Next:** Continue P6 collection only under the 65-minute cooldown and existing 85% stop gate, starting with read-only status/quota. Diagnose B's existing 400s offline; never replay them. n8n requires a locally available runtime or user-provided reachable endpoint and safe credential binding before activation.
+
+### P6-042 — 2026-10-22 · 커서 무효화 재앵커 요구사항 재검증 및 인수인계
+
+- **요구사항 반영:** 사용자는 무효 커서 오류에서 기존 요청을 재전송하지 않고 `resume_required`로 멈춘 뒤, 별도 승인 라운드에서 최신 페이지부터 기존 media ID 겹침을 찾고 새 커서로 이어갈 것을 추가 요청했다. 계정 배정/순서 294, 페이지당 4개, 라운드당 3페이지, 85% quota stop, cooldown, Capture/RAW 불변성은 그대로다.
+- **코드 상태:** 이 로직은 기존 `raw_v2/three_api_paging_recovery.py`에 이미 존재했다. `cursor_failure_disposition`은 정확히 분류된 `cursor_invalid`에만 `resume_required`를 반환하고 기존 요청 재전송을 거부한다. `plan_cursor_recovery`는 최대 세 개의 synthetic page만 받아 기존 ID 겹침 없이는 `coverage_gap`, 겹침과 새 `after`가 있으면 `resume_ready`를 낸다. 중복 관측 ID는 보존하고 분석 ID만 중복 제거한다. 삭제를 확정하지 않고 HTTP/DB/Capture/RAW 변경도 하지 않는다.
+- **최소 회귀 추가:** `tests/test_three_api_paging_recovery.py`에 무효 커서 → 새 첫 페이지 겹침 → 교체 커서 `resume_ready`까지 잇는 오프라인 planner 테스트를 추가했다. 기존 paging 테스트는 정상 `after` 커서 보존도 확인한다.
+- **한계:** 이는 계획 함수이며 실제 오류 본문 분류, 승인 프롬프트, Meta first-page fetch와 resume dispatch에 배선된 운영 복구 runner가 아니다. 실제 커서 무효화도 관측되지 않았다. API 호출과 운영 복구는 별도 승인 대기다.
+- **Git/P7:** 현재 사본은 fetch 후 원격 작업 브랜치 `188bc2f`까지 fast-forward했고, P6-042 테스트/문서 commit `713160e98a1c2c272383f3a84a9f6a19b034551e`를 origin에 push했다. 재-fetch 후 로컬과 원격 작업 브랜치 SHA 일치 확인. 최신 origin/main `2e55b90a60892fb721295b1faa5207c84b48586b`에는 이 recovery source/top handoff가 없어 main-level handoff sync는 미완료로 명시한다. main 병합 금지.
+- **n8n:** n8n `2.44.5`를 별도 `%LOCALAPPDATA%\OHORA_N8N_RUNTIME`에 설치했으나 workflow import/연결/활성화는 수행하지 않았다. 기존 P6 상태 CLI는 운영 pilot DB를 SQLite read-only로 읽으려 했으나 OS access denied가 재현되어 안전하게 중단됐다. 기존 RAW workflow draft는 legacy collector를 호출하므로 실행하지 않는다. Automation은 미완료다.
+- **검증:** Full offline rerun selected 956 but was interrupted during the slow 294-account stress tests; prior full 956/956 on the earlier verified snapshot remains historical evidence. Current targeted reruns: paging recovery 14/14, paging 16/16, handoff guard 4/4 (34/34 PASS). 실 Meta HTTP 0회, 운영 DB/CSV/Capture 0회 변경.
+
+### P6-043 — 2026-10-22 · 날짜 전환 시 quota hold 초기화 위험
+
+- **근본 원인:** `three_api_manual_pilot.run_manual_pilot`은 KST 날짜별 `coordinator.sqlite`를 연다. 새 날짜에는 `Coordinator`가 A/B/C lane 행을 기본값(unhalted, epoch cooldown)으로 만들고 294×3 jobs를 seed하므로, 전날의 `live_pending_usage` hold가 새 날짜에 승계되지 않았다. 5분 주기 n8n이 날짜를 넘어 계속 호출되면 85% 사용량 확인 gate를 우회할 위험이 있었다.
+- **최소 수정:** 새 날짜 coordinator에 아직 jobs가 없을 때만 가장 최근의 이전 날짜 coordinator를 SQLite `mode=ro`로 검사한다. 3개 lane 상태가 모두 유효할 때만 halted/reason 및 향후 `ready_at`를 새 coordinator에 복사한다. 이전 DB는 쓰지 않는다. 상태가 손상됐거나 읽을 수 없으면 dispatch 전 fail-closed한다. 같은 날짜에서 이후 수동 검증 reset을 다음 tick이 되돌리지 않도록 이미 jobs가 있으면 재승계하지 않는다.
+- **검증:** `tests/test_three_api_manual_pilot.py` 13/13 (신규 cross-day hold/cooldown 회귀 포함), paging 16/16, cursor recovery 14/14, env loader 8 PASS + 1 SKIP, handoff guard 4/4; total **55 PASS / 1 SKIP**. py_compile PASS. Meta/HTTP 0회, 운영 RAW/CSV/Capture 변경 0회.
+- **운영 상태:** 2026-10-21 read-only coordinator status showed B/C held `live_pending_usage`; last persisted successful-response usage values were below 85 but came from prior-day observations and do not prove current usage. No lane reset or live request is recorded for this update. The prior cursor errors remain classified only as account-scoped HTTP 400; missing raw subcodes prevent root-cause attribution.
+- **실패 코드 세분화(read-only 집계):** A의 HTTP 400 1건은 Graph code 110; B의 4건은 code 110 2건, code 100 1건, 코드 미보존 1건이었다. 저장된 실패에는 code 190 인증 거부나 code 10/200 권한 거부가 없었다. **subcode는 보존되지 않아** code 110이 특정 target-user 문제인지, code 100이 어떤 field/parameter 때문인지 확정할 수 없다. C는 기록된 HTTP 400 실패가 없고 lane usage hold만 있다. P6 경로는 Batch API가 아닌 단일 serial GET이다. 계정별 실패는 토큰 인증 오류라고 단정할 근거가 없다.
+- **제약/다음:** n8n 2.44.5 exists in an isolated local folder, but workflow remains unconnected. Only after a verified P6 page receipt should an inactive 5-minute workflow be imported and tested. Any activation is subject to the same current quota gates; do not reset B/C from elapsed cooldown alone.
+### P6-046 — 2026-10-22 · 커서 무효화 재앵커 시나리오 회귀 고정
+
+- **요구 흐름:** 무효 커서는 기존 요청 재전송 없이 `resume_required`로 중단한다. 별도 승인된 재탐색에서 최신 페이지부터 최대 3페이지를 검사하고 기존 게시물 ID 겹침을 연결점으로 사용한다. 새 응답의 `after`만 후속 오래된 페이지 후보로 내보내며, 연결점이 없거나 3페이지 안에 찾지 못하면 `coverage_gap`을 숨기지 않는다.
+- **최소 변경:** `tests/test_three_api_paging_recovery.py`에 정상 커서 후보와 새 커서 재개 전달을 직접 검증하는 오프라인 회귀를 추가했다. 기존 `raw_v2/three_api_paging_recovery.py` 계획 함수는 합성 페이지 입력만 처리한다. 같은 게시물 재관측은 `observation_ids`에 남고 `analysis_media_ids`에서만 deduplicate된다. 게시물 삭제를 확정하지 않는다.
+- **시나리오:** 정상 커서; 기준 게시물 삭제 가정 및 이웃 연결; invalid cursor 후 ID 재발견; 다중 추가/삭제에 따른 순서 변경; 중복 관측; 연결 성공/실패; 세 페이지 안에서 연결 불가; 세 페이지째 연결 후 네 번째 요청 금지.
+- **보존/경계:** 계획 결과는 network_requests=0, mutations=[]; 기존 요청 ID, Capture, RAW, 수집 순서는 수정하지 않는다. 실제 HTTP 오류 분류와 `resume_required`를 운영 coordinator에 기록하는 연결, 승인 UX, 새 요청 발행 runner는 미구현이다. 따라서 실제 복구 실행 준비 완료 또는 실수집 성공으로 해석하지 않는다.
+- **검증/다음:** `tests.test_three_api_paging_recovery` 16 tests, `tests.test_three_api_paging` 16 tests 및 handoff guard 실행 후 결과를 기록한다. Meta 실호출/운영 DB 변경은 0건이며 별도 복구 라운드 승인, 현재 quota 85% gate, cooldown이 계속 필요하다.
