@@ -187,6 +187,7 @@ class HistoryHTTPIntegration(unittest.TestCase):
         history_path = self.store.path
         self.store.close()
         self.store = P50HistoryStore(history_path)
+        self.addCleanup(self.store.close)  # A reopened connection must close on Windows.
         self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], first_cursor)
         self.assertEqual(self.step()["status"], "recovered")
         self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 2)
