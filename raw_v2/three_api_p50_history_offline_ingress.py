@@ -37,3 +37,26 @@ def ingest_offline_history_response(capture, raw_writer, request, response):
         raise ValueError("Unsafe history response; no RAW commit")
     persist_capture_verified(capture, record)
     return commit_raw_and_confirm(capture, raw_writer, record)
+
+
+def ingest_and_commit_offline_history_page(
+        store, capture, raw_writer, request, response, *,
+        oldest_post_at, terminal=False):
+    """Persist one synthetic page and advance its history cursor only afterward."""
+    if getattr(request, "phase", None) != "history":
+        raise ValueError("History request required")
+    # Check expected cursor before any Capture or RAW write.
+    current = store.read(request.account_key)
+    if current is None or current["cursor"] != request.cursor:
+        raise ValueError("History cursor changed before fixture ingestion")
+    receipt = ingest_offline_history_response(
+        capture, raw_writer, request, response)
+    from three_api_p50_history_commit import commit_persisted_history_page
+    record = capture.get_capture_for_request(request.request_id)
+    if record is None:
+        raise ValueError("Missing durable history Capture after ingestion")
+    decision = commit_persisted_history_page(
+        store, capture, raw_writer, account_key=request.account_key,
+        capture_id=record.capture_id, oldest_post_at=oldest_post_at,
+        terminal=terminal)
+    return {"raw_receipt": receipt, "history": decision}
