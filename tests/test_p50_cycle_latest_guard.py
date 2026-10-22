@@ -54,6 +54,26 @@ class P50CycleSafetyTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(json.loads(output.getvalue())["status"], "manual_review")
 
+    def test_blocked_history_states_are_nonzero_without_latest_refetch(self):
+        states = ("quota_hold", "manual_review", "blocked_unknown_http",
+                  "needs_verified_latest", "account_blocked",
+                  "blocked_missing_cursor", "blocked_unverified_page",
+                  "missing_usage", "usage_limit")
+        for status in states:
+            with self.subTest(status=status), \
+                 patch.object(cycle, "_needs_latest", return_value=False), \
+                 patch.object(cycle, "run_p50") as latest, \
+                 patch.object(cycle, "run_history", return_value={"status": status}) as history, \
+                 patch.object(cycle, "load_three_api_environment", return_value={}), \
+                 patch("sys.stdout", new_callable=io.StringIO) as output:
+                code = cycle.main(["history", "--live", "--confirm-owner-approval",
+                                   "--credentials-dir", "/synthetic",
+                                   "--workspace", "/synthetic/p50"])
+                self.assertEqual(code, 2)
+                latest.assert_not_called()
+                history.assert_called_once()
+                self.assertEqual(json.loads(output.getvalue())["status"], status)
+
     def test_latest_recovery_then_history(self):
         latest_result = {"status": "completed", "committed_pages": 1}
         with patch.object(cycle, "_needs_latest", side_effect=[True, False]), \
