@@ -44,5 +44,6 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
             oldest_post_at=evidence["oldest_post_at"],
             terminal=evidence["terminal"])
         completed.append({"account_key": key[0], "state": decision["state"]})
+        available.discard(key[0])
     return {"status": "step_budget_exhausted", "completed": completed,
-            "network_requests": 0}
+            "network_requests": 0, "deferred_accounts": deferred}
