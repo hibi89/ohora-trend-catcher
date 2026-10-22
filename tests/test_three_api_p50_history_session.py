@@ -34,6 +34,16 @@ class HistorySessionTests(unittest.TestCase):
                     latest_complete_keys=set(self.keys), captured_pages={},
                     max_steps=budget)
 
+    def test_invalid_budget_does_not_consume_roster(self):
+        def forbidden_roster():
+            raise AssertionError("Roster consumed before validation")
+            yield "unused"
+        with self.assertRaisesRegex(ValueError, "step budget"):
+            run_offline_history_session(
+                None, None, None, forbidden_roster(), self.names,
+                latest_complete_keys=forbidden_roster(), captured_pages={},
+                max_steps=0)
+
     def test_empty_session_does_not_advance(self):
         with P50HistoryStore(self.path) as store:
             result = run_offline_history_session(
