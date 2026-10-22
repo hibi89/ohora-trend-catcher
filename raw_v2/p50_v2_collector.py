@@ -128,6 +128,14 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
             planner.set_usage(lane,verified_usage.get(lane))
     done=0
     try:
+        # Check every lane against its own current Meta quota before dispatch.
+        # Previously measured >=85 lanes remain blocked; never override with a hint.
+        for candidate in ("A","B","C"):
+            row=planner.db.execute("SELECT usage,halted FROM lanes WHERE lane=?",(candidate,)).fetchone()
+            if row["usage"] is None or row["halted"] == 0:
+                observation=probe_lane(candidate,env,sender=sender)
+                planner.set_usage(candidate,observation["usage_percent"] if observation["quota_verified"] else None)
+                print(json.dumps({"event":"quota_probe","lane":candidate,"usage":observation["usage_percent"],"verified":observation["quota_verified"]}),flush=True)
         while done < max_requests:
             job=planner.next_job()
             if job is None:
