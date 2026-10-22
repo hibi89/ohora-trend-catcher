@@ -118,6 +118,55 @@ class HistorySessionTests(unittest.TestCase):
             self.assertEqual(reopened.read(account)["pages_verified"], 2)
             self.assertIsNone(reopened.read(account)["cursor"])
 
+    def test_two_sessions_resume_exact_cursor_without_replaying_page(self):
+        account = self.keys[0]
+        captured = {
+            (account, "tail"): {
+                "capture_id": "cap-first",
+                "oldest_post_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "terminal": False},
+            (account, "second"): {
+                "capture_id": "cap-second",
+                "oldest_post_at": datetime(2025, 1, 1, tzinfo=timezone.utc),
+                "terminal": True},
+        }
+        with P50HistoryStore(self.path) as store:
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-capture", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+        calls = []
+        def verified_commit(store_arg, journal, raw_writer, *,
+                            account_key, capture_id, oldest_post_at, terminal):
+            calls.append(capture_id)
+            return store_arg.commit_verified_page(
+                account_key=account_key,
+                expected_cursor=store_arg.read(account_key)["cursor"],
+                next_cursor=None if terminal else "second",
+                oldest_post_at=oldest_post_at, terminal=terminal,
+                capture_id=capture_id, raw_receipt_id="raw-" + capture_id,
+                raw_receipt_verified=True, capture_verified=True)
+        with patch("three_api_p50_history_recovery.commit_persisted_history_page",
+                   side_effect=verified_commit):
+            with P50HistoryStore(self.path) as first_store:
+                first = run_offline_history_session(
+                    first_store, None, None, self.keys, self.names,
+                    latest_complete_keys={account}, captured_pages=captured,
+                    max_steps=1)
+                self.assertEqual(first["recovery"]["status"], "step_budget_exhausted")
+                self.assertEqual(first_store.read(account)["cursor"], "second")
+            with P50HistoryStore(self.path) as restarted:
+                second = run_offline_history_session(
+                    restarted, None, None, self.keys, self.names,
+                    latest_complete_keys={account}, captured_pages=captured,
+                    max_steps=1)
+                self.assertEqual(second["recovery"]["status"], "completed")
+                self.assertEqual(restarted.read(account)["pages_verified"], 2)
+                self.assertEqual(restarted.read(account)["state"], "window_covered")
+        self.assertEqual(calls, ["cap-first", "cap-second"])
+        self.assertEqual(first["history_pages_added"], 1)
+        self.assertEqual(second["history_pages_added"], 1)
+
     def test_session_rejects_mismatched_durable_page_count(self):
         with P50HistoryStore(self.path) as store:
             with patch("three_api_p50_history_session.recover_history_pages",
