@@ -109,6 +109,17 @@ class HistoryRecoveryTests(unittest.TestCase):
             self.assertEqual(result["status"], "step_budget_exhausted")
             self.assertEqual(store.read(account)["cursor"], "next")
 
+    def test_malformed_page_index_rejected_before_writes(self):
+        with P50HistoryStore(self.path) as store:
+            for malformed in {"cursor": {}, (self.keys[0], None): {}}:
+                with self.subTest(malformed=malformed):
+                    with self.assertRaisesRegex(ValueError, "index key"):
+                        recover_history_pages(
+                            store, None, None, self.keys, self.names,
+                            latest_complete_keys=set(self.keys),
+                            captured_pages=malformed)
+            self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
+
     def test_invalid_step_budget_rejected(self):
         with P50HistoryStore(self.path) as store:
             with self.assertRaises(ValueError):
