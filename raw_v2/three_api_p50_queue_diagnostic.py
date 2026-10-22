@@ -9,6 +9,7 @@ import argparse
 from contextlib import closing
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 
@@ -93,6 +94,13 @@ def inspect_queue(workspace, *, now=None):
             state["eligible_before_gate"] += 1
             if state["lane_ready"]:
                 state["dispatchable_now"] += 1
+        # Daily latest front coverage matters independently of catch-up pages.
+        by_page = {
+            str(page): {
+                "done": sum(j["state"] == "done" and j["page"] == page for j in jobs),
+                "total": sum(j["page"] == page for j in jobs),
+            } for page in (1, 2, 3)
+        }
         remaining = len(jobs) - len(done)
         ready_count = sum(item["dispatchable_now"] for item in rows.values())
         held_eligible = sum(item["eligible_before_gate"]
@@ -105,6 +113,9 @@ def inspect_queue(workspace, *, now=None):
             "date_kst": path.parent.name, "expected_pages": 150,
             "jobs_total": len(jobs), "jobs_done": len(done),
             "jobs_remaining": remaining,
+            "front_accounts_completed": by_page["1"]["done"],
+            "page_coverage": by_page,
+            "daily_complete": remaining == 0 and len(jobs) == 150,
             "dispatchable_now": ready_count,
             "held_lanes_eligible_jobs": held_eligible,
             "next_action": reason,
@@ -115,7 +126,7 @@ def inspect_queue(workspace, *, now=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path,
-                        default=Path.home() / "AppData" / "Local" / "OHORA_P50" / "p50")
+                        default=Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "OHORA_P50" / "p50")
     args = parser.parse_args(argv)
     try:
         result = inspect_queue(args.workspace)
