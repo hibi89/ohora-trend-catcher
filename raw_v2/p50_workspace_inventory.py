@@ -25,6 +25,15 @@ def inspect(root):
                 continue
             if any(name == db + suffix for db in DB_NAMES for suffix in ("", "-wal", "-shm")):
                 result["files"].append({"relative_path": str(p.relative_to(root)), "bytes": p.stat().st_size})
+    sqlite_main = [f["relative_path"] for f in result["files"]
+                   if f["relative_path"].endswith(".sqlite")]
+    sidecars = {f["relative_path"] for f in result["files"]
+                if f["relative_path"].endswith(("-wal", "-shm"))}
+    for db in sqlite_main:
+        if db + "-wal" not in sidecars:
+            result["warnings"].append("WAL_NOT_PRESENT_FOR:" + db)
+    if sqlite_main:
+        result["warnings"].append("READ_ONLY_INVENTORY_CANNOT_PROVE_SNAPSHOT_CONSISTENCY")
     if not result["files"]:
         result["warnings"].append("NO_RECOGNIZED_SQLITE_FILES")
     result["warnings"].append("METADATA_ONLY_NOT_CANONICAL_OR_WAL_PROOF")
