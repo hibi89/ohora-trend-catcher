@@ -64,3 +64,7 @@ No automatic API retries, no original RAW mutation, no engine redesign.
 ## Cursor gap safety (2026-10-22)
 
 An observation with no matching RAW receipt is not exportable. The exporter now stops checkpoint advancement before the first such observation, even if later IDs have verified receipts. This prevents permanent loss if an earlier RAW receipt arrives late. The n8n consumer must not skip a gap or manually increment `after_id`. After a missing receipt is reconciled, replay the unchanged checkpoint and continue in observation ID order. Historical legacy gaps may require a separate explicit reconciliation policy; do not bypass this gate by modifying the authoritative RAW database.
+
+## Orphan observation checkpoint guard (2026-10-22)
+
+An observation whose post identity has no matching `posts` row, or whose post has no matching `accounts` row, is treated as a blocking integrity gap just like an absent RAW receipt. The read-only exporter must not advance `next_after_id` across the gap to later valid observations. Do not manually skip the gap or mutate RAW as a workaround. A standalone SQLite predicate check passed 4/4 scenarios; full repository tests remain unverified.
