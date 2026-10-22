@@ -101,37 +101,50 @@ class CyclePlanner:
         return recovered
 
     def next_job(self):
-        """Select the earliest eligible account for an available lane.
+        """Continue each account's single cursor, rotating A/B/C per page.
 
-        A halted lane cannot block progress on other lanes or later cycles.
-        A single account cursor is shared across lanes, and each successful
-        receipt advances that cursor exactly once.
+        Historical jobs remain intact. Each account has at most 20 pages
+        in total, regardless of which lane performed them. Unavailable
+        lanes are skipped; they never block a healthy lane.
         """
         self.db.execute("BEGIN IMMEDIATE")
         try:
             if self.db.execute("SELECT 1 FROM jobs WHERE state='reserved' LIMIT 1").fetchone():
                 self.db.execute("COMMIT")
                 return None
-            for cycle in range(1, MAX_CYCLES + 1):
-                for lane in LANES:
-                    gate = self.db.execute("SELECT halted FROM lanes WHERE lane=?", (lane,)).fetchone()
-                    if gate["halted"]:
+            available = {r["lane"] for r in self.db.execute(
+                "SELECT lane FROM lanes WHERE halted=0")}
+            if not available:
+                self.db.execute("COMMIT")
+                return None
+            for account in self.db.execute(
+                "SELECT ordinal,cursor FROM accounts WHERE finished=0 ORDER BY ordinal"
+            ).fetchall():
+                jobs = self.db.execute("""
+                    SELECT cycle,lane,state FROM jobs
+                    WHERE ordinal=? ORDER BY rowid
+                """, (account["ordinal"],)).fetchall()
+                if len(jobs) >= MAX_CYCLES:
+                    continue
+                if any(j["state"] != "done" for j in jobs):
+                    continue
+                last_lane = jobs[-1]["lane"] if jobs else "C"
+                start = (LANES.index(last_lane) + 1) % len(LANES)
+                for offset in range(len(LANES)):
+                    lane = LANES[(start + offset) % len(LANES)]
+                    if lane not in available:
                         continue
-                    pending = self.db.execute("""
-                      SELECT a.ordinal,a.cursor FROM accounts a
-                      WHERE a.finished=0 AND NOT EXISTS(
-                        SELECT 1 FROM jobs j
-                        WHERE j.cycle=? AND j.lane=? AND j.ordinal=a.ordinal)
-                      ORDER BY a.ordinal LIMIT 1""", (cycle, lane)).fetchone()
-                    if pending is None:
+                    cycle = 1 + sum(j["lane"] == lane for j in jobs)
+                    if cycle > MAX_CYCLES:
                         continue
                     self.db.execute("""
-                      INSERT INTO jobs(cycle,lane,ordinal,state,cursor_before)
-                      VALUES (?,?,?,'reserved',?)""",
-                      (cycle,lane,pending["ordinal"],pending["cursor"]))
+                        INSERT INTO jobs(cycle,lane,ordinal,state,cursor_before)
+                        VALUES (?,?,?,'reserved',?)
+                    """, (cycle,lane,account["ordinal"],account["cursor"]))
                     self.db.execute("COMMIT")
-                    return {"cycle":cycle,"lane":lane,"ordinal":pending["ordinal"],
-                            "cursor":pending["cursor"],"limit":PAGE_LIMIT}
+                    return {"cycle":cycle,"lane":lane,
+                            "ordinal":account["ordinal"],
+                            "cursor":account["cursor"],"limit":PAGE_LIMIT}
             self.db.execute("COMMIT")
             return None
         except BaseException:
