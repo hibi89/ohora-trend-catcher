@@ -317,6 +317,39 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.raw._db.execute(
             "SELECT COUNT(*) FROM post_observations").fetchone()[0], 0)
 
+    def test_quota_hold_remains_after_cooldown_without_verified_release(self):
+        """65 minutes elapsed is not permission to reset a usage-limit hold."""
+        from datetime import timedelta
+        self.anchor(1)
+        self.anchor(2)
+        self.usage_percent = 85
+        self.names = ["nail_us_1"]
+        self.assertEqual(self.step()["status"], "recovered")
+        first_cursor = self.store.read(self.accounts[0]["key"])["cursor"]
+        self.now += timedelta(minutes=66)
+        self.assertEqual(self.step()["status"], "quota_hold")
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], first_cursor)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 0)
+        lane = self.coordinator.db.execute(
+            "SELECT halted,reason FROM lanes WHERE lane='A'").fetchone()
+        self.assertEqual(lane["halted"], 1)
+        self.assertEqual(lane["reason"], "usage_limit")
+
+    def test_missing_usage_remains_held_after_cooldown_without_new_http(self):
+        """Missing Meta usage evidence must not turn into a time-based retry."""
+        from datetime import timedelta
+        self.anchor(1)
+        self.anchor(2)
+        self.usage_percent = None
+        self.names = ["nail_us_1"]
+        self.assertEqual(self.step()["status"], "manual_review")
+        self.now += timedelta(minutes=66)
+        self.assertEqual(self.step()["status"], "quota_hold")
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 0)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 0)
+
     def test_unknown_http_result_blocks_without_automatic_retry(self):
         self.anchor(1)
         self.anchor(2)
