@@ -224,6 +224,21 @@ class SheetsExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "status conflicts"):
             export_observations(self.path, after_id=1)
 
+    def test_returned_views_reject_invalid_numeric_values(self):
+        for views in (-1, True, "123", 1.5):
+            with self.subTest(views=views):
+                with sqlite3.connect(self.path) as db:
+                    db.execute(
+                        "UPDATE three_api_raw_receipts SET payload_json=? "
+                        "WHERE capture_id='cap-2'",
+                        (json.dumps({"request_id": "req-2",
+                                     "posts": [{"id": "p1", "view_count": views}],
+                                     "post_field_status": {
+                                         "p1": {"view_count": "returned"}}}),),
+                    )
+                with self.assertRaisesRegex(ValueError, "status conflicts"):
+                    export_observations(self.path, after_id=1)
+
     def test_explicit_zero_is_not_missing(self):
         with sqlite3.connect(self.path) as db:
             payload = json.dumps({
