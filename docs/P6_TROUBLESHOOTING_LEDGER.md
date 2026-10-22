@@ -1,7 +1,16 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-086 P50-first rollout](docs/P6_TROUBLESHOOTING_LEDGER.md) · Inactive P50 n8n bridge calls existing pilot CLI, one page/tick, separate workspace. P50 engine absent from this checkout; alert and receipt-readback interfaces pending. No live call or P294 activation.
 > Index: [P6-085 n8n runner clone selection](docs/P6_TROUBLESHOOTING_LEDGER.md) · Wildcard/first-match replaced with explicit repo-root resolution; implementation commit `fed83ee`, 17/17 focused checks PASS; origin push was verified at `e38c5db`.
 > Index: [P6-084 Google Sheets output boundary](docs/P6_TROUBLESHOOTING_LEDGER.md) · User decision: add Google Sheets as a derived n8n output after SQLite/RAW; keep P6 collection and source-of-truth unchanged. Spec is documentation-only; implementation deferred until n8n core is complete.
 > Index: [P6-083 credential-backed n8n alert route (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Owner selected credential-based auth and deferred channel; endpoint/credential and operational activation pending. Do not enable global `$env` access; `$vars` are plan-restricted. No product/runtime change yet.
+
+### P6-086 — 2026-10-22 · P50-first rollout strategy and n8n bridge
+
+- **Decision/source:** Owner directs P50 completion and real-collection/n8n normalization before any P294 scale-up. Keep P50 and P294 RAW, cursor, and collection history independent; P294 operational activation stays paused. Frozen P6 design is unchanged. n8n must invoke the existing P50 pilot entrypoint and must not recreate collection behavior.
+- **Implementation:** Added inactive `kq3_294_collection/n8n_p50_daily_collection.json` and `raw_v2/p50_n8n_tick.ps1`. The bridge calls `three_api_p50_manual_pilot`, uses a dedicated `%LOCALAPPDATA%\OHORA_P50\p50` workspace, caps each tick at one page, and adds live flags only when `OHORA_P50_LIVE_APPROVED=YES`. No P50 engine or P6 collector/cursor files changed. Result classification retains only bounded status/count fields.
+- **Dependency/blockers:** The P50 entrypoint exists on `origin/feature/p6-50-account-pilot-20261022` but not on this working branch, so this bridge cannot yet execute here. The P50 workflow is inactive. Alert delivery and independent SQLite receipt readback are not yet wired for P50. Do not import/activate it until the P50 runtime files are present and alert/verification interfaces are resolved. `OHORA_P50_LIVE_APPROVED` remains unset; actual Meta call requires separate approval.
+- **Verification:** New workflow contract tests passed 2/2; final focused suite passed 19/19 with workspace-local TEMP/TMP. One early run exposed the existing AppContainer temp ACL issue (`os.replace` WinError 5); rerunning with workspace-local temp succeeded. The P6 handoff guard then found `HANDOFF.md` lacked its required top-level `AGENTS.md` link and the ledger table lacked the new incident row; both were fixed, and the final guard passed. PowerShell parse and `git diff --check` PASS. Scratch import of the existing P6 workflow succeeded 1/1; P50 workflow runtime import is pending. P50 pilot currently omits `live_meta_called` on live results, so n8n preserves that field as unknown rather than falsely reporting no live request. No Meta call, operational DB access/write, or main merge.
+- **Safety/rollback:** New files only; remove/revert the P50 workflow and launcher together to roll back. Independent P50/P294 stores remain distinct; RAW/Capture and P6 internals untouched.
 
 ### P6-085 — 2026-10-22 · n8n runner path could select an unintended clone
 - **증상/범위:** Daily workflow Execute Command searched `OneDrive\\Desktop\\*\\ohora-trend-catcher\\raw_v2\\p6_n8n_tick.ps1` and ran the first match. With multiple clones, this was nondeterministic and could select a different checkout/branch.
@@ -401,6 +410,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-086 | P50-first n8n bridge | Inactive one-page n8n adapter; P50 engine absent from this checkout | 2 bridge tests PASS; broader rerun pending |
 | P6-085 | n8n runner 경로 선택 | wildcard first-match 제거, 지정된 working root만 실행 | 17/17 focused PASS; `fed83ee`; origin push verified at `e38c5db` |
 | P6-084 | Google Sheets 출력 경계 | durable receipt 기반 증분 export, post_id idempotency, ack 후 checkpoint, 장애 격리 | 명세만 작성; n8n core 완료 후 구현 |
 | P6-083 | n8n 자격증명 기반 알림 경로 | 사용자가 credential 방식 선택, 공급자/채널은 추후 결정 | OPEN; channel credential, endpoint, mock delivery 및 운영 활성화 pending |

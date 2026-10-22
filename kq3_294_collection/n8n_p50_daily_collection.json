@@ -1,0 +1,50 @@
+{
+  "name": "OHORA P50 bounded collection",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}},
+      "id": "p50-five-minute-schedule",
+      "name": "Every 5 minutes (P50 runner gates live access)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$ErrorActionPreference='Stop'; $root=Join-Path $env:USERPROFILE ('OneDrive\\Desktop\\' + (-join (0x32,0xcc28,0x20,0xd504,0xb85c,0xc81d,0xd2b8,0x20,0xc544,0xce74,0xc774,0xbe0c | ForEach-Object {[char]$_})) + '\\ohora-trend-catcher'); $runner=Join-Path $root 'raw_v2\\p50_n8n_tick.ps1'; if(-not (Test-Path -LiteralPath $runner -PathType Leaf)){throw 'P50 integration runner unavailable.'}; & $runner; exit $LASTEXITCODE\""
+      },
+      "id": "p50-bounded-runner",
+      "name": "Call isolated P50 runner",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out=[]; for (const item of $input.all()) { const stdout=item.json.stdout; if(typeof stdout!=='string'||!stdout.trim()) throw new Error('P50 runner returned no JSON result'); let r; try { r=JSON.parse(stdout.trim()); } catch { throw new Error('P50 runner returned invalid JSON'); } const pages=Number.isInteger(r.committed_pages)&&r.committed_pages>=0?r.committed_pages:null; const failures=Number.isInteger(r.account_failures)&&r.account_failures>=0?r.account_failures:null; const offline=r.mode==='P50_OFFLINE'&&r.live_meta_called===false; const valid=pages!==null&&failures!==null&&typeof r.mode==='string'; out.push({json:{state:!valid?'manual_review':failures>0?'attention':pages>0?'collection_progress':offline?'waiting':'manual_review',mode:r.mode||'unknown',status:r.status||null,committed_pages:pages,account_failures:failures,attempted_steps:Number.isInteger(r.attempted_steps)?r.attempted_steps:null,live_meta_called:typeof r.live_meta_called==='boolean'?r.live_meta_called:null}}); } return out;"
+      },
+      "id": "p50-validate-result",
+      "name": "Validate P50 runner result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {},
+      "id": "p50-result-recorded",
+      "name": "Keep result in n8n execution",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    }
+  ],
+  "connections": {
+    "Every 5 minutes (P50 runner gates live access)": {"main": [[{"node": "Call isolated P50 runner", "type": "main", "index": 0}]]},
+    "Call isolated P50 runner": {"main": [[{"node": "Validate P50 runner result", "type": "main", "index": 0}]]},
+    "Validate P50 runner result": {"main": [[{"node": "Keep result in n8n execution", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {"timezone": "Asia/Seoul", "executionOrder": "v1"},
+  "versionId": "p50-v1",
+  "tags": []
+}
