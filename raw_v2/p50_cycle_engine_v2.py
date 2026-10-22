@@ -123,7 +123,9 @@ class CyclePlanner:
                 continue
             body = __import__('json').loads(receipt[0]); media = body.get('media',{})
             posts = media.get('data',[]); paging = media.get('paging') or {}
-            cursor = (paging.get('cursors') or {}).get('after')
+            cursor = (paging.get('cursors') or {}).get('after') if paging.get("next") else None
+            if paging.get("next") and not cursor:
+                raise ValueError("Saved page missing continuation cursor")
             dates = [datetime.fromisoformat(p['timestamp'].replace('Z','+00:00')) for p in posts if p.get('timestamp')]
             self.acknowledge(dict(row),receipt_id=f"p50v2-{row['cycle']}-{row['lane']}-{row['ordinal']}",
                 posts=posts,next_cursor=cursor,exhausted=cursor is None,
@@ -264,26 +266,27 @@ class CyclePlanner:
                 UPDATE accounts SET cursor=?,finished=?,finished_reason=?
                 WHERE ordinal=?""",
                 (next_cursor,int(finished),reason,job["ordinal"]))
-            if finished or state["slot_count"] + page_size >= PAGE_LIMIT:
-                subsequent = self.db.execute("""SELECT 1 FROM accounts
-                    WHERE finished=0 AND ordinal>? LIMIT 1""",
-                    (job["ordinal"],)).fetchone()
-                if subsequent is not None:
-                    self.db.execute("""UPDATE schedule_state SET ordinal=?,
-                        slot_count=0 WHERE id=1""",(job["ordinal"]+1,))
-                elif state["lane_index"] < 2:
-                    self.db.execute("""UPDATE schedule_state SET lane_index=lane_index+1,
-                        ordinal=1,slot_count=0 WHERE id=1""")
+            if state is not None:
+                if finished or state["slot_count"] + page_size >= PAGE_LIMIT:
+                    subsequent = self.db.execute("""SELECT 1 FROM accounts
+                        WHERE finished=0 AND ordinal>? LIMIT 1""",
+                        (job["ordinal"],)).fetchone()
+                    if subsequent is not None:
+                        self.db.execute("""UPDATE schedule_state SET ordinal=?,
+                            slot_count=0 WHERE id=1""",(job["ordinal"]+1,))
+                    elif state["lane_index"] < 2:
+                        self.db.execute("""UPDATE schedule_state SET lane_index=lane_index+1,
+                            ordinal=1,slot_count=0 WHERE id=1""")
+                    else:
+                        # Exactly 63 minutes after C's last committed page.
+                        self.db.execute("""UPDATE schedule_state SET
+                            round_no=round_no+1,lane_index=0,ordinal=1,slot_count=0,
+                            ready_at=? WHERE id=1""",
+                            (iso((now or datetime.now(timezone.utc))+timedelta(minutes=COOLDOWN_MINUTES)),))
                 else:
-                    # Exactly 63 minutes after C's last committed page.
-                    self.db.execute("""UPDATE schedule_state SET
-                        round_no=round_no+1,lane_index=0,ordinal=1,slot_count=0,
-                        ready_at=? WHERE id=1""",
-                        (iso((now or datetime.now(timezone.utc))+timedelta(minutes=COOLDOWN_MINUTES)),))
-            else:
-                self.db.execute("UPDATE schedule_state SET slot_count=slot_count+? WHERE id=1",
-                                (page_size,))
-            self.db.execute("COMMIT")
+                    self.db.execute("UPDATE schedule_state SET slot_count=slot_count+? WHERE id=1",
+                                    (page_size,))
+                self.db.execute("COMMIT")
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
