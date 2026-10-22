@@ -11,6 +11,8 @@ def run_offline_history_session(store, journal, raw_writer, account_keys,
     """Inspect, recover only durable pages, and report persisted state."""
     if type(max_steps) is not int or not 1 <= max_steps <= 50:
         raise ValueError("History session step budget must be 1..50")
+    if not isinstance(account_keys, (list, tuple)):
+        raise ValueError("Ordered 50-account roster required")
     account_keys = tuple(account_keys)
     latest_complete_keys = frozenset(latest_complete_keys)
     before = history_status(
