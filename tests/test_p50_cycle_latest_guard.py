@@ -60,6 +60,23 @@ class P50CycleSafetyTests(unittest.TestCase):
         history.assert_called_once()
         self.assertEqual(json.loads(output.getvalue())["latest_preparation"]["committed_pages"], 1)
 
+    def test_nonpositive_max_pages_rejected_before_any_dispatch(self):
+        for mode in ("latest", "history"):
+            for value in ("0", "-1"):
+                with self.subTest(mode=mode, value=value), \
+                     patch.object(cycle, "run_p50") as latest, \
+                     patch.object(cycle, "run_history") as history, \
+                     patch.object(cycle, "_needs_latest") as needs_latest, \
+                     patch.object(cycle, "load_three_api_environment") as credentials:
+                    with self.assertRaises(SystemExit) as caught:
+                        cycle.main([mode, "--live", "--confirm-owner-approval",
+                                    "--max-pages", value])
+                    self.assertEqual(caught.exception.code, 2)
+                    latest.assert_not_called()
+                    history.assert_not_called()
+                    needs_latest.assert_not_called()
+                    credentials.assert_not_called()
+
     def test_missing_coordinator_refuses_implicit_history_bootstrap(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
