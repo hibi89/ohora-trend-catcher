@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 from three_api_p50_history_store import P50HistoryStore
@@ -53,6 +55,55 @@ class HistorySessionTests(unittest.TestCase):
             self.assertEqual(result["history_pages_added"], 0)
             self.assertEqual(result["recovery"]["status"], "no_eligible_cursor")
             self.assertEqual(result["network_requests"], 0)
+
+    def test_two_page_recovery_reports_durable_progress_after_restart(self):
+        account = self.keys[0]
+        with P50HistoryStore(self.path) as store:
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-capture", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            captured = {
+                (account, "tail"): {
+                    "capture_id": "history-cap-1",
+                    "oldest_post_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    "terminal": False},
+                (account, "page-2"): {
+                    "capture_id": "history-cap-2",
+                    "oldest_post_at": datetime(2025, 1, 1, tzinfo=timezone.utc),
+                    "terminal": True},
+            }
+            def verified_commit(store_arg, journal, raw_writer, *,
+                                account_key, capture_id, oldest_post_at, terminal):
+                return store_arg.commit_verified_page(
+                    account_key=account_key,
+                    expected_cursor=store_arg.read(account_key)["cursor"],
+                    next_cursor=None if terminal else "page-2",
+                    oldest_post_at=oldest_post_at, terminal=terminal,
+                    capture_id=capture_id, raw_receipt_id="raw-" + capture_id,
+                    raw_receipt_verified=True, capture_verified=True)
+            with patch("three_api_p50_history_recovery.commit_persisted_history_page",
+                       side_effect=verified_commit):
+                result = run_offline_history_session(
+                    store, None, None, self.keys, self.names,
+                    latest_complete_keys={account}, captured_pages=captured,
+                    max_steps=2)
+            self.assertEqual(result["history_pages_added"], 2)
+            self.assertEqual(result["recovery"]["status"], "completed")
+            self.assertEqual(result["after"]["verified_pages"], 2)
+        with P50HistoryStore(self.path) as reopened:
+            self.assertEqual(reopened.read(account)["state"], "window_covered")
+            self.assertEqual(reopened.read(account)["pages_verified"], 2)
+            self.assertIsNone(reopened.read(account)["cursor"])
+
+    def test_session_rejects_mismatched_durable_page_count(self):
+        with P50HistoryStore(self.path) as store:
+            with patch("three_api_p50_history_session.recover_history_pages",
+                       return_value={"completed": [{"account_key": self.keys[0]}]}):
+                with self.assertRaisesRegex(RuntimeError, "receipt count"):
+                    run_offline_history_session(
+                        store, None, None, self.keys, self.names,
+                        latest_complete_keys=set(), captured_pages={})
 
 if __name__ == "__main__":
     unittest.main()
