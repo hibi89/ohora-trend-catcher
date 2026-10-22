@@ -1,0 +1,204 @@
+{
+  "name": "OHORA P6 bounded daily collection",
+  "id": "p6-daily-collection-v1",
+  "nodes": [
+    {
+      "parameters": {
+        "events": "worklfow_call",
+        "inputSource": "passthrough"
+      },
+      "id": "p6-manual-run-trigger",
+      "name": "Manual n8n execution",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "p6-five-minute-schedule",
+      "name": "Every 5 minutes (KST gate inside P6)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$root=Join-Path $env:USERPROFILE ('OneDrive\\Desktop\\' + (-join (0x32,0xcc28,0x20,0xd504,0xb85c,0xc81d,0xd2b8,0x20,0xc544,0xce74,0xc774,0xbe0c | ForEach-Object {[char]$_})) + '\\ohora-trend-catcher'); $script=Join-Path $root 'raw_v2\\p6_n8n_tick.ps1'; if(-not (Test-Path -LiteralPath $script -PathType Leaf)){exit 2}; & $script\""
+      },
+      "id": "p6-bounded-runner",
+      "name": "P6 read gates and run at most three pages",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allowedRecovery = new Set(['resume_required', 'coverage_gap', 'resume_ready']);\nconst out = [];\nfor (const item of $input.all()) {\n  const stdout = item.json.stdout;\n  if (typeof stdout !== 'string' || !stdout.trim()) {\n    throw new Error('P6 runner returned no JSON result');\n  }\n  let result;\n  try { result = JSON.parse(stdout.trim()); }\n  catch { throw new Error('P6 runner returned invalid JSON'); }\n  const committed = Number.isInteger(result.committed_pages) && result.committed_pages >= 0\n    ? result.committed_pages : null;\n  const knownWait = ['WAIT_EXPLICIT_LIVE_APPROVAL', 'SKIP_CONCURRENT'].includes(result.action);\n  const failures = Number.isInteger(result.account_failures) && result.account_failures >= 0\n    ? result.account_failures : knownWait ? 0 : null;\n  const recoveryValue = result.recovery_status || result.status;\n  const recovery = allowedRecovery.has(recoveryValue) ? recoveryValue : null;\n  const completed = result.action === 'LIVE_TICK_COMPLETE';\n  const storage = result.storage_verification && typeof result.storage_verification === 'object'\n    ? result.storage_verification : null;\n  const storageNeedsReview = completed && (!storage || storage.status !== 'verified');\n  const malformed = committed === null || failures === null || typeof result.action !== 'string';\n  const state = malformed || storageNeedsReview ? 'manual_review'\n    : recovery ? 'attention'\n    : failures > 0 ? 'attention'\n    : completed && committed > 0 ? 'collection_progress'\n    : knownWait || completed ? 'waiting' : 'manual_review';\n  out.push({json: {\n    state, action: result.action || 'unknown',\n    run_status: typeof result.status === 'string' ? result.status : null,\n    committed_pages: committed, account_failures: failures,\n    max_pages: Number.isInteger(result.max_pages) ? result.max_pages : null,\n    live_meta_called: result.live_meta_called === true,\n    storage_verification_status: storage ? storage.status : null,\n    receipt_delta: storage && Number.isInteger(storage.receipt_delta) ? storage.receipt_delta : null,\n    durable_receipts: storage && Number.isInteger(storage.durable_receipts) ? storage.durable_receipts : null,\n    lane_status: storage && storage.lanes && typeof storage.lanes === 'object' ? storage.lanes : null,\n    recovery_status: recovery,\n    alert_required: state === 'attention' || state === 'manual_review',\n    alert_code: recovery || (storageNeedsReview ? 'storage_verification' : failures > 0 ? 'account_failures' : state)\n  }});\n}\nreturn out;"
+      },
+      "id": "p6-validate-result",
+      "name": "Validate P6 result and classify progress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "p6-alert-required",
+              "leftValue": "={{ $json.alert_required }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "p6-alert-required-gate",
+      "name": "Alert required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OHORA_P6_ALERT_WEBHOOK }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({source: 'OHORA P6', state: $json.state, action: $json.action, run_status: $json.run_status, committed_pages: $json.committed_pages, account_failures: $json.account_failures, storage_verification_status: $json.storage_verification_status, receipt_delta: $json.receipt_delta, durable_receipts: $json.durable_receipts, lane_status: $json.lane_status, recovery_status: $json.recovery_status, alert_code: $json.alert_code}) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "p6-alert-webhook",
+      "name": "Send redacted P6 alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        220
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "p6-result-recorded",
+      "name": "Keep result in n8n execution",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        380
+      ]
+    }
+  ],
+  "connections": {
+    "Every 5 minutes (KST gate inside P6)": {
+      "main": [
+        [
+          {
+            "node": "P6 read gates and run at most three pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual n8n execution": {
+      "main": [
+        [
+          {
+            "node": "P6 read gates and run at most three pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "P6 read gates and run at most three pages": {
+      "main": [
+        [
+          {
+            "node": "Validate P6 result and classify progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate P6 result and classify progress": {
+      "main": [
+        [
+          {
+            "node": "Alert required?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert required?": {
+      "main": [
+        [
+          {
+            "node": "Send redacted P6 alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Keep result in n8n execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "timezone": "Asia/Seoul",
+    "executionOrder": "v1",
+    "errorWorkflow": "p6-error-alert-v1"
+  },
+  "versionId": "p6-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

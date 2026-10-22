@@ -16,7 +16,7 @@ class ReanchorTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path=Path(self.tmp.name)/"gap.sqlite"
         self.ledger=DailyGapLedger(self.path)
-        self.addCleanup(self.ledger.close)
+        self.addCleanup(lambda: self.ledger.close())
         self.reanchor=ReanchorEvidenceStore(self.ledger)
         self.ledger.seed_previous_head("KR_001","100")
         self.ledger.begin_day("KR_001","2026-10-19")

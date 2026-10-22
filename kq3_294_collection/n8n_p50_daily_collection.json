@@ -1,0 +1,77 @@
+{
+  "name": "OHORA P50 bounded collection",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}},
+      "id": "p50-five-minute-schedule",
+      "name": "Every 5 minutes (P50 runner gates live access)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$ErrorActionPreference='Stop'; $root=Join-Path $env:USERPROFILE ('OneDrive\\Desktop\\' + (-join (0x32,0xcc28,0x20,0xd504,0xb85c,0xc81d,0xd2b8,0x20,0xc544,0xce74,0xc774,0xbe0c | ForEach-Object {[char]$_})) + '\\ohora-trend-catcher'); $runner=Join-Path $root 'raw_v2\\p50_n8n_tick.ps1'; if(-not (Test-Path -LiteralPath $runner -PathType Leaf)){throw 'P50 integration runner unavailable.'}; & $runner; exit $LASTEXITCODE\""
+      },
+      "id": "p50-bounded-runner",
+      "name": "Call isolated P50 runner",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const out=[]; for (const item of $input.all()) { const stdout=item.json.stdout; if(typeof stdout!=='string'||!stdout.trim()) throw new Error('P50 runner returned no JSON result'); let r; try { r=JSON.parse(stdout.trim()); } catch { throw new Error('P50 runner returned invalid JSON'); } const pages=Number.isInteger(r.committed_pages)&&r.committed_pages>=0?r.committed_pages:null; const recovered=Number.isInteger(r.recovered_pages)&&r.recovered_pages>=0?r.recovered_pages:null; const failures=Number.isInteger(r.account_failures)&&r.account_failures>=0?r.account_failures:null; const storage=r.storage_verification&&typeof r.storage_verification==='object'?r.storage_verification:null; const offline=r.mode==='P50_OFFLINE'&&r.live_meta_called===false; const malformed=pages===null||recovered===null||failures===null||typeof r.mode!=='string'||typeof r.live_meta_called!=='boolean'; const failed=r.action==='MANUAL_REVIEW'||malformed||(r.action==='LIVE_TICK_COMPLETE'&&(!storage||storage.status!=='verified')); const waiting=r.action==='WAIT_EXPLICIT_LIVE_APPROVAL'||offline||r.status==='no_ready_work'||r.status==='serial_busy'; const state=failed?'manual_review':failures>0?'attention':pages+recovered>0?'collection_progress':waiting?'waiting':'manual_review'; const alertRequired=state==='manual_review'||state==='attention'; const alertCode=state==='manual_review'?'runner_or_storage_review':state==='attention'?'account_failures':null; out.push({json:{state,action:r.action||'unknown',mode:r.mode||'unknown',status:r.status||null,committed_pages:pages,recovered_pages:recovered,account_failures:failures,attempted_steps:Number.isInteger(r.attempted_steps)?r.attempted_steps:null,live_meta_called:typeof r.live_meta_called==='boolean'?r.live_meta_called:null,storage_verification_status:storage?storage.status:null,receipt_delta:storage&&Number.isInteger(storage.receipt_delta)?storage.receipt_delta:null,durable_receipts:storage&&Number.isInteger(storage.durable_receipts)?storage.durable_receipts:null,alert_required:alertRequired,alert_code:alertCode}}); } return out;"
+      },
+      "id": "p50-validate-result",
+      "name": "Validate P50 runner result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2},
+          "conditions": [{"id": "p50-review-required", "leftValue": "={{ $json.alert_required }}", "rightValue": true, "operator": {"type": "boolean", "operation": "equals"}}],
+          "combinator": "and"
+        }
+      },
+      "id": "p50-review-required-gate",
+      "name": "Operator review required?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "P50 tick requires operator review. Inspect the sanitized result in this execution."
+      },
+      "id": "p50-stop-for-review",
+      "name": "Stop P50 run for operator review",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [1220, 220]
+    },
+    {
+      "parameters": {},
+      "id": "p50-result-recorded",
+      "name": "Keep result in n8n execution",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    }
+  ],
+  "id": "p50-daily-collection-v1",
+  "connections": {
+    "Every 5 minutes (P50 runner gates live access)": {"main": [[{"node": "Call isolated P50 runner", "type": "main", "index": 0}]]},
+    "Call isolated P50 runner": {"main": [[{"node": "Validate P50 runner result", "type": "main", "index": 0}]]},
+    "Validate P50 runner result": {"main": [[{"node": "Operator review required?", "type": "main", "index": 0}]]},
+    "Operator review required?": {"main": [[{"node": "Stop P50 run for operator review", "type": "main", "index": 0}], [{"node": "Keep result in n8n execution", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {"timezone": "Asia/Seoul", "executionOrder": "v1"},
+  "versionId": "p50-v1",
+  "tags": []
+}

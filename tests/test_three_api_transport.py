@@ -1,0 +1,278 @@
+"""Offline-only quota parser tests."""
+from datetime import date, datetime, timezone
+from email.message import Message
+from io import BytesIO
+import json
+import unittest
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
+from three_api_transport import parse_meta_usage, extract_next_cursor
+from three_api_transport import MetaTransport
+from three_api_graph_http import GraphHTTPClient
+from three_api_credentials import make_references
+from three_api_request_spec import build_request_spec
+from three_api_runtime_contract import (
+    CONTRACT_VERSION, RequestEnvelope, TransportFailure, digest_sha256,
+)
+
+
+TARGET_ID = "17840000000000000"
+
+
+def request_envelope():
+    spec = build_request_spec("A", "nails_1")
+    return RequestEnvelope(
+        CONTRACT_VERSION, "req-transport-1", "run-transport-1", "a" * 64,
+        date(2026, 10, 19), 1, "KR_001", "nails_1", "A", "front", 1,
+        None, datetime(2026, 10, 19, tzinfo=timezone.utc), spec,
+        digest_sha256({"api_version": "v26.0", "target_ig_user_id": TARGET_ID, "spec": spec}),
+        api_version="v26.0", target_ig_user_id=TARGET_ID,
+    )
+
+
+def references():
+    return make_references({lane: {
+        "token_env_name": "TEST_%s_TOKEN" % lane,
+        "ig_user_id_env_name": "TEST_%s_IG_USER_ID" % lane,
+    } for lane in "ABC"})
+
+
+class MemoryResponse:
+    def __init__(self, body, status=200, headers=None):
+        self.status = status
+        self.content = BytesIO(json.dumps(body).encode("utf-8"))
+        self.headers = Message()
+        for name, value in (headers or {}).items():
+            self.headers[name] = value
+
+    def read(self, amount=-1):
+        return self.content.read(amount)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.content.close()
+
+
+def payload():
+    return {"business_discovery": {
+        "id": TARGET_ID, "username": "nails_1",
+        "media": {"data": [{"id": "1234567890"}]},
+    }}
+
+
+def transport(*, headers=None, approved=True, sender=None):
+    client = GraphHTTPClient(
+        sender=sender or (lambda *_args, **_kwargs: MemoryResponse(
+            payload(), headers=headers if headers is not None else {
+                "X-App-Usage": '{"call_count":20}'
+            })),
+        approved=approved,
+    )
+    return MetaTransport(
+        client=client, credentials=references()["A"],
+        caller_ig_id=TARGET_ID, token="SYNTHETIC_NOT_A_REAL_TOKEN",
+        clock=lambda: datetime(2026, 10, 19, 12, tzinfo=timezone.utc),
+    )
+
+class QuotaTests(unittest.TestCase):
+    def test_cursor_extraction(self):
+        payload = {"business_discovery": {"media": {
+            "data": [{"id": "123"}],
+            "paging": {"next": "https://example.invalid/?access_token=secret",
+                       "cursors": {"after": "opaque_ABC"}}}}}
+        self.assertEqual(extract_next_cursor(payload), "opaque_ABC")
+
+    def test_full_page_without_cursor_blocks(self):
+        payload = {"business_discovery": {"media": {
+            "data": [{"id": str(i)} for i in range(4)],
+            "paging": {"next": "https://example.invalid/"}}}}
+        with self.assertRaises(ValueError):
+            extract_next_cursor(payload)
+
+    def test_cursor_cycle_blocks(self):
+        payload = {"business_discovery": {"media": {
+            "data": [{"id": "123"}],
+            "paging": {"next": "https://example.invalid/",
+                       "cursors": {"after": "same_cursor"}}}}}
+        with self.assertRaises(ValueError):
+            extract_next_cursor(payload, requested_cursor="same_cursor")
+
+    def test_valid(self):
+        self.assertEqual(parse_meta_usage({"x-app-usage": '{"call_count":84}'}), 84)
+    def test_threshold(self):
+        self.assertEqual(parse_meta_usage({"x-app-usage": '{"call_count":85}'}), 85)
+
+    def test_business_multiple_entries(self):
+        value = '{"one":[{"call_count":21},{"call_count":91}]}'
+        self.assertEqual(parse_meta_usage({"X-Business-Use-Case-Usage": value}), 91)
+
+    def test_empty_business_fails_closed(self):
+        with self.assertRaises(ValueError):
+            parse_meta_usage({"x-business-use-case-usage": "{}"})
+
+    def test_non_numeric_fails_closed(self):
+        with self.assertRaises(ValueError):
+            parse_meta_usage({"x-app-usage": '{"call_count":"85"}'})
+
+    def test_overflow_fails_closed(self):
+        with self.assertRaises(ValueError):
+            parse_meta_usage({"x-app-usage": '{"call_count":101}'})
+
+    def test_missing(self):
+        with self.assertRaises(ValueError):
+            parse_meta_usage({})
+    def test_invalid(self):
+        with self.assertRaises(ValueError):
+            parse_meta_usage({"x-app-usage": "invalid"})
+
+    def test_meta_transport_returns_typed_response_from_local_sender(self):
+        calls = []
+
+        def sender(request, *, timeout):
+            calls.append(request)
+            return MemoryResponse(payload(), headers={
+                "X-App-Usage": '{"call_count":20}',
+                "Set-Cookie": "must-not-be-retained",
+            })
+
+        result = transport(sender=sender).send(request_envelope())
+        self.assertEqual(result.request_id, "req-transport-1")
+        self.assertEqual(result.http_status, 200)
+        self.assertEqual(result.next_cursor, None)
+        self.assertEqual(result.usage_headers, {"X-App-Usage": '{"call_count":20}'})
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("SYNTHETIC_NOT_A_REAL_TOKEN", calls[0].full_url)
+
+    def test_meta_400_persists_only_safe_integer_error_codes(self):
+        """Offline fake HTTP; never retain Graph error messages or secrets."""
+        from urllib.error import HTTPError
+        from io import BytesIO
+        from email.message import Message
+        def sender(request, *, timeout):
+            body = json.dumps({"error": {
+                "code": 100, "error_subcode": 33,
+                "message": "SECRET_TOKEN_SHOULD_NOT_SURVIVE",
+                "fbtrace_id": "PRIVATE_TRACE",
+            }}).encode()
+            raise HTTPError(request.full_url, 400, "Bad Request",
+                            Message(), BytesIO(body))
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "http_error")
+        self.assertIn("code=100", ctx.exception.safe_message)
+        self.assertIn("subcode=33", ctx.exception.safe_message)
+        self.assertNotIn("SECRET_TOKEN", ctx.exception.safe_message)
+        self.assertNotIn("PRIVATE_TRACE", ctx.exception.safe_message)
+
+    def test_explicit_invalid_cursor_stops_as_cursor_invalid_without_retry(self):
+        calls = []
+        def sender(request, *, timeout):
+            calls.append(request)
+            body = json.dumps({"error": {
+                "code": 100, "error_subcode": 33,
+                "message": "Invalid after cursor",
+            }}).encode()
+            from urllib.error import HTTPError
+            from io import BytesIO
+            from email.message import Message
+            raise HTTPError(request.full_url, 400, "Bad Request", Message(), BytesIO(body))
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "cursor_invalid")
+        self.assertEqual(ctx.exception.scope, "account")
+        self.assertEqual(ctx.exception.http_status, 400)
+        self.assertFalse(ctx.exception.retryable)
+        self.assertEqual(ctx.exception.safe_message,
+                         "Meta explicitly rejected the supplied cursor")
+        self.assertEqual(len(calls), 1)
+
+    def test_generic_code_100_remains_http_error(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+        from email.message import Message
+        def sender(request, *, timeout):
+            body = json.dumps({"error": {
+                "code": 100, "message": "Invalid parameter: requested fields",
+            }}).encode()
+            raise HTTPError(request.full_url, 400, "Bad Request", Message(), BytesIO(body))
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "http_error")
+        self.assertFalse(ctx.exception.retryable)
+
+    def test_generic_error_retains_only_numeric_usage_evidence(self):
+        sender = lambda *_a, **_k: MemoryResponse(
+            {"error": {"code": 999, "message": "private provider text"}},
+            status=400, headers={"X-App-Usage": '{"call_count":85.2}'})
+        with self.assertRaises(TransportFailure) as ctx:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(ctx.exception.category, "http_error")
+        self.assertEqual(ctx.exception.safe_message,
+                         "HTTP rejected (code=999) usage_pct=86")
+        self.assertNotIn("private provider text", ctx.exception.safe_message)
+
+    def test_default_graph_gate_blocks_before_sender(self):
+        calls = []
+        client = GraphHTTPClient(sender=lambda *_a, **_k: calls.append(1))
+        blocked = MetaTransport(
+            client=client, credentials=references()["A"],
+            caller_ig_id=TARGET_ID, token="SYNTHETIC_NOT_A_REAL_TOKEN",
+        )
+        with self.assertRaises(TransportFailure) as ctx:
+            blocked.send(request_envelope())
+        self.assertEqual(ctx.exception.category, "approval_denied")
+        self.assertEqual(calls, [])
+
+    def test_missing_or_high_usage_preserves_received_response_then_halts(self):
+        for headers, category in (
+            ({}, "usage_missing"),
+            ({"X-App-Usage": '{"call_count":85}'}, "usage_limit"),
+        ):
+            with self.subTest(category=category):
+                t = transport(headers=headers)
+                response = t.send(request_envelope())
+                self.assertEqual(response.http_status, 200)
+                self.assertIn("business_discovery", response.payload)
+                with self.assertRaises(TransportFailure) as ctx:
+                    t.send(request_envelope())
+                self.assertEqual(ctx.exception.category, category)
+
+    def test_missing_user_code_is_safely_classified_with_quota(self):
+        sender = lambda *_a, **_k: MemoryResponse(
+            {"error": {"code": 110, "error_subcode": 2207013}},
+            status=400, headers={"X-App-Usage": '{"call_count":21.3}'})
+        t = transport(sender=sender)
+        with self.assertRaises(TransportFailure) as error:
+            t.send(request_envelope())
+        failure = error.exception
+        self.assertEqual((failure.http_status, failure.category, failure.scope),
+                         (400, "http_error", "account"))
+        self.assertEqual(failure.safe_message,
+                         "Target account unavailable code=110 subcode=2207013 usage_pct=22")
+
+    def test_missing_user_code_without_usage_does_not_claim_quota(self):
+        sender = lambda *_a, **_k: MemoryResponse(
+            {"error": {"code": 110, "error_subcode": 2207013}},
+            status=400, headers={})
+        with self.assertRaises(TransportFailure) as error:
+            transport(sender=sender).send(request_envelope())
+        self.assertEqual(error.exception.safe_message,
+                         "Target account unavailable code=110 subcode=2207013")
+
+    def test_lane_and_target_identity_are_bound_before_send(self):
+        calls = []
+        client = GraphHTTPClient(sender=lambda *_a, **_k: calls.append(1), approved=True)
+        wrong_lane = MetaTransport(
+            client=client, credentials=references()["B"],
+            caller_ig_id=TARGET_ID, token="SYNTHETIC_NOT_A_REAL_TOKEN",
+        )
+        with self.assertRaises(TransportFailure) as ctx:
+            wrong_lane.send(request_envelope())
+        self.assertEqual(ctx.exception.category, "approval_denied")
+        self.assertEqual(calls, [])
+
+if __name__ == "__main__":
+    unittest.main()

@@ -106,10 +106,24 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         runner.evidence.commit_staged_page(
             job["id"],job["lease_id"],normalized,now=NOW)
         self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        # Source committed, daily ledger/RAW not yet projected: audit must
+        # expose the incomplete three-DB boundary without altering it.
+        before=tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db))
+        pending=runner.audit_storage()
+        self.assertEqual(pending["source_pages"],1)
+        self.assertEqual(pending["unverified_source"],1)
+        self.assertFalse(pending["storage_verified"])
+        self.assertEqual(tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db)),before)
         runner.close()
         restarted=self.create(front={})
         r=restarted.reconcile()
         self.assertEqual(r["mirror_posts"],4)
+        repaired=restarted.audit_storage()
+        self.assertEqual(repaired["verified_pages"],1)
+        self.assertEqual(repaired["pages_requiring_attention"],0)
+        self.assertTrue(repaired["storage_verified"])
         self.assertEqual(r["front_pages"],1)
         self.assertEqual(restarted.mirror.db.execute(
             "SELECT COUNT(*) FROM raw_post_observations").fetchone()[0],4)
@@ -271,6 +285,171 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
                          "front_committed")
         self.assertEqual(runner.coordinator.db.execute(
             "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+
+    def test_serial_dispatch_commits_one_page_per_tick(self):
+        self.front[(151,1,None)]=fixture([30151],None)
+        self.front[(1,2,"p2")]=fixture([111,110,109,108],None)
+        runner=self.create()
+        expected=(("A",1,1),("B",151,1),("C",1,2))
+        for index,(lane,ordinal,page) in enumerate(expected,1):
+            with self.subTest(tick=index):
+                result=runner.step_serial(now=NOW)
+                self.assertEqual((result["selected_lane"],result["status"]),
+                                 (lane,"front_committed"))
+                self.assertEqual((result["account_ordinal"],result["page"]),
+                                 (ordinal,page))
+                self.assertEqual(runner.coverage()["front_pages"],index)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],9)
+        blocked=runner.step_serial(now=NOW)
+        self.assertEqual((blocked["selected_lane"],blocked["status"]),
+                         ("A","front_fixture_missing"))
+        self.assertEqual(runner.coverage()["front_pages"],3)
+
+    def test_serial_dispatch_skips_quota_stopped_lane_without_parallel_calls(self):
+        for ordinal in range(2,295):
+            self.front[(ordinal,1,None)]=fixture([30000+ordinal],None)
+        runner=self.create()
+        runner.coordinator.observe_usage("A",85,now=NOW)
+        result=runner.step_serial(now=NOW)
+        self.assertEqual((result["selected_lane"],result["status"]),
+                         ("B","front_committed"))
+        self.assertEqual(runner.coverage()["front_pages"],1)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],1)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT halted FROM lanes WHERE lane='A'").fetchone()[0],1)
+
+    def test_serial_dispatch_rejects_duplicate_lane_order(self):
+        runner=self.create()
+        with self.assertRaises(OfflineDailyScheduleError):
+            runner.step_serial(now=NOW,lane_order=("A","A","C"))
+        self.assertEqual(runner.coverage()["front_pages"],0)
+
+    def test_serial_lane_turn_survives_process_restart(self):
+        self.front[(151,1,None)]=fixture([30151],None)
+        runner=self.create()
+        self.assertEqual(runner.step_serial(now=NOW)["selected_lane"],"A")
+        runner.close()
+        resumed=self.create()
+        result=resumed.step_serial(now=NOW)
+        self.assertEqual((result["selected_lane"],result["status"]),
+                         ("B","front_committed"))
+        self.assertEqual(resumed.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone()[0],"B")
+        self.assertEqual(resumed.coverage()["front_pages"],2)
+        self.assertEqual(resumed.mirror.summary()["raw_posts"],5)
+
+    def test_serial_missing_fixture_does_not_advance_durable_turn(self):
+        runner=self.create(front={})
+        first=runner.step_serial(now=NOW)
+        self.assertEqual((first["selected_lane"],first["status"]),
+                         ("A","front_fixture_missing"))
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
+        runner.close()
+        retry=self.create(front={})
+        second=retry.step_serial(now=NOW)
+        self.assertEqual((second["selected_lane"],second["status"]),
+                         ("A","front_fixture_missing"))
+        self.assertEqual(retry.coverage()["front_pages"],0)
+
+    def test_serial_restart_replays_durable_source_before_next_lane(self):
+        self.front[(151,1,None)]=fixture([30151],None)
+        runner=self.create()
+        with mock.patch.object(runner.raw,"project_page",
+                               side_effect=RuntimeError("synthetic crash")):
+            first=runner.step_serial(now=NOW)
+        self.assertEqual((first["selected_lane"],first["status"]),
+                         ("A","front_blocked"))
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
+        runner.close()
+        recovered=self.create(front={(151,1,None):fixture([30151],None)})
+        next_page=recovered.step_serial(now=NOW)
+        self.assertEqual((next_page["selected_lane"],next_page["status"]),
+                         ("B","front_committed"))
+        self.assertEqual(recovered.mirror.summary()["raw_posts"],5)
+        self.assertEqual(recovered.coverage()["front_pages"],2)
+        self.assertEqual(recovered.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],2)
+        self.assertEqual(recovered.reconcile()["mirror_posts"],5)
+        self.assertEqual(recovered.mirror.summary()["raw_post_observations"],5)
+
+    def test_serial_invalid_b_page_never_silently_falls_through_to_c(self):
+        self.front[(151,1,None)]=fixture([30151],None,like_count=-1)
+        self.front[(1,2,"p2")]=fixture([111],None)
+        runner=self.create()
+        self.assertEqual(runner.step_serial(now=NOW)["selected_lane"],"A")
+        result=runner.step_serial(now=NOW)
+        self.assertEqual((result["selected_lane"],result["status"]),
+                         ("B","front_blocked"))
+        self.assertEqual(runner.coverage()["front_pages"],1)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],4)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone()[0],"A")
+
+    def test_serial_all_quota_lanes_stop_without_new_proof(self):
+        runner=self.create()
+        for lane in ("A","B","C"):
+            self.assertTrue(runner.coordinator.observe_usage(lane,85,now=NOW))
+        self.assertEqual(runner.step_serial(now=NOW),
+                         {"status":"all_lanes_unavailable","selected_lane":None})
+        self.assertEqual(runner.coverage()["front_pages"],0)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
+
+    def test_serial_invalid_lane_values_are_rejected_without_mutation(self):
+        runner=self.create()
+        for bad in (("A","A","C"), ("A",[], "C"), ("A","D","C"),
+                    ("A","B"), ("A",None,"C")):
+            with self.subTest(bad=str(bad)):
+                with self.assertRaises(OfflineDailyScheduleError):
+                    runner.step_serial(now=NOW,lane_order=bad)
+        with self.assertRaises(OfflineDailyScheduleError):
+            runner.step_serial(now=datetime(2026,10,19))
+        self.assertEqual(runner.coverage()["front_pages"],0)
+        self.assertIsNone(runner.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone())
+
+    def test_quota_stop_keeps_uncommitted_raw_and_evidence_empty(self):
+        runner=self.create()
+        self.assertTrue(runner.coordinator.observe_usage("A",85,now=NOW))
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                self.assertEqual(runner.step("A",now=NOW)["status"],
+                                 "front_lane_unavailable")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],0)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        self.assertEqual(runner.coverage()["front_pages"],0)
+        self.assertEqual(runner.coverage()["front_incomplete"],294)
+
+    def test_quota_stop_does_not_prevent_other_lane_commits(self):
+        # The default fixture only covers account 1, assigned to lane A.
+        # Supply deterministic account fixtures for the unaffected B lane.
+        for ordinal in range(2,295):
+            self.front[(ordinal,1,None)]=fixture([30000+ordinal],None)
+        runner=self.create()
+        self.assertTrue(runner.coordinator.observe_usage("A",85,now=NOW))
+        self.assertEqual(runner.step("A",now=NOW)["status"],
+                         "front_lane_unavailable")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],1)
+        self.assertEqual(runner.step("A",now=NOW)["status"],
+                         "front_lane_unavailable")
 
     def test_lane_missing_usage_halts_only_one_lane(self):
         runner=self.create()
@@ -457,6 +636,123 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         dump="\n".join(runner.coordinator.db.iterdump())
         self.assertNotIn("DROP",dump)
 
+    def test_p4_three_db_audit_proves_existing_media_without_writes(self):
+        page=fixture([115],"p2",like_count=0,media_type="CAROUSEL_ALBUM")
+        page["payload"]["data"][0]["children"]={
+            "data":[{"id":"116","media_type":"IMAGE",
+                     "media_url":"https://cdn.example.invalid/nail.jpg"}]
+        }
+        runner=self.create(front={(1,1,None):page})
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        before=tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db))
+        audit=runner.audit_storage()
+        self.assertEqual(audit["mode"],"SYNTHETIC_OFFLINE_READ_ONLY_AUDIT")
+        self.assertEqual(audit["source_pages"],1)
+        self.assertEqual(audit["verified_pages"],1)
+        self.assertEqual(audit["pages_requiring_attention"],0)
+        self.assertTrue(audit["storage_verified"])
+        self.assertFalse(audit["history_dispatch_enabled"])
+        self.assertFalse(audit["unattended_execution_enabled"])
+        self.assertEqual(tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db)),before)
+
+    def test_p4_three_db_audit_refuses_empty_collection_claim(self):
+        runner=self.create(front={})
+        audit=runner.audit_storage()
+        self.assertEqual(audit["source_pages"],0)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+
+    def test_p4_three_db_audit_detects_mirror_payload_tampering(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        request="front.2026-10-19.001.p1"
+        runner.mirror.db.execute(
+            "UPDATE page_receipts SET payload_json='[]' WHERE request_id=?",
+            (request,))
+        audit=runner.audit_storage()
+        self.assertEqual(audit["receipt_mismatch"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+        self.assertEqual(runner.mirror.summary()["raw_posts"],4)
+
+    def test_p4_three_db_audit_detects_missing_raw_observation(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.mirror.db.execute(
+            "DELETE FROM raw_post_observations WHERE request_id=? AND post_id=?",
+            ("front.2026-10-19.001.p1","115"))
+        audit=runner.audit_storage()
+        self.assertEqual(audit["observation_mismatch"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+
+    def test_p4_three_db_audit_staged_receipt_is_not_auto_promoted(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.mirror.db.execute(
+            "UPDATE page_receipts SET state='staged' WHERE request_id=?",
+            ("front.2026-10-19.001.p1",))
+        before=runner.mirror.db.total_changes
+        audit=runner.audit_storage()
+        self.assertEqual(audit["staged_receipts"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+        self.assertEqual(runner.mirror.db.total_changes,before)
+
+    def test_p4_three_db_audit_separates_clock_loss_and_orphan_receipt(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.coordinator.db.execute("DELETE FROM offline_fixture_clock")
+        runner.mirror.stage_page(
+            "front.2026-10-19.294.p3","KR_294",
+            "2026-10-19T18:00:00+09:00",[{"id":"999999"}])
+        audit=runner.audit_storage()
+        self.assertEqual(audit["missing_clock"],1)
+        self.assertEqual(audit["orphan_front_receipts"],1)
+        self.assertEqual(audit["verified_pages"],0)
+        self.assertFalse(audit["storage_verified"])
+
+    def test_p4_operator_report_explicitly_opts_in_to_integrity(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        ordinary=runner.operator_report(now=NOW)
+        self.assertNotIn("storage_integrity",ordinary)
+        before=tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db))
+        checked=runner.operator_report(now=NOW,include_storage_audit=True)
+        self.assertEqual(checked["storage_integrity"]["source_pages"],1)
+        self.assertEqual(checked["storage_integrity"]["verified_pages"],1)
+        self.assertEqual(checked["storage_integrity"]["pages_requiring_attention"],0)
+        self.assertEqual(tuple(db.total_changes for db in (
+            runner.coordinator.db,runner.ledger.db,runner.mirror.db)),before)
+        with self.assertRaises(OfflineDailyScheduleError):
+            runner.operator_report(now=NOW,include_storage_audit="true")
+
+    def test_p4_audit_detects_missing_media_parent(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.mirror.db.execute(
+            "DELETE FROM raw_post_media WHERE media_id='115' AND media_role='parent'")
+        report=runner.operator_report(now=NOW,include_storage_audit=True)
+        self.assertEqual(report["storage_integrity"]["observation_mismatch"],1)
+        self.assertEqual(report["storage_integrity"]["verified_pages"],0)
+        self.assertFalse(report["storage_integrity"]["storage_verified"])
+
+    def test_p4_audit_survives_restart_without_fixture_refetch(self):
+        runner=self.create()
+        self.assertEqual(runner.step("A",now=NOW)["status"],"front_committed")
+        runner.close()
+        restarted=self.create(front={},catchup={})
+        before=restarted.mirror.db.total_changes
+        audit=restarted.audit_storage()
+        self.assertTrue(audit["storage_verified"])
+        self.assertEqual(audit["verified_pages"],1)
+        self.assertEqual(restarted.mirror.db.total_changes,before)
+        self.assertEqual(restarted.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],1)
+
     def test_manual_review_not_masked_as_verified(self):
         runner=self.create(front={})
         for account in accounts():
@@ -465,5 +761,42 @@ class OfflineDailyOrchestratorTests(unittest.TestCase):
         runner.ledger.db.execute(
             "UPDATE daily_window SET status='needs_review' WHERE account_key='KR_001'"
         )
+        decision=runner.step("A",now=NOW)
+        self.assertEqual(decision["status"],"manual_gap_review_required")
+        self.assertEqual(decision["review_accounts"],1)
+        self.assertEqual(decision["history_eligible_accounts"],293)
+        self.assertFalse(decision["history_dispatch_enabled"])
+        before_changes=runner.ledger.db.total_changes
+        report=runner.operator_report(now=NOW)
+        self.assertEqual(report["policy"]["next_phase_if_storage_verified"],
+                         "manual_review")
+        self.assertEqual(report["policy"]["manual_review_accounts"],1)
+        self.assertEqual(report["policy"]["history_eligible_accounts"],293)
+        self.assertFalse(report["policy"]["history_dispatch_enabled"])
+        self.assertFalse(report["policy"]["unattended_execution_enabled"])
+        self.assertEqual(runner.ledger.db.total_changes,before_changes)
+        self.assertEqual(runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence").fetchone()[0],0)
+        self.assertEqual(runner.mirror.summary()["raw_posts"],0)
+        # The same account-scoped decision survives process restart.
+        runner.close()
+        back=self.create(front={},catchup={})
+        reopened=back.step("B",now=NOW)
+        self.assertEqual(reopened["review_accounts"],1)
+        self.assertEqual(reopened["history_eligible_accounts"],293)
+        self.assertEqual(reopened["status"],"manual_gap_review_required")
+        self.assertEqual(back.ledger.status("KR_001",DAY)["status"],
+                         "needs_review")
+
+    def test_front_barrier_does_not_prematurely_report_history_eligibility(self):
+        runner=self.create(front={})
+        runner.ledger.db.execute(
+            "UPDATE daily_window SET status='needs_review' WHERE account_key='KR_001'"
+        )
+        report=runner.operator_report(now=NOW)
+        self.assertEqual(report["policy"]["next_phase_if_storage_verified"],
+                         "front")
+        self.assertEqual(report["policy"]["manual_review_accounts"],0)
+        self.assertEqual(report["policy"]["history_eligible_accounts"],0)
         self.assertEqual(runner.step("A",now=NOW)["status"],
-                         "manual_gap_review_required")
+                         "front_fixture_missing")

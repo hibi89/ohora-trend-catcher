@@ -16,7 +16,18 @@ class DailyGapTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name)/"three_api_daily_gap.sqlite"
         self.l = DailyGapLedger(self.path)
-        self.addCleanup(self.l.close)
+        self.addCleanup(lambda: self.l.close())
+
+    def test_gap_lookup_index_is_present(self):
+        """Account/status/day queries stay indexed in fresh offline ledgers."""
+        indexes = self.l.db.execute("PRAGMA index_list(daily_window)").fetchall()
+        names = {row[1] for row in indexes}
+        self.assertIn("idx_daily_window_account_status_day", names)
+        columns = self.l.db.execute(
+            "PRAGMA index_info(idx_daily_window_account_status_day)"
+        ).fetchall()
+        self.assertEqual([row[2] for row in columns],
+                         ["account_key", "status", "day"])
 
     def seed(self, account="KR_001"):
         self.l.seed_previous_head(account,"100")
@@ -57,6 +68,167 @@ class DailyGapTests(unittest.TestCase):
         next=self.l.next_actions(["KR_001"],"2026-10-20")
         self.assertEqual(next[0]["phase"],"catchup")
         self.assertEqual(next[0]["gap_day"],"2026-10-19")
+
+    def test_front_barrier_is_roster_scoped_and_single_lookup(self):
+        """An absent daily window is a front; historical gaps wait for all fronts."""
+        self.seed()
+        self.front()  # KR_001 has a durable catch-up gap
+        self.l.seed_previous_head("US_151", "200")
+        self.l.begin_day("US_151", "2026-10-19")
+        self.l.record_page("US_151", "2026-10-19",
+                           phase="front", post_ids=["201", "200"])
+        self.l.begin_day("JP_003", "2026-10-19")
+        self.l.begin_day("EXTRA_999", "2026-10-19")  # not in requested roster
+        queries = []
+        self.l.db.set_trace_callback(queries.append)
+        try:
+            queue = self.l.next_actions(
+                ["JP_004", "KR_001", "JP_003", "US_151"], "2026-10-19"
+            )
+        finally:
+            self.l.db.set_trace_callback(None)
+        self.assertEqual(queue, [
+            {"account_key": "JP_004", "phase": "front"},
+            {"account_key": "JP_003", "phase": "front"},
+        ])
+        self.assertEqual(len([q for q in queries
+                              if "FROM daily_window" in q]), 1)
+        # Without requested fronts, previously committed gap still wins.
+        self.assertEqual(
+            self.l.next_actions(["KR_001", "US_151"], "2026-10-19"),
+            [{"account_key": "KR_001", "phase": "catchup",
+              "gap_day": "2026-10-19"}],
+        )
+
+    def test_294_roster_front_barrier_bounded_queries(self):
+        """Full roster never scans historical gaps while any front is missing."""
+        keys = [f"KR_{i:03d}" for i in range(1, 295)]
+        self.l.seed_previous_head("KR_001", "100")
+        for key in keys:
+            self.l.begin_day(key, "2026-10-19")
+        # Historical, unresolved gap must not outrank a pending current front.
+        self.front(account="KR_001")
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "catchup_pending")
+        observed = []
+        self.l.db.set_trace_callback(observed.append)
+        try:
+            actions = self.l.next_actions(keys, "2026-10-19")
+        finally:
+            self.l.db.set_trace_callback(None)
+        self.assertEqual(len(actions), 293)
+        self.assertEqual(actions[0], {"account_key": "KR_002", "phase": "front"})
+        self.assertEqual(actions[-1], {"account_key": "KR_294", "phase": "front"})
+        self.assertEqual(
+            len([query for query in observed if "FROM daily_window" in query]), 1
+        )
+
+    def test_front_barrier_preserves_roster_order_after_restart(self):
+        """Pending fronts stay ordered and block older catch-up after restart."""
+        self.l.seed_previous_head("KR_001", "100")
+        self.l.seed_previous_head("US_151", "200")
+        for key in ("KR_001", "US_151", "JP_294"):
+            self.l.begin_day(key, "2026-10-19")
+        self.front()
+        self.l.close()
+        self.l = DailyGapLedger(self.path)
+        self.l.record_page("US_151", "2026-10-19",
+                           phase="front", post_ids=["201", "200"])
+        roster = ["JP_294", "KR_001", "US_151"]
+        self.assertEqual(self.l.next_actions(roster, "2026-10-19"),
+                         [{"account_key": "JP_294", "phase": "front"}])
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "catchup_pending")
+        self.assertEqual(self.l.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE account_key='KR_001'"
+        ).fetchone()[0], 3)
+
+    def test_all_fronts_complete_exposes_gap_and_review_in_roster_order(self):
+        """Early front barrier must not conceal older review or catch-up."""
+        self.seed()
+        self.front()
+        self.l.seed_previous_head("US_151", "200")
+        self.l.begin_day("US_151", "2026-10-19")
+        self.l.record_page("US_151", "2026-10-19",
+                           phase="front", post_ids=["201"])
+        actions = self.l.next_actions(["US_151", "KR_001"], "2026-10-19")
+        self.assertEqual(actions, [
+            {"account_key": "US_151", "phase": "needs_review",
+             "gap_day": "2026-10-19"},
+            {"account_key": "KR_001", "phase": "catchup",
+             "gap_day": "2026-10-19"},
+        ])
+
+    def test_front_barrier_rejects_duplicate_roster_without_sql(self):
+        """Duplicate account input cannot silently duplicate collection actions."""
+        self.seed()
+        statements = []
+        self.l.db.set_trace_callback(statements.append)
+        try:
+            with self.assertRaises(GapEvidenceError):
+                self.l.next_actions(["KR_001", "KR_001"], "2026-10-19")
+        finally:
+            self.l.db.set_trace_callback(None)
+        self.assertEqual(statements, [])
+
+    def test_front_barrier_rejects_invalid_roster_without_sql(self):
+        """Reject malformed account IDs before any SQLite status lookup."""
+        statements = []
+        self.l.db.set_trace_callback(statements.append)
+        try:
+            with self.assertRaises(GapEvidenceError):
+                self.l.next_actions(["KR_001", "bad account"], "2026-10-19")
+        finally:
+            self.l.db.set_trace_callback(None)
+        self.assertEqual(statements, [])
+
+    def test_empty_roster_returns_no_actions(self):
+        """An empty requested roster must never schedule off-roster accounts."""
+        self.seed()
+        self.front()
+        self.assertEqual(self.l.next_actions([], "2026-10-19"), [])
+
+    def test_manual_review_blocks_only_affected_account_history(self):
+        """One review exception must not starve another verified account."""
+        self.seed()
+        self.l.record_page("KR_001", "2026-10-19",
+                           phase="front", post_ids=["115", "114"])
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "needs_review")
+        self.l.seed_previous_head("US_151", "200")
+        self.l.begin_day("US_151", "2026-10-19")
+        self.l.record_page("US_151", "2026-10-19",
+                           phase="front", post_ids=["201", "200"])
+        self.assertEqual(self.l.next_actions(
+            ["KR_001", "US_151"], "2026-10-19"), [
+                {"account_key": "KR_001", "phase": "needs_review",
+                 "gap_day": "2026-10-19"},
+                {"account_key": "US_151", "phase": "history"},
+            ])
+        # The exception stays durable; eligibility must not change its state.
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "needs_review")
+
+    def test_old_day_review_does_not_starve_other_day_history(self):
+        """New daily front completion does not erase an old manual-review gap."""
+        self.seed()
+        self.l.record_page("KR_001", "2026-10-19",
+                           phase="front", post_ids=["115", "114"])
+        self.l.begin_day("KR_001", "2026-10-20")
+        self.l.record_page("KR_001", "2026-10-20",
+                           phase="front", post_ids=["117", "115"])
+        self.l.seed_previous_head("US_151", "200")
+        self.l.begin_day("US_151", "2026-10-20")
+        self.l.record_page("US_151", "2026-10-20",
+                           phase="front", post_ids=["201", "200"])
+        self.assertEqual(self.l.next_actions(
+            ["US_151", "KR_001"], "2026-10-20"), [
+                {"account_key": "KR_001", "phase": "needs_review",
+                 "gap_day": "2026-10-19"},
+                {"account_key": "US_151", "phase": "history"},
+            ])
+        self.assertEqual(self.l.status("KR_001", "2026-10-19")["status"],
+                         "needs_review")
 
     def test_front_is_first_for_all_accounts(self):
         self.seed();self.front()

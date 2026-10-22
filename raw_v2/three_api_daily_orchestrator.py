@@ -22,11 +22,16 @@ import json
 from pathlib import Path
 
 from three_api_coordinator import Coordinator, LANES, stamp
+from three_api_serial_lock import single_dispatch_gate
 from three_api_daily_gap import DailyGapLedger, _day
 from three_api_daily_projection import DailyEvidenceProjector
 from three_api_evidence import PageEvidenceStore
 from three_api_meta_normalizer import normalize_meta_page
-from three_api_raw_mirror import OfflineRawMirror, _observation_time
+from three_api_raw_mirror import (
+    OfflineRawMirror, OfflineRawMirrorError, _observation_time,
+    _normalize_post, _canonical,
+)
+from three_api_raw_projection import OfflineRawProjectionError
 from three_api_raw_projection import OfflineRawEvidenceProjector
 from three_api_catchup_offline import OfflineCatchupRunner, OfflineCatchupError
 from three_api_catchup_payload import (
@@ -70,6 +75,13 @@ class OfflineDailyOrchestrator:
         self.mirror = None
         try:
             self.coordinator = Coordinator(paths[0])
+            # Only an offline manual fairness cursor. This does not authorize
+            # HTTP, change any per-page A/B/C assignment, or reset a quota.
+            self.coordinator.db.execute("""CREATE TABLE IF NOT EXISTS
+              offline_serial_turn (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                last_lane TEXT NOT NULL CHECK(last_lane IN ('A','B','C'))
+              )""")
             self.evidence = PageEvidenceStore(self.coordinator)
             self.ledger = DailyGapLedger(paths[1])
             self.daily = DailyEvidenceProjector(
@@ -123,6 +135,9 @@ class OfflineDailyOrchestrator:
         # replay a staged inbox before examining phase decisions.
         self.catchup_runner.reconcile_pending()
         self.catchup.reconcile_all()
+        # The caller only needs recovery to finish before dispatch. Avoid a
+        # second roster-wide coverage scan on every manual scheduler tick;
+        # coverage() remains available explicitly for reporting and tests.
         return self.coverage()
 
     def coverage(self):
@@ -155,7 +170,131 @@ class OfflineDailyOrchestrator:
             "mirror_pending_pages":self.mirror.summary()["pending_pages"]
         }
 
-    def operator_report(self, *, now):
+    def audit_storage(self):
+        """Read-only cross-DB proof audit for the synthetic offline P4 boundary.
+
+        This does not reconcile, fetch, promote, or mark work complete.
+        It checks immutable source/ledger proof, capture clock, staged RAW
+        digest, committed observations, and parent/child media identity.
+        Failure counters intentionally never disclose posts or cursors.
+        """
+        self.daily._verify_binding()
+        counters = {
+            "verified_pages": 0, "missing_clock": 0,
+            "unverified_source": 0, "missing_receipt": 0,
+            "staged_receipts": 0, "receipt_mismatch": 0,
+            "observation_mismatch": 0, "orphan_front_receipts": 0,
+        }
+        pages = list(self.coordinator.db.execute(
+            "SELECT account_ordinal,page,job_id FROM page_evidence "
+            "ORDER BY account_ordinal,page"
+        ))
+        known = set()
+        for page in pages:
+            ordinal, sequence, job_id = (
+                page["account_ordinal"], page["page"], page["job_id"]
+            )
+            receipt_id = f"front.{self.day}.{ordinal:03d}.p{sequence}"
+            known.add(receipt_id)
+            clock = self.coordinator.db.execute(
+                "SELECT observed_at FROM offline_fixture_clock WHERE job_id=?",
+                (job_id,)
+            ).fetchone()
+            if clock is None:
+                counters["missing_clock"] += 1
+                continue
+            try:
+                account, posts = self.raw._validated_page(ordinal, sequence)
+                normalized = [_normalize_post(post) for post in posts]
+                payload = _canonical(normalized)
+                digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                observed = _observation_time(clock["observed_at"])
+            except (OfflineRawProjectionError, OfflineRawMirrorError,
+                    TypeError, ValueError):
+                counters["unverified_source"] += 1
+                continue
+            receipt = self.mirror.db.execute(
+                "SELECT account_key,observed_at,payload_sha256,payload_json,state "
+                "FROM page_receipts WHERE request_id=?", (receipt_id,)
+            ).fetchone()
+            if receipt is None:
+                counters["missing_receipt"] += 1
+                continue
+            if (receipt["account_key"] != account or
+                    receipt["observed_at"] != observed or
+                    receipt["payload_sha256"] != digest or
+                    receipt["payload_json"] != payload):
+                counters["receipt_mismatch"] += 1
+                continue
+            if receipt["state"] == "staged":
+                counters["staged_receipts"] += 1
+                continue
+            if receipt["state"] != "committed":
+                counters["receipt_mismatch"] += 1
+                continue
+            observations = list(self.mirror.db.execute(
+                "SELECT post_id,observed_at,like_count,comments_count,"
+                "like_present,comments_present FROM raw_post_observations "
+                "WHERE request_id=?", (receipt_id,)
+            ))
+            expected_ids = {post["id"] for post in normalized}
+            got_ids = {row["post_id"] for row in observations}
+            verified = len(observations) == len(expected_ids) and got_ids == expected_ids
+            if verified:
+                by_id = {post["id"]: post for post in normalized}
+                for observation in observations:
+                    post = by_id[observation["post_id"]]
+                    if (observation["observed_at"] != observed or
+                            observation["like_count"] != post.get("like_count") or
+                            observation["comments_count"] != post.get("comments_count") or
+                            observation["like_present"] != int("like_count" in post) or
+                            observation["comments_present"] != int("comments_count" in post)):
+                        verified = False
+                        break
+                    stored = self.mirror.db.execute(
+                        "SELECT account_key FROM raw_posts WHERE post_id=?",
+                        (post["id"],)
+                    ).fetchone()
+                    if stored is None or stored["account_key"] != account:
+                        verified = False
+                        break
+                    media = list(self.mirror.db.execute(
+                        "SELECT media_id,account_key,media_role,item_order "
+                        "FROM raw_post_media WHERE post_id=?", (post["id"],)
+                    ))
+                    expected_media = {
+                        (post["id"],account,"parent",0),
+                        *((child["media_id"],account,"child",child["item_order"])
+                          for child in post["children"]),
+                    }
+                    if {tuple(m) for m in media} != expected_media or len(media) != len(expected_media):
+                        verified = False
+                        break
+            if verified:
+                counters["verified_pages"] += 1
+            else:
+                counters["observation_mismatch"] += 1
+        other_receipts = self.mirror.db.execute(
+            "SELECT request_id FROM page_receipts WHERE request_id LIKE ?",
+            (f"front.{self.day}.%",)
+        )
+        counters["orphan_front_receipts"] = sum(
+            row["request_id"] not in known for row in other_receipts
+        )
+        pending = len(pages) - counters["verified_pages"]
+        return {
+            "mode": "SYNTHETIC_OFFLINE_READ_ONLY_AUDIT",
+            "day": self.day, "source_pages": len(pages),
+            **counters, "pages_requiring_attention": pending,
+            # This certifies existing source pages only, never 294-account
+            # collection coverage; an empty source is not a successful audit.
+            "storage_verified": bool(pages) and pending == 0 and
+                                counters["orphan_front_receipts"] == 0,
+            "history_dispatch_enabled": False,
+            "unattended_execution_enabled": False,
+        }
+
+    def operator_report(self, *, now, include_storage_audit=False):
         """Read-only, bounded operational diagnosis of this synthetic snapshot.
 
         Never repairs or dispatches. Counts express *stored evidence*, not
@@ -164,6 +303,8 @@ class OfflineDailyOrchestrator:
         """
         if not isinstance(now, datetime) or now.tzinfo is None:
             raise OfflineDailyScheduleError("Timezone-aware report instant required")
+        if type(include_storage_audit) is not bool:
+            raise OfflineDailyScheduleError("include_storage_audit must be boolean")
         now = now.astimezone(timezone.utc)
         self.daily._verify_binding()
         utc_time = stamp(now)
@@ -256,6 +397,15 @@ class OfflineDailyOrchestrator:
                 "expired_leases": expired,
             })
         phases = {action["phase"] for action in actions}
+        # These counts are derived from the same roster-scoped action list,
+        # never from global DB rows or unverified RAW completeness.
+        history_eligible_count=sum(
+            action["phase"].startswith("history") for action in actions
+        )
+        manual_review_count=sum(
+            action["phase"] in ("reanchor","needs_review")
+            for action in actions
+        )
         if "front" in phases:
             next_phase = "front"
         elif "catchup" in phases:
@@ -292,7 +442,7 @@ class OfflineDailyOrchestrator:
                 "합성 수집 윈도우와 첫 페이지 증거가 확인됐습니다. "
                 "실제 Meta 수집과 전체 무결성은 미검증입니다."
             )
-        return {
+        result = {
             "mode": "SYNTHETIC_OFFLINE_MANUAL_ONLY",
             "read_only": True,
             "integrity": "not_fully_revalidated",
@@ -344,9 +494,17 @@ class OfflineDailyOrchestrator:
             "policy": {
                 "next_phase_if_storage_verified": next_phase,
                 "must_reconcile_before_dispatch": recovery_attention,
+                "manual_review_accounts": manual_review_count,
+                "history_eligible_accounts": history_eligible_count,
+                "history_dispatch_enabled": False,
                 "unattended_execution_enabled": False,
             },
         }
+        if include_storage_audit:
+            # Explicit operator opt-in: expensive full source/ledger/RAW
+            # evidence audit never runs on ordinary reports or scheduler ticks.
+            result["storage_integrity"] = self.audit_storage()
+        return result
 
     def _release_unused_lease(self, job):
         # Fixture omission is not a successful attempt. Do not wait 15 mins.
@@ -408,6 +566,53 @@ class OfflineDailyOrchestrator:
             self.coordinator.observe_usage(lane,None,now=now)
             return {"status":"front_blocked","lane":lane}
 
+    @single_dispatch_gate
+    def step_serial(self, *, now, lane_order=("A", "B", "C")):
+        """One manual synthetic page maximum; rotate lanes across restarts.
+
+        Rotate the first lane only after a confirmed page commit. Failed
+        fixtures, recovery errors and unavailable lanes must not advance the
+        durable fairness cursor. Never invent a new job assignment or bypass a
+        predecessor's page/cursor proof. This is NOT an HTTP scheduler.
+        """
+        if (not isinstance(lane_order, (tuple, list))
+                or len(lane_order) != len(LANES)
+                or any(type(lane) is not str for lane in lane_order)
+                or set(lane_order) != set(LANES)):
+            raise OfflineDailyScheduleError("Exactly three unique lanes required")
+        if not isinstance(now, datetime) or now.tzinfo is None:
+            raise OfflineDailyScheduleError("Timezone-aware time required")
+        order = tuple(lane_order)
+        row = self.coordinator.db.execute(
+            "SELECT last_lane FROM offline_serial_turn WHERE singleton=1"
+        ).fetchone()
+        if row is not None:
+            # Custom orders remain deterministic; do not hard-code A/B/C here.
+            pivot = order.index(row["last_lane"]) + 1
+            order = order[pivot:] + order[:pivot]
+        now = now.astimezone(timezone.utc)
+        try:
+            coverage = self.reconcile()
+        except Exception:
+            return {"status": "recovery_blocked",
+                    "selected_lane": order[0], "lane": order[0]}
+        phases = coverage["action_counts"]
+        for lane in order:
+            result = self._step_with_phases(lane, now, phases)
+            if result["status"] in ("front_lane_unavailable", "lane_blocked"):
+                continue
+            if result["status"] in ("front_committed", "applied"):
+                self.coordinator.db.execute(
+                    """INSERT INTO offline_serial_turn(singleton,last_lane)
+                       VALUES (1,?)
+                       ON CONFLICT(singleton) DO UPDATE
+                       SET last_lane=excluded.last_lane""",
+                    (lane,),
+                )
+            return {"selected_lane": lane, **result}
+        return {"status": "all_lanes_unavailable", "selected_lane": None}
+
+    @single_dispatch_gate
     def step(self, lane, *, now, stage_only=False):
         """One explicit fixture-only step; never runs autonomously or live.
 
@@ -420,24 +625,36 @@ class OfflineDailyOrchestrator:
             raise OfflineDailyScheduleError("stage_only must be boolean")
         now=now.astimezone(timezone.utc)
         try:
-            status=self.reconcile()
+            recovered_coverage=self.reconcile()
         except Exception:
             return {"status":"recovery_blocked","lane":lane}
-        acts=self.ledger.next_actions([a["key"] for a in self.accounts],self.day)
-        if any(a["phase"]=="front" for a in acts):
+        return self._step_with_phases(lane, now, recovered_coverage["action_counts"], stage_only=stage_only)
+
+    def _step_with_phases(self, lane, now, phases, *, stage_only=False):
+        """One synthetic phase decision using already reconciled evidence."""
+        if phases.get("front",0):
             if stage_only:
                 return {"status":"front_stage_only_unsupported"}
             return self._front_step(lane,now)
-        if any(a["phase"] in ("catchup","reanchor","needs_review")
-               for a in acts):
-            if any(a["phase"]=="catchup" for a in acts):
-                out=self.catchup.run_one(lane,self.day,now=now,stage_only=stage_only)
-                return {"status":out["status"],"phase":"catchup",
-                        "gap_status":out.get("gap_status")}
-            return {"status":"manual_gap_review_required"}
+        # Eligibility is a read-only decision, not a history dispatch. Review
+        # exceptions are account-scoped: preserve their count while making
+        # unrelated eligible history accounts visible to the operator.
+        history_count=sum(count for phase,count in phases.items()
+                          if phase.startswith("history"))
+        review_count=sum(phases.get(phase,0) for phase in
+                         ("reanchor","needs_review"))
+        if phases.get("catchup",0):
+            out=self.catchup.run_one(lane,self.day,now=now,stage_only=stage_only)
+            return {"status":out["status"],"phase":"catchup",
+                    "gap_status":out.get("gap_status")}
+        if review_count:
+            return {"status":"manual_gap_review_required",
+                    "review_accounts":review_count,
+                    "history_eligible_accounts":history_count,
+                    "history_dispatch_enabled":False}
         # History is only an eligibility decision. This scheduler never
         # quietly sends history requests, even if spare API budget exists.
-        if any(a["phase"].startswith("history") for a in acts):
+        if history_count:
             return {"status":"history_held_for_review",
-                    "eligible_accounts":len(acts)}
+                    "eligible_accounts":history_count}
         return {"status":"no_eligible_work"}

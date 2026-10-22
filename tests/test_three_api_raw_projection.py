@@ -34,7 +34,7 @@ class RawProjectionTests(unittest.TestCase):
         self.addCleanup(self.l.close)
         self.daily=DailyEvidenceProjector(self.c,self.l,accounts(),DAY)
         self.m=OfflineRawMirror(root/"three_api_raw_mirror.sqlite")
-        self.addCleanup(self.m.close)
+        self.addCleanup(lambda: self.m.close())
         self.projector=OfflineRawEvidenceProjector(self.daily,self.m)
         self.c.db.execute(
             "INSERT INTO jobs(account_ordinal,page,lane,phase) VALUES (1,1,'A','front')"
@@ -47,7 +47,7 @@ class RawProjectionTests(unittest.TestCase):
         if page==2:
             self.c.db.execute(
                 "INSERT INTO jobs(account_ordinal,page,lane,phase) "
-                "VALUES (1,2,'C','history')"
+                "VALUES (1,2,'C','catchup')"
             )
         lane="A" if page==1 else "C"
         job=self.c.lease(lane,now=NOW)

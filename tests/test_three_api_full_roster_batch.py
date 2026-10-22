@@ -88,6 +88,77 @@ class FullRosterBatchTests(unittest.TestCase):
         self.assertEqual(resumed.step("B",now=NOW)["status"],"history_held_for_review")
         self.assertEqual(resumed.mirror.summary()["raw_post_observations"],309)
 
+    def test_restart_does_not_duplicate_294_account_front_evidence(self):
+        runner = self.open()
+        self.assertEqual(self._drain_lane(runner, "A", 151), 150)
+        self.assertEqual(self._drain_lane(runner, "B", 145), 144)
+        self.assertEqual(runner.step("C", now=NOW)["status"], "front_committed")
+        self.assertEqual(runner.step("B", now=NOW)["status"], "front_committed")
+        self.assertEqual(runner.step("A", now=NOW)["status"], "applied")
+        before = runner.coverage()
+        evidence_before = runner.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence"
+        ).fetchone()[0]
+        runner.close()
+        resumed = self.open(front={}, catchup={})
+        after = resumed.reconcile()
+        self.assertEqual(after["mirror_posts"], before["mirror_posts"])
+        self.assertEqual(resumed.coordinator.db.execute(
+            "SELECT COUNT(*) FROM page_evidence"
+        ).fetchone()[0], evidence_before)
+        self.assertEqual(resumed.mirror.summary()["raw_post_observations"], 309)
+
+    def test_repeated_reconcile_does_not_inflate_full_roster_raw_counts(self):
+        runner=self.open()
+        self.assertEqual(self._drain_lane(runner,"A",151),150)
+        self.assertEqual(self._drain_lane(runner,"B",145),144)
+        self.assertEqual(runner.step("C",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("A",now=NOW)["status"],"applied")
+        initial=runner.coverage()
+        initial_raw=runner.mirror.summary()
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                self.assertEqual(runner.reconcile()["mirror_posts"],309)
+                self.assertEqual(runner.coverage()["front_pages"],
+                                 initial["front_pages"])
+                self.assertEqual(runner.mirror.summary()["raw_post_media"],
+                                 initial_raw["raw_post_media"])
+                self.assertEqual(runner.mirror.summary()["raw_post_observations"],
+                                 initial_raw["raw_post_observations"])
+        runner.close()
+        restarted=self.open(front={},catchup={})
+        for attempt in range(2):
+            with self.subTest(restart_attempt=attempt):
+                self.assertEqual(restarted.reconcile()["mirror_posts"],309)
+                self.assertEqual(restarted.mirror.summary()["raw_post_media"],309)
+                self.assertEqual(restarted.mirror.summary()["raw_post_observations"],309)
+
+    def test_restart_does_not_claim_coverage_when_last_account_missing(self):
+        self.front.pop((294,1,None))
+        runner=self.open()
+        self.assertEqual(self._drain_lane(runner,"A",151),150)
+        for _ in range(143):
+            self.assertEqual(runner.step("B",now=NOW)["status"],"front_committed")
+        self.assertEqual(runner.step("B",now=NOW)["status"],"front_fixture_missing")
+        before=runner.coverage()
+        self.assertGreater(before["front_incomplete"],0)
+        self.assertEqual(runner.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'").fetchone()[0],0)
+        runner.close()
+        restarted=self.open(front={},catchup={})
+        after=restarted.reconcile()
+        self.assertGreater(restarted.coverage()["front_incomplete"],0)
+        self.assertEqual(restarted.coverage()["front_pages"],before["front_pages"])
+        self.assertEqual(restarted.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'").fetchone()[0],0)
+        # Account 1 page 2 can still advance on lane C, but this must
+        # not silently certify the missing account or launch catch-up.
+        self.assertEqual(restarted.step("C",now=NOW)["status"],"front_fixture_missing")
+        self.assertGreater(restarted.coverage()["front_incomplete"],0)
+        self.assertEqual(restarted.ledger.db.execute(
+            "SELECT COUNT(*) FROM page_proof WHERE phase='catchup'").fetchone()[0],0)
+
     def test_missing_account_294_blocks_global_gap_without_lying_about_coverage(self):
         self.front.pop((294,1,None))
         runner=self.open()
