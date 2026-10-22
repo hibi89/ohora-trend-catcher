@@ -38,6 +38,7 @@
       "position": [1000, 300]
     }
   ],
+  "id": "p50-daily-collection-v1",
   "connections": {
     "Every 5 minutes (P50 runner gates live access)": {"main": [[{"node": "Call isolated P50 runner", "type": "main", "index": 0}]]},
     "Call isolated P50 runner": {"main": [[{"node": "Validate P50 runner result", "type": "main", "index": 0}]]},

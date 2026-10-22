@@ -11,6 +11,7 @@ class P50N8nExportTests(unittest.TestCase):
         workflow = json.loads((ROOT / 'kq3_294_collection' /
                                'n8n_p50_daily_collection.json').read_text(encoding='utf-8'))
         self.assertFalse(workflow['active'])
+        self.assertEqual(workflow['id'], 'p50-daily-collection-v1')
         self.assertEqual(workflow['settings']['timezone'], 'Asia/Seoul')
         nodes = {node['name']: node for node in workflow['nodes']}
         self.assertIn('n8n-nodes-base.scheduleTrigger',
