@@ -43,6 +43,19 @@ def export_observations(db_path, *, after_id=0, limit=500):
                ORDER BY o.id LIMIT ?""",
             (after_id, limit),
         ).fetchall()
+        # LIMIT applies after the join: a duplicate receipt could otherwise
+        # consume a page slot and hide a later observation.
+        ambiguous = db.execute(
+            """SELECT o.id FROM post_observations o
+               JOIN posts p ON p.post_id=o.post_id
+               JOIN three_api_raw_receipts r
+                 ON json_extract(r.payload_json,'$.request_id')=o.request_id
+                AND r.account_key=p.account_key
+               WHERE o.id>? GROUP BY o.id HAVING COUNT(*)>1 LIMIT 1""",
+            (after_id,),
+        ).fetchone()
+        if ambiguous is not None:
+            raise ValueError("Ambiguous RAW receipts for observation")
         output = []
         seen_observation_ids = set()
         for row in rows:
