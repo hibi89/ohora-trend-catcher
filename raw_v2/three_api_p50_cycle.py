@@ -121,7 +121,7 @@ def main(argv=None):
                         },
                     }
                     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-                    return 0
+                    return 2
                 result = run_history(
                     args.source, args.workspace, environment=environment,
                     live=True, approved=True, max_pages=args.max_pages or 5000)
