@@ -55,6 +55,28 @@ class OfflineHistoryBatchTests(unittest.TestCase):
                 ingest_offline_history_batch(None, None, None, pages, max_pages=1)
             ingest.assert_not_called()
 
+    def test_chain_mismatch_preflight_blocks_all_writes(self):
+        pages = [page(1, "tail", "next"), page(2, "wrong", None, terminal=True)]
+        with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page") as ingest:
+            with self.assertRaisesRegex(ValueError, "chain cursor mismatch"):
+                ingest_offline_history_batch(None, None, None, pages)
+            ingest.assert_not_called()
+
+    def test_terminal_page_cannot_be_followed_by_same_account(self):
+        pages = [page(1, "tail", None, terminal=True),
+                 page(2, "next", None, terminal=True)]
+        with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page") as ingest:
+            with self.assertRaises(ValueError):
+                ingest_offline_history_batch(None, None, None, pages)
+            ingest.assert_not_called()
+
+    def test_nonterminal_missing_cursor_preflight_blocks_all_writes(self):
+        pages = [page(1, "tail", "next"), page(2, "next", None)]
+        with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page") as ingest:
+            with self.assertRaisesRegex(ValueError, "requires continuation cursor"):
+                ingest_offline_history_batch(None, None, None, pages)
+            ingest.assert_not_called()
+
     def test_first_commit_failure_stops_remaining_pages(self):
         pages = [page(1, "tail", "next"), page(2, "next", None, terminal=True)]
         with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page",
