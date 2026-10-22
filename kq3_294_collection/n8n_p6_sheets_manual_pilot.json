@@ -1,0 +1,140 @@
+{
+  "name": "P6 Sheets export — manual gated pilot (INACTIVE)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "p6-sheets-manual",
+      "name": "Manual dry-run only",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$ErrorActionPreference='Stop'; $root=$env:OHORA_P6_REPO_ROOT; $db=$env:OHORA_P6_RAW_DB; if([string]::IsNullOrWhiteSpace($root) -or [string]::IsNullOrWhiteSpace($db)){throw 'P6 repo/db environment variables required'}; $script=Join-Path $root 'raw_v2\\three_api_sheets_export.py'; if(-not (Test-Path -LiteralPath $script -PathType Leaf) -or -not (Test-Path -LiteralPath $db -PathType Leaf)){throw 'Missing export script or RAW database'}; $after=$env:OHORA_P6_SHEETS_AFTER_ID; if([string]::IsNullOrWhiteSpace($after)){$after='0'}; if($after -notmatch '^\\d+$'){throw 'Invalid cursor'}; & python $script --db $db --after-id $after --limit 500; if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}\""
+      },
+      "id": "p6-sheets-export",
+      "name": "Read-only RAW export",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items=$input.all();if(items.length!==1)throw new Error('Expected one export response');const raw=items[0].json;if(raw.exitCode!==0)throw new Error('RAW export failed');let data;try{data=JSON.parse(raw.stdout)}catch{throw new Error('Invalid RAW export JSON')}if(data.schema_version!=='p6-sheets-export-v1'||!Array.isArray(data.rows)||!Number.isSafeInteger(data.after_id)||!Number.isSafeInteger(data.next_after_id)||typeof data.has_more!=='boolean')throw new Error('Unexpected export contract');if(data.rows.length===0){if(data.has_more)throw new Error('RAW integrity gap: do not advance cursor');return []}let prev=data.after_id;const seen=new Set();for(const row of data.rows){if(!Number.isSafeInteger(row.observation_id)||row.observation_id<=prev||typeof row.observation_key!=='string'||!row.observation_key||seen.has(row.observation_key))throw new Error('Invalid observation sequence');prev=row.observation_id;seen.add(row.observation_key)}if(prev!==data.next_after_id)throw new Error('Cursor mismatch');return data.rows.map(row=>({json:{...row,_batch_next_after_id:data.next_after_id,_batch_after_id:data.after_id}}));"
+      },
+      "id": "p6-sheets-validate",
+      "name": "Validate receipt-backed rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "P50_observations",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "observation_key"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "p6-sheets-upsert",
+      "name": "Sheets upsert by observation_key",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Manual validation gate only: do NOT persist checkpoint here. The operator must verify all rows in Sheets first.\\nconst rows=$input.all();return rows.map(x=>({json:{...x.json,checkpoint_update:'NOT_AUTOMATED',instruction:'After verifying all upserts, set OHORA_P6_SHEETS_AFTER_ID to the acknowledged next_after_id before the next run.'}}));"
+      },
+      "id": "p6-sheets-review",
+      "name": "Manual checkpoint approval required",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manual dry-run only": {
+      "main": [
+        [
+          {
+            "node": "Read-only RAW export",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read-only RAW export": {
+      "main": [
+        [
+          {
+            "node": "Validate receipt-backed rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate receipt-backed rows": {
+      "main": [
+        [
+          {
+            "node": "Sheets upsert by observation_key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets upsert by observation_key": {
+      "main": [
+        [
+          {
+            "node": "Manual checkpoint approval required",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": []
+}
