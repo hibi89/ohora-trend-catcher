@@ -74,10 +74,10 @@ def probe_lane(lane, environment, *, sender=None):
 
 
 def release_verified_lane(path, lane, observation, *, now=None):
-    """Release only an expired usage_limit hold with a freshly verified result.
+    """Release a usage_limit hold when Meta explicitly verifies recovery.
 
     Caller must hold P50's serial operator lock. A successful probe is not
-    permission to clear other reasons or restart an unknown HTTP request.
+    permission to clear other reasons or restart an unknown HTTP request.\n    A successful scoped Meta BUC probe with zero regain time supersedes the\n    locally estimated cooldown, but never an explicit Meta regain hold.
     """
     now = now or datetime.now(timezone.utc)
     if (not isinstance(now, datetime) or now.utcoffset() is None
