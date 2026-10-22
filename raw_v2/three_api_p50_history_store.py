@@ -159,8 +159,8 @@ class P50HistoryStore:
                 raise ValueError("Unknown P50 history account")
             if row["cursor"] != expected_cursor:
                 raise ValueError("History cursor changed; stale page rejected")
-            if row["state"] != "continuation_ready":
-                raise ValueError("Only verified anchored history can be advanced")
+            if row["state"] not in ("ready", "continuation_ready"):
+                raise ValueError("Blocked or completed history cannot be advanced")
             existing = self.db.execute(
                 "SELECT * FROM history_receipts WHERE capture_id=? OR raw_receipt_id=?", (capture_id, raw_receipt_id)).fetchone()
             if existing is not None:
