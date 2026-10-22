@@ -78,7 +78,7 @@ class CyclePlanner:
         if len(rows)!=3 or not all(row['halted'] for row in rows):
             return None
         dates = [datetime.fromisoformat(row['ready_at']) for row in rows if row['ready_at']]
-        return min(dates) if dates else None
+        return max(dates) if len(dates)==3 else None
 
     def reconcile_saved_receipts(self, raw):
         # Only reconcile pages already durably saved; never replay unknown HTTP.
