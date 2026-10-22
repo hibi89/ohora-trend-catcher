@@ -10,6 +10,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import sqlite3
 import math
+import re
+import json
 
 LANES = ("A", "B", "C")
 ACCOUNTS = 50
@@ -132,6 +134,54 @@ class CyclePlanner:
                 oldest_published_at=min(dates) if dates else None)
             recovered += 1
         return recovered
+
+    def reopen_false_exhausted_accounts(self, raw):
+        """Resume cursor-only full pages wrongly marked terminal by older code.
+
+        This never rewinds a completed 8-post slot: the next API pass resumes
+        from its saved cursor. Do not alter terminal short pages or RAW pages.
+        """
+        repaired = []
+        rows = self.db.execute("""SELECT a.ordinal
+            FROM accounts a WHERE a.finished=1 AND a.finished_reason='exhausted'
+            ORDER BY a.ordinal""").fetchall()
+        for row in rows:
+            ordinal = row["ordinal"]
+            receipt = self.db.execute("""SELECT cycle,lane,ordinal,post_count
+                FROM jobs WHERE ordinal=? AND state='done'
+                ORDER BY rowid DESC LIMIT 1""",(ordinal,)).fetchone()
+            if receipt is None or receipt["post_count"] != PAGE_LIMIT:
+                continue
+            stored = raw.execute("""SELECT response_json FROM pages
+                WHERE cycle=? AND lane=? AND ordinal=?""",
+                (receipt["cycle"],receipt["lane"],ordinal)).fetchone()
+            if stored is None:
+                continue
+            body = json.loads(stored[0])
+            media = body.get("media") if isinstance(body,dict) else None
+            if not isinstance(media,dict):
+                continue
+            pages = media.get("paging") or {}
+            after = (pages.get("cursors") or {}).get("after")
+            if pages.get("next") or not isinstance(after,str):
+                continue
+            if not re.fullmatch(r"[A-Za-z0-9_+=/\\-]{1,2048}",after):
+                continue
+            # A full page plus a valid after cursor merits one more page probe,
+            # even if the response omitted the paging.next URL.
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                changed = self.db.execute("""UPDATE accounts
+                    SET cursor=?,finished=0,finished_reason=NULL
+                    WHERE ordinal=? AND finished=1
+                      AND finished_reason='exhausted'""",(after,ordinal)).rowcount
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+            if changed:
+                repaired.append(ordinal)
+        return repaired
 
     def _schedule(self):
         row = self.db.execute("SELECT * FROM schedule_state WHERE id=1").fetchone()
