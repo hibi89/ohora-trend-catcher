@@ -83,8 +83,10 @@ def main(argv=None):
     parser.add_argument("--confirm-owner-approval", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.max_pages is not None and args.max_pages < 1:
-            raise ValueError("--max-pages must be a positive integer")
+        if args.max_pages is not None:
+            ceiling = 150 if args.mode == "latest" else 50000 if args.mode == "history" else 0
+            if not 1 <= args.max_pages <= ceiling:
+                raise ValueError("--max-pages outside permitted mode-specific range")
         if args.mode == "status":
             if args.live or args.confirm_owner_approval or args.credentials_dir:
                 raise ValueError("Read-only status cannot accept live options")
