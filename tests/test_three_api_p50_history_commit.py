@@ -58,6 +58,34 @@ class HistoryCommitTests(unittest.TestCase):
             self.assertEqual(store.read(account)["cursor"], "tail")
             self.assertEqual(store.read(account)["pages_verified"], 0)
 
+    def test_invalid_next_cursor_rejected_before_raw_lookup(self):
+        account = self.keys[0]
+        with P50HistoryStore(self.path) as store:
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            request = SimpleNamespace(
+                account_key=account, phase="history", history_offline_only=True,
+                cursor="tail", request_id="req", page=4)
+            for bad_cursor in ("", 123, [], {}):
+                with self.subTest(cursor=bad_cursor):
+                    cursor_state = SimpleNamespace(
+                        request_id="req", current_cursor="tail",
+                        next_cursor=bad_cursor, page=4)
+                    record = SimpleNamespace(
+                        capture_id="cap-invalid", request=request,
+                        cursor_state=cursor_state, normalized_posts=[])
+                    journal = SimpleNamespace(get_capture=lambda _: record)
+                    raw = SimpleNamespace(get_raw_receipt=lambda _:
+                        self.fail("RAW accessed for invalid cursor"))
+                    with self.assertRaisesRegex(ValueError, "continuation cursor"):
+                        commit_persisted_history_page(
+                            store, journal, raw, account_key=account,
+                            capture_id="cap-invalid", oldest_post_at=None,
+                            terminal=True)
+            self.assertEqual(store.read(account)["pages_verified"], 0)
+
     def test_wrong_phase_rejected_before_raw_lookup(self):
         record = SimpleNamespace(capture_id="cap",
             request=SimpleNamespace(account_key=self.keys[0], phase="front"))
