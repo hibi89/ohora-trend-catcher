@@ -172,6 +172,48 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.calls, 1)
         self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 1)
 
+    def test_full_process_restart_keeps_raw_and_recovers_without_duplicate_http(self):
+        self.anchor(1)
+        self.names = ["nail_us_1"]
+        actual_commit = self.store.commit_verified_page
+
+        def crash_after_raw(**kwargs):
+            self.store.commit_verified_page = actual_commit
+            raise RuntimeError("synthetic power loss after durable RAW")
+        self.store.commit_verified_page = crash_after_raw
+        self.assertEqual(self.step()["status"], "manual_review")
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], "tail1")
+        binding = self.store.db.execute(
+            "SELECT request_id FROM history_requests WHERE account_key=?",
+            (self.accounts[0]["key"],)).fetchone()[0]
+        capture_id = "cap-" + binding
+        self.assertIsNotNone(self.raw.get_raw_receipt(capture_id))
+        raw_file = self.root / "p50" / "p50_raw.sqlite"
+        capture_file = self.root / "p50" / "history_capture.sqlite"
+        history_file = self.store.path
+        self.store.close()
+        self.capture.close()
+        self.raw._db.close()
+
+        reopened_raw = connect(raw_file, self.accounts, self.digest)
+        reopened_raw.isolation_level = None
+        self.addCleanup(reopened_raw.close)
+        self.raw = ContractRawWriter(reopened_raw)
+        self.capture = CaptureJournal(str(capture_file))
+        self.addCleanup(self.capture.close)
+        self.store = P50HistoryStore(history_file)
+        self.addCleanup(self.store.close)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], "tail1")
+        self.assertIsNotNone(self.raw.get_raw_receipt(capture_id))
+        self.assertEqual(self.step()["status"], "recovered")
+        self.assertEqual(self.calls, 1, "Replaying durable Capture must never send HTTP again")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 1)
+        self.assertEqual(self.raw._db.execute(
+            "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
+        self.assertEqual(self.raw._db.execute(
+            "SELECT COUNT(*) FROM post_observations").fetchone()[0], 1)
+
     def test_bound_missing_capture_blocks_without_resend(self):
         self.anchor(1)
         account = self.accounts[0]
