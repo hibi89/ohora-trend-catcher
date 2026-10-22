@@ -13,6 +13,13 @@ import unittest
 import zlib
 from unittest.mock import patch
 
+# Running this file as `python tests/run_offline.py` puts tests/ rather than
+# the repository root on sys.path. Keep package imports such as
+# `from src.collection_schedule import decide` valid in both script and -m modes.
+_REPOSITORY_ROOT = str(Path(__file__).resolve().parents[1])
+if _REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, _REPOSITORY_ROOT)
+
 
 # Split slow Windows SQLite orchestrator tests into stable, independent shards.
 # Assignment uses the full unittest ID: deterministic across OS, enumeration and
