@@ -1,10 +1,20 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-089 isolated n8n runtime blocker (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · App bound in the isolated profile, but JS task-runner connection to localhost task broker was denied (`EACCES`) under the n8n sandbox; no workflow executed. No process/listener left running.
 > Index: [P6-088 P50-first readiness](docs/P6_TROUBLESHOOTING_LEDGER.md) · Launcher offline proof passed with synthetic 50-row roster; real n8n execution/live collection still pending. No P50 environment inputs are configured. Installed n8n CLI 2.40.7 help command stalled; cause unconfirmed.
 > Index: [P6-087 P50 receipt-verifying n8n adapter](docs/P6_TROUBLESHOOTING_LEDGER.md) · n8n-only adapter performs read-only RAW/contract/Capture/coordinator receipt checks and imports the existing P50 engine from a SHA-pinned detached worktree under ignored `.tmp`; no P6 core edits. Offline P50 entrypoint verified; live API/n8n execution remains unverified.
 > Index: [P6-086 P50-first rollout](docs/P6_TROUBLESHOOTING_LEDGER.md) · Inactive P50 n8n bridge calls existing pilot CLI, one page/tick, separate workspace. P50 engine absent from this checkout; alert and receipt-readback interfaces pending. No live call or P294 activation.
 > Index: [P6-085 n8n runner clone selection](docs/P6_TROUBLESHOOTING_LEDGER.md) · Wildcard/first-match replaced with explicit repo-root resolution; implementation commit `fed83ee`, 17/17 focused checks PASS; origin push was verified at `e38c5db`.
 > Index: [P6-084 Google Sheets output boundary](docs/P6_TROUBLESHOOTING_LEDGER.md) · User decision: add Google Sheets as a derived n8n output after SQLite/RAW; keep P6 collection and source-of-truth unchanged. Spec is documentation-only; implementation deferred until n8n core is complete.
 > Index: [P6-083 credential-backed n8n alert route (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Owner selected credential-based auth and deferred channel; endpoint/credential and operational activation pending. Do not enable global `$env` access; `$vars` are plan-restricted. No product/runtime change yet.
+
+### P6-089 — 2026-10-22 · Isolated n8n runtime launch cannot reach task runner (OPEN)
+
+- **Observed:** The user asks for mock/offline n8n integration before live collection. Installed n8n CLI is 2.40.7; existing isolated `.tmp/n8n_p50_scratch` profile contains one inactive P50 workflow and zero execution rows. A new disposable profile was started on localhost only. Its first attempt assigned app and task-broker ports both to 5679 and failed with a port collision; this was a test configuration error. Retrying with app port 5680 let n8n bind and start the broker on 5679.
+- **Failure/cause:** Startup then logged `[runner:js] Error: Failed to connect to n8n task broker at 127.0.0.1:5679` / `connect EACCES`, with `Sandbox: enabled=false provider=n8n-sandbox`. The first launch also hit `EPERM` creating the isolated `.cache/n8n` directory; pre-creating that directory removed the cache mkdir error, but did not resolve task-broker access. Exact cause of the sandbox's loopback denial is unconfirmed. The server was stopped; a read-only process/port check found no n8n/node process or listener on 5678/5679/5680. No workflow import or execution occurred.
+- **Affected scope:** Only ignored `.tmp/n8n_p50_mock_runtime` scratch files and local n8n startup. No repository runtime or workflow source was changed. The existing P50 workflow remains inactive.
+- **Verification:** P50 offline launcher remains `OFFLINE_PREFLIGHT`, `P50_OFFLINE`, attempted_steps=0, `live_meta_called=false`, no workspace created. Node-executed workflow classifier synthetic cases 4/4 PASS. Handoff guard 4/4 PASS. Runtime workflow test is PENDING, not PASS. The isolated n8n profile's Python task-runner warning is unrelated to this workflow's JavaScript Code node; JS runner broker access is the unresolved blocker.
+- **Prevention/resolution:** Use a supported isolated n8n runtime that can communicate with its task broker (or a user-approved isolated Docker/runtime setup) and rerun the inactive workflow with only synthetic runner output. Do not change the operational profile or enable the P50 schedule to work around this sandbox condition.
+- **Data/safety/rollback:** No Meta call, P50/P294 RAW/Capture/control DB, cursor, roster, credentials, cooldown, or schedule state changed. Remove only this disposable scratch profile if desired; it contains no project data or credentials. Restore the previous state by stopping the isolated process (already done); no source rollback is needed.
 
 ### P6-088 — 2026-10-22 · P50-first rollout readiness and isolated n8n runtime limitation (OPEN)
 
@@ -432,6 +442,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-089 | Isolated n8n runtime | Disposable local instance starts but sandbox blocks JS runner access to broker | OPEN; no workflow execution; source/operational data unchanged |
 | P6-088 | P50-first runtime readiness | Synthetic P50 launcher proof; isolated n8n runtime attempt | Launcher offline PASS; classifier 4/4 PASS; actual n8n execution and live collection pending; CLI 2.40.7 stall OPEN |
 | P6-087 | P50 n8n receipt verification | Pinned P50 engine worktree + adapter read-only proof across RAW/contract/Capture/coordinator | 29/29 focused PASS; offline runner and scratch import/export PASS; final synchronized docs follow-up pushed; P50 suite has 4 temp-cleanup errors |
 | P6-086 | P50-first n8n bridge | Historical snapshot: P50 engine absent from this checkout at that point | Superseded by P6-087 pinned worktree; 19/19 focused PASS; PowerShell parse + diff check PASS; n8n 2.44.5 scratch import/export PASS; active=false |
