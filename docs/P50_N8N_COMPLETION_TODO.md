@@ -13,7 +13,7 @@ Use this list to track the user's agreed sequence. P50 and P294 use independent 
 ## n8n completion — pending
 
 - [x] Repeat the isolated n8n workflow end-to-end **offline/mock only** against the corrected adapter. Isolated n8n 2.40.7 execution 3 persisted `success`; the pinned launcher separately returned `OFFLINE_PREFLIGHT` / `P50_OFFLINE`, zero attempts/pages, and `live_meta_called=false`.
-- [x] Align the n8n launcher pin with P50 engine commit `8548ecb650bb17a7f671829b740609f6a72cac5a`; P50 focused suite: 43 passed, 1 platform skip; n8n adapter/export suite: 13/13 passed. P50 branch advanced by one two-line receipt-ID collision guard after `990e0cd`; latest focused suite remains 43 passed, 1 skip.
+- [x] Align the n8n launcher pin with P50 engine commit `10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb`; focused engine suite: 47 passed, 1 platform skip; n8n adapter/export suite: 13/13 passed. This SHA adds verified latest-tail history anchoring with durable evidence checks; P50 engine execution, rather than n8n, owns that feature.
 - [ ] Identify and configure the intended production P50 n8n runtime. Current default n8n profile has no P50 workflow; the separate P6 custom profile was not found.
 - [ ] Decide and explicitly approve a P50 schedule cadence and per-run/page budget. The checked-in P50 workflow currently fires every five minutes; do not activate it because that would exceed the one-page live approval and create recurring Meta calls.
 - [ ] Configure the deferred credential-backed failure alert channel and test delivery with a mock event before unattended operation.
@@ -33,5 +33,5 @@ Use this list to track the user's agreed sequence. P50 and P294 use independent 
 ## Current gates
 
 - One P50 live page is verified; broader P50 collection and scheduled n8n execution are **not** verified.
-- The current n8n pin is `8548ecb650bb17a7f671829b740609f6a72cac5a`; focused P50 tests pass locally with one platform skip, and the matching P50 GitHub offline/frozen-design checks passed. n8n adapter/export tests pass 13/13. The earlier `9f165b8` engine's four `WinError 32` teardown errors remain historical at that old SHA; do not carry them forward as a current failure or erase the earlier incident. Full n8n-branch CI at `4088bad` failed one Windows test fixture path-alias assertion; corrected locally, pending new-SHA CI.
+- The current n8n pin is `10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb`; focused P50 tests pass locally with one platform skip. Matching P50 engine CI was still in progress when checked; n8n adapter/export tests pass 13/13. The earlier `9f165b8` engine's four `WinError 32` teardown errors remain historical at that old SHA; do not carry them forward as a current failure or erase the earlier incident. Full n8n-branch CI at `4088bad` failed one Windows test fixture path-alias assertion; corrected locally at `6d096d8`, whose CI is pending.
 - No further Meta request, P50 schedule activation, or P294 activation is authorized by the one-page approval.
