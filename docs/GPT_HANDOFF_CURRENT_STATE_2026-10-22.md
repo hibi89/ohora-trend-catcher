@@ -3,8 +3,7 @@
 **기준일:** 2026-10-22 KST
 **저장소:** `C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher`
 **현재 브랜치:** `codex/p6-readiness-hardening-20261019`
-**P2 소스 수정 커밋:** `0278cae64da5ec52430eaa034ca32ed0360d69c3` (문서 동기화 커밋도 같은 작업 브랜치에 포함)
-**보고서 갱신 시점 origin HEAD:** `18af475e632bcc571b6a66f714fdd03f66174ebf` (fetch 후 local/origin 일치 확인; 뒤따른 변경은 문서 상태 보정)
+**P2 source fix:** `0278cae64da5ec52430eaa034ca32ed0360d69c3`; **P6-103 n8n correction:** `2a09fb346721893a749df4b74ab7a427551a38d3` (pushed; all 6 Actions success, including Runtime Integration `39733073179`)
 **P50 엔진 origin tip:** `e0ecd043b70c2f8f49936bc279e40d544232c862`
 
 ## 최근 사용자 지시와 현재 우선순위
@@ -20,9 +19,15 @@
 - P50 수집 엔진/커서 복구 로직은 수정하지 않았다. 기존 P50 엔진 pin은 검토·테스트된 `10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb`이다.
 - 수정은 P2 소스 커밋 `0278cae64da5ec52430eaa034ca32ed0360d69c3`과 후속 문서 동기화 커밋으로 같은 작업 브랜치에 반영됐다. `main` 병합은 하지 않았다.
 
+## P6-103 n8n recovery result correction
+
+- Offline Node reproduction showed a verified recovery-only result was classified as `manual_review` and reported a new Meta call. Source `LiveSerialStep.step()` confirms `recovered` commits an existing Capture before dispatch; no HTTP is issued on that path.
+- Adapter now maps `recovered` to `live_meta_called=false`; workflow requires valid nonnegative recovery count and counts verified recovered pages as progress. Invalid counts remain fail-closed. P50 engine internals untouched.
+- `2a09fb346721893a749df4b74ab7a427551a38d3` pushed; local focused run 20 PASS +6 subtests. All 6 Actions succeeded, including Runtime Integration run `39733073179`. No API/DB/schedule side effect.
+
 ## 오프라인 검증 증거
 
-- `python -m pytest -q tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py tests/test_p6_troubleshooting_handoff_guard.py`: **19 passed, 2 handoff-guard subtests passed**.
+- Latest focused command `python -m pytest -q tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py tests/test_p6_troubleshooting_handoff_guard.py`: **20 passed, 6 subtests passed** after P6-103.
 - pinned engine `tests/test_three_api_serial_lock.py`: **8/8 passed**.
 - Node classifier 시나리오: **5/5 passed** (offline wait, clean progress, partial attention, manual review, serial busy).
 - 격리 n8n 2.40.7 CLI E2E: offline preflight 성공 결과가 `success`, operator-review 결과가 sanitised `error`로 저장됨. 임시 비활성 workflow/격리 DB만 사용했다.
@@ -40,17 +45,16 @@
 
 ## Git 및 문서 상태
 
-- 로컬 브랜치에는 P2 소스 커밋 `0278cae`와 문서 동기화 변경이 포함되어 있다. 가장 최근 성공한 `git fetch origin`에서 n8n 브랜치 기준점은 `4e1469225a17d28285b09132fdb7175fbee49e1e`였고, 이후 커밋의 원격 반영 여부는 현재 GitHub ref로 확인해야 한다.
-- 일반 `git fetch` 첫 시도는 `.git/FETCH_HEAD` ACL로 실패했으나, 권한 상승 재시도는 성공했고 문서 보고 SHA `18af475`도 원격 일치를 확인했다. P50 origin feature ref는 `e0ecd043b70c2f8f49936bc279e40d544232c862`로 갱신됐다.
+- P6-103 source commit push 이후 GitHub branch API에서 origin ref가 `2a09fb346721893a749df4b74ab7a427551a38d3`임을 재확인했다. P50 origin feature ref는 `e0ecd043b70c2f8f49936bc279e40d544232c862`다.
 - 수정 상세 및 테스트 증거는 `docs/P50_GPT_PROGRESS_REPORT_2026-10-22.md`, `docs/P50_N8N_COMPLETION_TODO.md`, `docs/P6_TROUBLESHOOTING_LEDGER.md`에 있다. HANDOFF/STATUS 상단 요약도 이번 P1/P2 및 v3 자료를 가리킨다.
-- GitHub checks on repair tip `fa89ef73740eb40b641254fc61b5b69877dbb909`: Three API `39731218415`, Runtime Linux+all Windows shards `39731218625`, C Contract `39731218421`, Frozen Design Guard `39731218434` **SUCCESS**. Focused local guard is 4 passed +2 subtests; wider focused suite is 19 passed +2 subtests.
+- GitHub Actions on `2a09fb346721893a749df4b74ab7a427551a38d3`: Frozen Design Guard `39733073246`, C Contract `39733073167`, Three API offline `39733073258`, Frozen Guard `39733068560`, RAW v2 offline `39733068493` **SUCCESS**; P6 Runtime Integration Offline `39733073179` completed **SUCCESS**. Focused local suite is 20 passed +6 subtests and serial-lock is 8/8.
 - Project Book 색인 업데이트/재조회는 다음 인계 작업이다.
 
 ## 다음 작업자가 먼저 할 일
 
 1. 새 설계 지시를 읽고 기존 전략을 대체하는 범위를 확인한다. 변경 설계나 운영 범위가 불명확하면 추정 구현하지 않는다.
 2. 작업 전 `AGENTS.md`, `DESIGN_FREEZE_NOTICE.md`, P6 동결 설계, 최신 `HANDOFF.md`, `STATUS.md`, `docs/P6_TROUBLESHOOTING_LEDGER.md`를 읽는다. P6/RAW-v2 관련 작업이면 AGENTS가 지시한 사고 기록도 확인한다.
-3. 기존 사용자 변경을 보존한 채 Git status/HEAD를 확인하고, 현재 원격 branch SHA와 비교한다. `0278cae` 및 문서 동기화 커밋의 push/CI 결과를 확인하기 전 게시 완료를 가정하지 않는다.
+3. `2a09fb3` Actions 6개가 모두 성공했음을 확인했다. 문서 변경은 현재 미커밋이다.
 4. P6 동결 설계, 운영 DB/RAW/Capture, 비활성 예약 및 P294 상태를 유지한다. 새로운 Meta 호출·운영 DB 변경·예약 활성화·main 병합 전에 별도 사용자 승인을 받는다.
 5. 설계가 n8n 연동을 계속 요구할 경우, 알림 credential/channel과 운영 n8n endpoint/cadence/budget이 여전히 결정되지 않았음을 고려한다. 먼저 mock 기반 계약을 갱신하고 운영 워크플로는 비활성으로 둔다.
 
@@ -62,7 +66,7 @@
 
 | 항목 | 상태 |
 |---|---|
-| P1/P2 n8n 분기 수정 | 로컬 구현·커밋됨 (`0278cae`), 원격 push 미확인 |
+| P1/P2 n8n 분기 수정 | 원격 반영 (`0278cae`, `2a09fb3`); 최신 CI Runtime Integration 1개 실행 중 |
 | 오프라인 단위/격리 E2E | 위 범위 PASS |
 | 새 Meta 수집 성공 | 이번 작업에서는 실행하지 않음; 기존 승인 A 1페이지 proof는 HANDOFF에 기록 |
 | n8n 예약 운영 | 미완료, 비활성 |

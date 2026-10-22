@@ -8,16 +8,18 @@ Use this list to track the user's agreed sequence. P50 and P294 use independent 
 
 - [x] Re-read Simulation v2.0, P50 v3, official Issue #15, and PR #16; v3 is the current design target and is explicitly design-only.
 - [x] Re-fetch origin: n8n branch base `4e1469225a17d28285b09132fdb7175fbee49e1e`; P50 owner tip `e0ecd043b70c2f8f49936bc279e40d544232c862`.
-- [x] Re-run the focused n8n adapter/export/handoff suite: 19 passed + 2 guard subtests. P50 engine serial-lock suite and Node classifier/E2E evidence remain as recorded below/P6-098–100.
+- [x] Re-run the focused n8n adapter/export/handoff suite after P6-103: 20 passed + 6 subtests. P50 engine serial-lock suite and Node classifier/E2E evidence remain as recorded below/P6-098–100.
 - [x] Compare P50 history changes to n8n boundary: history internals have advanced, but the pilot CLI still exposes the old latest runner only. Keep reviewed `10ebaf8` pin and do not import engine internals into n8n.
 - [ ] P50 `latest/history/status/recover` owner CLI, receipt contract, and Windows/offline verification are still required before n8n history integration.
 - [ ] GitHub status for P50 `e0ecd04` was not returned by combined-status query; do not claim it green.
 - [x] Diagnosed pushed n8n commit `3e59672` CI: Three API, C Contract, Frozen Guard PASS; Runtime Linux and Windows failed only because P6-101's detail lacked a quick-index table row. Added matching P6-101/P6-102 rows; local handoff guard 4 PASS +2 subtests.
 - [x] Push this guard repair and verify the new CI: Three API, Runtime Linux+all Windows shards, C Contract, and Frozen Design Guard all SUCCESS on branch HEAD `fa89ef7`.
 
+- [x] P6-103 recovery-only result semantics fixed in `2a09fb3`: Capture recovery reports no new Meta call; validated recovered pages count as progress; 4 Node Code-node cases and adapter regression PASS.
+- [x] Verify CI on pushed `2a09fb3`: all 6 Actions SUCCESS, including Runtime Integration Offline `39733073179`.
 - [x] P2 result routing is fail-visible: `manual_review` and partial `attention` go through an IF node to `StopAndError`; clean progress/waiting remain recorded in n8n execution history. Focused tests 19 PASS + 2 handoff subtests PASS; pinned P50 serial-lock suite 8/8 PASS; direct Node classifier cases 5/5 PASS. `serial_busy` stays a no-call waiting outcome.
 - [ ] No n8n production/instance execution was repeated after this edit. The workflow remains inactive, the user deferred the credential-backed alert channel, and no n8n schedule is authorized to run Meta calls.
-- [ ] Latest P50 source tip `c4944f1` keeps the n8n `run_p50`/status/receipt boundary modules unchanged from tested pin `10ebaf8`, but the additional history modules are not integrated with the n8n tick. Keep the exact pin unchanged until an offline contract test against the candidate SHA and green relevant CI.
+- [ ] Latest P50 source tip `e0ecd04` leaves the pilot CLI latest-run-only; history/status/recover dispatch and receipt contract are not integrated with the n8n tick. Keep the exact pin unchanged until an offline contract test against the candidate SHA and green relevant CI.
 - [ ] Upstream P50 CI run `39727639343` has OPEN blockers: Ubuntu offline-runtime failed three handoff-link/index assertions; Windows `remaining` failed those and 17 temporary SQLite cleanup errors (`WinError 32`). P50 owner must repair/retest that branch. Do not change its source from this n8n branch.
 
 ## P50 readiness and one-page proof
