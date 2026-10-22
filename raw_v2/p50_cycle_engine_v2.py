@@ -39,7 +39,7 @@ class CyclePlanner:
           cursor TEXT, finished INTEGER NOT NULL DEFAULT 0,
           finished_reason TEXT);
         CREATE TABLE IF NOT EXISTS jobs(
-          cycle INTEGER NOT NULL CHECK(cycle BETWEEN 1 AND 20),
+          cycle INTEGER NOT NULL CHECK(cycle >= 1),
           lane TEXT NOT NULL CHECK(lane IN ('A','B','C')),
           ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 50),
           state TEXT NOT NULL DEFAULT 'pending'
@@ -58,7 +58,31 @@ class CyclePlanner:
             self.db.execute("INSERT OR IGNORE INTO lanes(lane) VALUES (?)", (lane,))
         for ordinal in range(1, ACCOUNTS + 1):
             self.db.execute("INSERT OR IGNORE INTO accounts(ordinal) VALUES (?)", (ordinal,))
-        self.cutoff = (start_at or datetime.now(timezone.utc)) - timedelta(days=365)
+        # Preserve legacy receipts while removing the former 20-page schema cap.
+        schema = self.db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+        ).fetchone()[0]
+        if "BETWEEN 1 AND 20" in schema:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                self.db.execute("""CREATE TABLE jobs_unlimited(
+                  cycle INTEGER NOT NULL CHECK(cycle >= 1),
+                  lane TEXT NOT NULL CHECK(lane IN ('A','B','C')),
+                  ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 50),
+                  state TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(state IN ('pending','reserved','done','skipped')),
+                  cursor_before TEXT,cursor_after TEXT,receipt_id TEXT,post_count INTEGER,
+                  PRIMARY KEY(cycle,lane,ordinal))""")
+                self.db.execute("INSERT INTO jobs_unlimited SELECT * FROM jobs")
+                self.db.execute("DROP TABLE jobs")
+                self.db.execute("ALTER TABLE jobs_unlimited RENAME TO jobs")
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+        # Previously marked year-cutoff accounts must resume at their saved cursor.
+        self.db.execute("""UPDATE accounts SET finished=0,finished_reason=NULL
+            WHERE finished=1 AND finished_reason='one_year_cutoff'""")
 
     def set_usage(self, lane, usage, *, now=None):
         if lane not in LANES or (usage is not None and
@@ -126,14 +150,9 @@ class CyclePlanner:
                 self.db.execute("COMMIT")
                 return None
             account = self.db.execute("""
-                SELECT a.ordinal,a.cursor,COALESCE(SUM(j.post_count),0) AS posts,COUNT(j.ordinal) AS pages
-                FROM accounts a
-                LEFT JOIN jobs j ON j.ordinal=a.ordinal AND j.state='done'
-                WHERE a.finished=0
-                GROUP BY a.ordinal,a.cursor
-                HAVING COUNT(j.ordinal) < ?
-                ORDER BY posts ASC,a.ordinal ASC LIMIT 1
-            """,(MAX_CYCLES,)).fetchone()
+                SELECT ordinal,cursor FROM accounts
+                WHERE finished=0 ORDER BY ordinal LIMIT 1
+            """).fetchone()
             if account is None:
                 self.db.execute("COMMIT")
                 return None
@@ -141,16 +160,13 @@ class CyclePlanner:
                 SELECT COALESCE(MAX(cycle),0)+1 FROM jobs
                 WHERE lane=? AND ordinal=?
             """,(lane,account["ordinal"])).fetchone()[0]
-            if cycle > MAX_CYCLES:
-                self.db.execute("COMMIT")
-                return None
             self.db.execute("""
                 INSERT INTO jobs(cycle,lane,ordinal,state,cursor_before)
                 VALUES (?,?,?,'reserved',?)
             """,(cycle,lane,account["ordinal"],account["cursor"]))
             self.db.execute("COMMIT")
             return {"cycle":cycle,"lane":lane,"ordinal":account["ordinal"],
-                    "cursor":account["cursor"],"limit":PAGE_LIMIT - (account["posts"] % PAGE_LIMIT)}
+                    "cursor":account["cursor"],"limit":PAGE_LIMIT}
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
@@ -172,9 +188,8 @@ class CyclePlanner:
             raise ValueError("Missing next cursor; cannot continue safely")
         if next_cursor is not None and (not isinstance(next_cursor, str) or not next_cursor):
             raise ValueError("Invalid next cursor")
-        finished = exhausted or (oldest_published_at is not None and
-                                  oldest_published_at < self.cutoff)
-        reason = "exhausted" if exhausted else "one_year_cutoff" if finished else None
+        finished = exhausted
+        reason = "exhausted" if exhausted else None
         self.db.execute("BEGIN IMMEDIATE")
         try:
             row = self.db.execute("""
