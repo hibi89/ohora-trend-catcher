@@ -19,11 +19,22 @@ class P50HistoryPlanTests(unittest.TestCase):
                 result = plan_next_history_page(
                     store, keys, latest_complete_keys={keys[1], keys[3]},
                     max_pages=1)
-                self.assertEqual(len(result["jobs"]), 1)
-                self.assertEqual(result["jobs"][0]["account_key"], keys[1])
-                self.assertIsNone(result["jobs"][0]["cursor"])
+                self.assertEqual(len(result["jobs"]), 0)  # No verified tail anchor yet
                 self.assertEqual(result["network_requests"], 0)
                 self.assertEqual(result["database_writes"], 0)
+
+    def test_only_persisted_continuation_cursor_is_planned(self):
+        keys = [f"P50_US_{i:03d}" for i in range(1, 51)]
+        with tempfile.TemporaryDirectory() as tmp:
+            with P50HistoryStore(Path(tmp) / "p50" / "history.sqlite") as store:
+                store.initialize(keys, date(2025, 10, 22))
+                store.db.execute(
+                    "UPDATE history_accounts SET state='continuation_ready',cursor='saved-tail' "
+                    "WHERE account_key=?", (keys[1],))
+                result = plan_next_history_page(
+                    store, keys, latest_complete_keys={keys[1]}, max_pages=1)
+                self.assertEqual(result["jobs"][0]["cursor"], "saved-tail")
+                self.assertEqual(result["network_requests"], 0)
 
     def test_unknown_completion_rejected(self):
         keys = [f"P50_US_{i:03d}" for i in range(1, 51)]
