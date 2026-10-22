@@ -48,6 +48,7 @@ class P50StatusTests(unittest.TestCase):
             """)
         before = raw.read_bytes()
         result = inspect_p50(self.root)
+        self.assertIsNone(result["live_meta_called"])
         self.assertEqual(result["accounts"], 50)
         self.assertEqual(result["unique_posts"], 1)
         self.assertEqual(result["post_observations"], 1)
