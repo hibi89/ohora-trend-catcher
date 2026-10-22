@@ -1,0 +1,43 @@
+"""Bounded, serial, offline P50 history recovery loop.
+
+Only consumes already-persisted captures. No transport or RAW mutation.
+"""
+from __future__ import annotations
+
+from three_api_p50_history_commit import commit_persisted_history_page
+from three_api_p50_history_request import prepare_history_request
+
+
+def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *,
+                          latest_complete_keys, captured_pages, max_steps=10,
+                          lane="A"):
+    """Recover verified pages in order; stop at first missing evidence."""
+    if type(max_steps) is not int or not 1 <= max_steps <= 50:
+        raise ValueError("Recovery step budget must be 1..50")
+    if not isinstance(captured_pages, dict):
+        raise ValueError("Explicit persisted page index required")
+    completed = []
+    for _ in range(max_steps):
+        job = prepare_history_request(
+            store, account_keys, usernames,
+            latest_complete_keys=latest_complete_keys, lane=lane)
+        if job is None:
+            return {"status": "no_eligible_cursor", "completed": completed,
+                    "network_requests": 0}
+        key = (job["account_key"], job["cursor"])
+        evidence = captured_pages.get(key)
+        if evidence is None:
+            return {"status": "awaiting_persisted_page", "next_account": key[0],
+                    "next_cursor": key[1], "completed": completed,
+                    "network_requests": 0}
+        if not isinstance(evidence, dict) or set(evidence) != {
+                "capture_id", "oldest_post_at", "terminal"}:
+            raise ValueError("Invalid persisted history page descriptor")
+        decision = commit_persisted_history_page(
+            store, journal, raw_writer, account_key=key[0],
+            capture_id=evidence["capture_id"],
+            oldest_post_at=evidence["oldest_post_at"],
+            terminal=evidence["terminal"])
+        completed.append({"account_key": key[0], "state": decision["state"]})
+    return {"status": "step_budget_exhausted", "completed": completed,
+            "network_requests": 0}
