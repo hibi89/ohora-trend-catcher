@@ -23,6 +23,28 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(len(inspect(p)["files"]), 2)
             self.assertEqual(before, (db.read_bytes(), wal.read_bytes()))
 
+    def test_nested_symlink_not_followed(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "p50"
+            root.mkdir()
+            target = Path(d) / "external"
+            target.mkdir()
+            (target / "history.sqlite").write_bytes(b"secret")
+            try:
+                (root / "nested").symlink_to(target, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink unsupported")
+            self.assertEqual(inspect(root)["files"], [])
+
+    def test_secret_file_excluded(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".env").write_text("SECRET")
+            (root / "p50_raw.sqlite").write_bytes(b"x")
+            files = inspect(root)["files"]
+            self.assertEqual(len(files), 1)
+            self.assertEqual(files[0]["relative_path"], "p50_raw.sqlite")
+
     def test_symlink_root_refused(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
