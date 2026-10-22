@@ -88,6 +88,17 @@ class P50HistoryStoreTests(unittest.TestCase):
                 self.commit(store, raw_receipt_id='capture-1')
             self.assertEqual(store.read(self.keys[0])['pages_verified'], 0)
 
+    def test_reused_raw_receipt_rejected_without_advancement(self):
+        self.initialize()
+        with P50HistoryStore(self.path) as store:
+            self.commit(store)
+            with self.assertRaises(ValueError):
+                self.commit(store, expected_cursor="next-1",
+                            next_cursor="next-2", capture_id="capture-2",
+                            raw_receipt_id="raw-1")
+            self.assertEqual(store.read(self.keys[0])["pages_verified"], 1)
+            self.assertEqual(store.read(self.keys[0])["cursor"], "next-1")
+
     def test_unverified_raw_never_advances(self):
         self.initialize()
         with P50HistoryStore(self.path) as store:
