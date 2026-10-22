@@ -130,6 +130,25 @@ class CycleTests(unittest.TestCase):
                              (21,21,"A",1))
             p.db.close()
 
+    def test_reserved_short_page_reconciles_cursor_without_next_url(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            reserved=p.next_job(now=T)
+            raw=sqlite3.connect(":memory:")
+            raw.execute("""CREATE TABLE pages(cycle INTEGER,lane TEXT,
+                ordinal INTEGER,response_json TEXT)""")
+            bd={"media":{"data":posts(3),"paging":{
+                "cursors":{"after":"saved_cursor"}}}}
+            raw.execute("INSERT INTO pages VALUES (?,?,?,?)",
+                        (reserved["cycle"],"A",1,json.dumps(bd)))
+            self.assertEqual(p.reconcile_saved_receipts(raw),1)
+            self.assertEqual(p.summary()["reserved_requests"],0)
+            job=p.next_job(now=T)
+            self.assertEqual((job["lane"],job["ordinal"],job["limit"],job["cursor"]),
+                             ("A",1,5,"saved_cursor"))
+            raw.close()
+            p.db.close()
+
     def test_recover_false_terminal_full_page_from_existing_raw(self):
         with tempfile.TemporaryDirectory() as d:
             p=new_planner(d)
