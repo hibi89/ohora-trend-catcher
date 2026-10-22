@@ -16,6 +16,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
     if type(max_steps) is not int or not 1 <= max_steps <= 50:
         raise ValueError("Recovery step budget must be 1..50")
     account_keys = tuple(account_keys)
+    if lane not in ("A", "B", "C"):
+        raise ValueError("Unknown P50 API lane")
     if not isinstance(captured_pages, dict):
         raise ValueError("Explicit persisted page index required")
     # An account's captured page index must be keyed by its immutable
@@ -67,7 +69,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
         key = (job["account_key"], job["cursor"])
         evidence = captured_pages.get(key)
         if evidence is None:
-            deferred.append(key[0])
+            if key[0] not in deferred:
+                deferred.append(key[0])
             available.discard(key[0])
             continue
         if not isinstance(evidence, dict) or set(evidence) != {
@@ -83,7 +86,8 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
             available.discard(key[0])
         elif (key[0], store.read(key[0])["cursor"]) not in captured_pages:
             available.discard(key[0])
-            deferred.append(key[0])
+            if key[0] not in deferred:
+                deferred.append(key[0])
     # Only count still-eligible persisted work, not accounts already completed.
     budget_exhausted = bool(available)
     return {"status": "step_budget_exhausted" if budget_exhausted else
