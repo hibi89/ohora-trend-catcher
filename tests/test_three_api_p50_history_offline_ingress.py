@@ -21,6 +21,30 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                 ingest_offline_history_response(
                     ForbiddenCapture(), object(), request, response)
 
+    def test_unanchored_history_never_touches_capture(self):
+        from three_api_p50_history_offline_ingress import (
+            ingest_and_commit_offline_history_page)
+        store = SimpleNamespace(read=lambda _: {
+            "state": "ready", "cursor": None})
+        request = SimpleNamespace(
+            phase="history", account_key="P50_US_001", cursor=None)
+        with self.assertRaises(ValueError):
+            ingest_and_commit_offline_history_page(
+                store, object(), object(), request, object(),
+                oldest_post_at=None)
+
+    def test_mismatched_history_cursor_never_touches_capture(self):
+        from three_api_p50_history_offline_ingress import (
+            ingest_and_commit_offline_history_page)
+        store = SimpleNamespace(read=lambda _: {
+            "state": "continuation_ready", "cursor": "expected"})
+        request = SimpleNamespace(
+            phase="history", account_key="P50_US_001", cursor="stale")
+        with self.assertRaises(ValueError):
+            ingest_and_commit_offline_history_page(
+                store, object(), object(), request, object(),
+                oldest_post_at=None)
+
     def test_wrong_response_identity_never_touches_capture(self):
         request = SimpleNamespace(
             phase="history", history_offline_only=True, request_id="req-1")
