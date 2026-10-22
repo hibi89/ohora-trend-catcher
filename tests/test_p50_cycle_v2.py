@@ -115,6 +115,19 @@ class CycleTests(unittest.TestCase):
             self.assertEqual(p.summary()["finished_accounts"],50)
             p.db.close()
 
+    def test_more_than_twenty_rounds_are_allowed(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            p._schedule()
+            for number in range(1,21):
+                p.db.execute("""INSERT INTO jobs(cycle,lane,ordinal,state,post_count)
+                    VALUES (?,'A',1,'done',8)""",(number,))
+            p.db.execute("UPDATE schedule_state SET round_no=21 WHERE id=1")
+            j=p.next_job(now=T)
+            self.assertEqual((j["round"],j["cycle"],j["lane"],j["ordinal"]),
+                             (21,21,"A",1))
+            p.db.close()
+
     def test_reserved_job_is_not_duplicated(self):
         with tempfile.TemporaryDirectory() as d:
             p=new_planner(d)
