@@ -6,7 +6,6 @@ verified latest-complete keys. The original P50 latest collector is unchanged.
 from __future__ import annotations
 
 import argparse
-from datetime import date, timedelta
 import json
 from pathlib import Path
 import sqlite3
