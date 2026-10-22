@@ -23,6 +23,17 @@ class N8nTickTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def fake_existing_pilot_store(self):
+        (self.kw["workspace"] / "2026-10-22").mkdir(parents=True)
+        (self.kw["workspace"] / "2026-10-22" / "coordinator.sqlite").touch()
+        (self.kw["workspace"] / "p6_pilot_raw.sqlite").touch()
+
+    def fake_bootstrap_runner(self, *_args, **_kwargs):
+        self.fake_existing_pilot_store()
+        return {"status": "page_committed", "committed_pages": 1,
+                "account_failures": 0, "attempted_steps": 1,
+                "verified_success_at": None}
+
     @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
     def test_offline_tick_never_calls_live_and_needs_explicit_gate(self, _):
         result = adapter.tick(**self.kw)
@@ -61,13 +72,20 @@ class N8nTickTests(unittest.TestCase):
         "status": "page_committed", "committed_pages": 1, "account_failures": 0,
         "attempted_steps": 1, "verified_success_at": "2026-10-22T01:00:00+00:00"})
     @patch.object(adapter, "load_three_api_environment", return_value={"private": "secret"})
-    def test_first_verified_committed_success_persisted(self, loader, runner, _):
+    @patch.object(adapter, "read_pilot_status", side_effect=[
+        {"durable_receipts": 10, "lanes": {"A": {}, "B": {}, "C": {}}},
+        {"durable_receipts": 11, "lanes": {"A": {}, "B": {}, "C": {}}},
+    ])
+    def test_first_verified_committed_success_persisted(self, status_reader, loader, runner, _):
+        self.fake_existing_pilot_store()
         result = adapter.tick(**self.kw, live=True, confirm_owner_approval=True)
         runner.assert_called_once()
         self.assertEqual(runner.call_args.kwargs["max_pages"], 1)
         saved = json.loads(self.kw["state_file"].read_text())
         self.assertEqual(saved["first_verified_success_at"], "2026-10-22T01:00:00+00:00")
         self.assertTrue(result["first_success_persisted"])
+        self.assertEqual(result["storage_verification"]["status"], "verified")
+        self.assertEqual(result["storage_verification"]["receipt_delta"], 1)
         self.assertNotIn("secret", json.dumps(result))
 
     @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
@@ -75,11 +93,17 @@ class N8nTickTests(unittest.TestCase):
         "status": "no_ready_work", "committed_pages": 0, "account_failures": 0,
         "attempted_steps": 1, "verified_success_at": None})
     @patch.object(adapter, "load_three_api_environment", return_value={})
+    @patch.object(adapter, "read_pilot_status", side_effect=[
+        {"durable_receipts": 10, "lanes": {"A": {}, "B": {}, "C": {}}},
+        {"durable_receipts": 10, "lanes": {"A": {}, "B": {}, "C": {}}},
+    ])
     def test_no_ready_work_does_not_claim_meta_call(self, *_):
+        self.fake_existing_pilot_store()
         result = adapter.tick(**self.kw, live=True, confirm_owner_approval=True)
         self.assertEqual(result["status"], "no_ready_work")
         self.assertEqual(result["committed_pages"], 0)
         self.assertFalse(result["live_meta_called"])
+        self.assertEqual(result["storage_verification"]["status"], "verified")
 
     @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
     @patch.object(adapter, "run_manual_pilot", return_value={
@@ -89,6 +113,46 @@ class N8nTickTests(unittest.TestCase):
     def test_failed_page_does_not_persist_start_clock(self, *_):
         adapter.tick(**self.kw, live=True, confirm_owner_approval=True)
         self.assertFalse(self.kw["state_file"].exists())
+
+    @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
+    @patch.object(adapter, "run_manual_pilot", return_value={
+        "status": "page_committed", "committed_pages": 1, "account_failures": 0,
+        "attempted_steps": 1, "verified_success_at": None})
+    @patch.object(adapter, "load_three_api_environment", return_value={})
+    @patch.object(adapter, "read_pilot_status", side_effect=[
+        {"durable_receipts": 10, "lanes": {"A": {}, "B": {}, "C": {}}},
+        {"durable_receipts": 10, "lanes": {"A": {}, "B": {}, "C": {}}},
+    ])
+    def test_receipt_delta_mismatch_is_reported_for_manual_review(self, *_):
+        self.fake_existing_pilot_store()
+        result = adapter.tick(**self.kw, live=True, confirm_owner_approval=True)
+        self.assertEqual(result["storage_verification"]["status"], "receipt_delta_mismatch")
+        self.assertEqual(result["storage_verification"]["receipt_delta"], 0)
+
+    @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
+    @patch.object(adapter, "run_manual_pilot", return_value={
+        "status": "page_committed", "committed_pages": 1, "account_failures": 0,
+        "attempted_steps": 1, "verified_success_at": None})
+    @patch.object(adapter, "load_three_api_environment", return_value={})
+    @patch.object(adapter, "read_pilot_status", return_value={
+        "durable_receipts": 1, "lanes": {"A": {}, "B": {}, "C": {}}})
+    def test_empty_pilot_bootstrap_compares_first_durable_receipt(self, *_):
+        adapter.run_manual_pilot.side_effect = self.fake_bootstrap_runner
+        result = adapter.tick(**self.kw, live=True, confirm_owner_approval=True)
+        self.assertEqual(result["storage_verification"]["status"], "verified")
+        self.assertEqual(result["storage_verification"]["receipt_delta"], 1)
+
+    @patch.object(adapter, "_read_gate", return_value=("absent", None, True, None))
+    @patch.object(adapter, "run_manual_pilot")
+    @patch.object(adapter, "load_three_api_environment")
+    @patch.object(adapter, "read_pilot_status", side_effect=RuntimeError("offline fixture"))
+    def test_unreadable_receipt_baseline_stops_before_runner(self, status_reader, loader, runner, _):
+        self.fake_existing_pilot_store()
+        result = adapter.tick(**self.kw, live=True, confirm_owner_approval=True)
+        runner.assert_not_called()
+        loader.assert_not_called()
+        self.assertFalse(result["live_meta_called"])
+        self.assertEqual(result["storage_verification"]["status"], "baseline_unavailable")
 
     def test_three_page_hard_cap(self):
         with self.assertRaises(ValueError):
@@ -128,6 +192,9 @@ class N8nTickTests(unittest.TestCase):
             self.assertIn(state, code)
         self.assertIn("committed_pages", code)
         self.assertIn("alert_required", code)
+        self.assertIn("storage_verification", code)
+        self.assertIn("receipt_delta", code)
+        self.assertIn("lane_status", code)
         self.assertNotIn("stdout,", code)
         edges = workflow["connections"]["P6 read gates and run at most three pages"]["main"][0]
         self.assertEqual(edges[0]["node"], "Validate P6 result and classify progress")

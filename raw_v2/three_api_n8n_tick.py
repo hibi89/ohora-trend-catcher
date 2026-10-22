@@ -18,7 +18,7 @@ import tempfile
 from src.collection_schedule import decide, KST
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raw_v2"))
 from three_api_manual_pilot import (
-    load_three_api_environment, run_manual_pilot,
+    load_three_api_environment, read_pilot_status, run_manual_pilot,
 )
 
 
@@ -50,6 +50,38 @@ def _save_state(path: Path, stamp: str) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def _pilot_status_day(workspace: Path, today: str) -> str | None:
+    """Return the newest existing pilot coordinator day for a read-only snapshot."""
+    root = workspace.expanduser()
+    if not root.is_dir() or root.is_symlink():
+        return None
+    days = [child.name for child in root.iterdir()
+            if child.is_dir() and not child.is_symlink()
+            and re.fullmatch(r"20\d{2}-\d{2}-\d{2}", child.name)
+            and child.name <= today
+            and (child / "coordinator.sqlite").is_file()
+            and not (child / "coordinator.sqlite").is_symlink()]
+    return max(days) if days else None
+
+
+def _receipt_snapshot(workspace: Path, today: str) -> dict:
+    """Read durable receipt/lane counts through the existing read-only status API."""
+    root = workspace.expanduser()
+    raw = root / "p6_pilot_raw.sqlite"
+    day = _pilot_status_day(root, today)
+    if not raw.exists() and day is None:
+        return {"durable_receipts": 0, "lanes": None}
+    if raw.is_symlink() or not raw.is_file() or day is None:
+        raise ValueError("Pilot receipt baseline unavailable")
+    snapshot = read_pilot_status(root, day=day)
+    receipts = snapshot.get("durable_receipts")
+    lanes = snapshot.get("lanes")
+    if (type(receipts) is not int or receipts < 0 or not isinstance(lanes, dict)
+            or set(lanes) != {"A", "B", "C"}):
+        raise ValueError("Malformed pilot receipt snapshot")
+    return {"durable_receipts": receipts, "lanes": lanes}
 
 
 def _read_gate(workspace: Path, today: str, now: datetime):
@@ -132,6 +164,15 @@ def tick(*, source: Path, workspace: Path, credentials_dir: Path,
     if not live or not confirm_owner_approval:
         out["action"] = "WAIT_EXPLICIT_LIVE_APPROVAL"
         return out
+    # Establish an independent read-only baseline before any approved dispatch.
+    # An absent pilot store is a valid zero baseline; a partial/unreadable store
+    # fails closed so the scheduled runner cannot write without a receipt check.
+    try:
+        before = _receipt_snapshot(workspace, today)
+    except Exception:
+        return {**out, "action": "MANUAL_REVIEW",
+                "storage_verification": {"status": "baseline_unavailable"},
+                "live_meta_called": False}
     env = load_three_api_environment(credentials_dir, base_environment=os.environ)
     result = run_manual_pilot(source, workspace, live=True,
                               confirm_owner_approval=True,
@@ -145,6 +186,18 @@ def tick(*, source: Path, workspace: Path, credentials_dir: Path,
                 # handled separately as unknown_after_live_error.
                 "live_meta_called": result["status"] in
                 ("page_committed", "account_failed")})
+    try:
+        after = _receipt_snapshot(workspace, today)
+        delta = after["durable_receipts"] - before["durable_receipts"]
+        verified = delta >= result["committed_pages"] and delta >= 0
+        out["storage_verification"] = {
+            "status": "verified" if verified else "receipt_delta_mismatch",
+            "receipt_delta": delta,
+            "durable_receipts": after["durable_receipts"],
+            "lanes": after["lanes"],
+        }
+    except Exception:
+        out["storage_verification"] = {"status": "readback_unavailable"}
     verified = result.get("verified_success_at")
     if result["committed_pages"] and isinstance(verified, str) and not first_success:
         _save_state(state_file, verified)
