@@ -4,7 +4,7 @@
 **저장소:** `C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher`
 **현재 브랜치:** `codex/p6-readiness-hardening-20261019`
 **P2 소스 수정 커밋:** `0278cae64da5ec52430eaa034ca32ed0360d69c3` (문서 동기화 커밋도 같은 작업 브랜치에 포함)
-**최신 확인된 origin 브랜치 HEAD:** `fa89ef73740eb40b641254fc61b5b69877dbb909` (push 후 fetch로 local/origin 일치 확인)
+**보고서 갱신 시점 origin HEAD:** `18af475e632bcc571b6a66f714fdd03f66174ebf` (fetch 후 local/origin 일치 확인; 뒤따른 변경은 문서 상태 보정)
 **P50 엔진 origin tip:** `e0ecd043b70c2f8f49936bc279e40d544232c862`
 
 ## 최근 사용자 지시와 현재 우선순위
@@ -41,7 +41,7 @@
 ## Git 및 문서 상태
 
 - 로컬 브랜치에는 P2 소스 커밋 `0278cae`와 문서 동기화 변경이 포함되어 있다. 가장 최근 성공한 `git fetch origin`에서 n8n 브랜치 기준점은 `4e1469225a17d28285b09132fdb7175fbee49e1e`였고, 이후 커밋의 원격 반영 여부는 현재 GitHub ref로 확인해야 한다.
-- 일반 `git fetch` 첫 시도는 `.git/FETCH_HEAD` ACL로 실패했으나, 승인된 권한 상승 재시도는 성공했다. P50 origin feature ref는 `e0ecd043b70c2f8f49936bc279e40d544232c862`로 갱신됐다.
+- 일반 `git fetch` 첫 시도는 `.git/FETCH_HEAD` ACL로 실패했으나, 권한 상승 재시도는 성공했고 문서 보고 SHA `18af475`도 원격 일치를 확인했다. P50 origin feature ref는 `e0ecd043b70c2f8f49936bc279e40d544232c862`로 갱신됐다.
 - 수정 상세 및 테스트 증거는 `docs/P50_GPT_PROGRESS_REPORT_2026-10-22.md`, `docs/P50_N8N_COMPLETION_TODO.md`, `docs/P6_TROUBLESHOOTING_LEDGER.md`에 있다. HANDOFF/STATUS 상단 요약도 이번 P1/P2 및 v3 자료를 가리킨다.
 - GitHub checks on repair tip `fa89ef73740eb40b641254fc61b5b69877dbb909`: Three API `39731218415`, Runtime Linux+all Windows shards `39731218625`, C Contract `39731218421`, Frozen Design Guard `39731218434` **SUCCESS**. Focused local guard is 4 passed +2 subtests; wider focused suite is 19 passed +2 subtests.
 - Project Book 색인 업데이트/재조회는 다음 인계 작업이다.
