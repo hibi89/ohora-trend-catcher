@@ -111,7 +111,7 @@ class HistoryRecoveryTests(unittest.TestCase):
 
     def test_malformed_page_index_rejected_before_writes(self):
         with P50HistoryStore(self.path) as store:
-            for malformed in {"cursor": {}, (self.keys[0], None): {}}:
+            for malformed in ({"cursor": {}}, {(self.keys[0], None): {}}):
                 with self.subTest(malformed=malformed):
                     with self.assertRaisesRegex(ValueError, "index key"):
                         recover_history_pages(
