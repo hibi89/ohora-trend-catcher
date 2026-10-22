@@ -17,6 +17,14 @@ def _case(module_name, class_name="Fixture"):
     return klass()
 
 
+def _remaining_case_for(group):
+    for index in range(200):
+        case = _case("test_other_runtime", f"RemainingFixture{index}")
+        if runner.group_for_case(case) == group:
+            return case
+    raise AssertionError(f"No synthetic case found for {group}")
+
+
 def _roster_case(method):
     cls = type("FullRosterBatchTests", (unittest.TestCase,), {
         "__module__": "test_three_api_full_roster_batch",
@@ -49,8 +57,8 @@ class OfflineShardTests(unittest.TestCase):
             _case("test_three_api_epoch_contract_projection"),
         ]
         self.remaining_cases = [
-            _case("test_other_runtime"),
-            _case("tests.test_another_module"),
+            _remaining_case_for(group)
+            for group in ("remaining", "remaining-2", "remaining-3")
         ]
         self.cases = self.orchestrator_cases + self.roster_cases + self.heavy_cases + self.remaining_cases
         self.suite = unittest.TestSuite([
@@ -93,11 +101,14 @@ class OfflineShardTests(unittest.TestCase):
                 list(runner.iter_cases(runner.select_group(self.suite, group))), [case]
             )
 
-    def test_remaining_group_has_all_other_modules(self):
-        self.assertEqual(
-            list(runner.iter_cases(runner.select_group(self.suite, "remaining"))),
-            self.remaining_cases,
-        )
+    def test_remaining_groups_cover_other_modules_once(self):
+        for group, case in zip(("remaining", "remaining-2", "remaining-3"),
+                               self.remaining_cases):
+            self.assertEqual(runner.group_for_case(case), group)
+            self.assertEqual(
+                list(runner.iter_cases(runner.select_group(self.suite, group))),
+                [case],
+            )
 
     def test_orchestrator_partition_is_stable_under_discovery_reordering(self):
         for case in self.orchestrator_cases:
