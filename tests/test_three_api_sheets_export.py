@@ -123,6 +123,29 @@ class SheetsExportTests(unittest.TestCase):
         self.assertEqual(export_observations(
             self.path, after_id=4, limit=1)["rows"], [])
 
+    def test_late_receipt_restores_ordered_export(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(3,'p1','2026-10-22T03:00:00Z','batch-3','req-3',60,5,1,1)"
+            )
+            db.execute(
+                "INSERT INTO post_observations VALUES "
+                "(4,'p1','2026-10-22T04:00:00Z','batch-4','req-4',61,6,1,1)"
+            )
+            db.execute("INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
+                       ("cap-4", "P50_US_001", json.dumps({
+                           "request_id": "req-4", "posts": [{"id": "p1"}]})))
+        self.assertEqual(export_observations(
+            self.path, after_id=2)["next_after_id"], 2)
+        with sqlite3.connect(self.path) as db:
+            db.execute("INSERT INTO three_api_raw_receipts VALUES (?,?,?)",
+                       ("cap-3", "P50_US_001", json.dumps({
+                           "request_id": "req-3", "posts": [{"id": "p1"}]})))
+        result = export_observations(self.path, after_id=2)
+        self.assertEqual([r["observation_id"] for r in result["rows"]], [3, 4])
+        self.assertEqual(result["next_after_id"], 4)
+
     def test_malformed_raw_field_status_fails_closed(self):
         for status in ([], "returned", {"p1": ["returned"]}):
             with self.subTest(status=status):
