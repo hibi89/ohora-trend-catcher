@@ -145,6 +145,21 @@ class P50N8nTickTests(unittest.TestCase):
         self.assertEqual(result["storage_verification"]["receipt_delta"], 1)
         self.assertNotIn("synthetic-secret", json.dumps(result))
 
+    def test_pinned_p50_status_shape_reports_committed_live_call(self):
+        def write_result():
+            _seed(self.workspace, raw_ids=("cap-1",),
+                  captures=(("cap-1", "rawv2:cap-1"),), done=1)
+        result = adapter.tick(
+            self.source, self.workspace, live=True, approved=True,
+            credentials_dir=self.base / "credentials", environment={}, now=NOW,
+            pilot_runner=self._runner({"status": "page_committed",
+                                       "committed_pages": 1, "recovered_pages": 0,
+                                       "account_failures": 0, "attempted_steps": 1}, write_result),
+            environment_loader=self._loader)
+        self.assertEqual(result["status"], "page_committed")
+        self.assertTrue(result["live_meta_called"])
+        self.assertEqual(result["action"], "LIVE_TICK_COMPLETE")
+
     def test_initialized_empty_raw_can_be_used_as_first_live_baseline(self):
         _seed_initialized_empty(self.workspace)
         def write_first_page():

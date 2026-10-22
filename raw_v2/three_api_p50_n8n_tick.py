@@ -172,7 +172,9 @@ def tick(source, workspace, *, live=False, approved=False, credentials_dir=None,
     except Exception:
         storage = {"status": "readback_unavailable"}
         verified = False
-    status = result.get("last_status")
+    # The pinned P50 pilot contract returns "status". Accept the older
+    # "last_status" shape too for injected legacy runners used by callers.
+    status = result.get("status", result.get("last_status"))
     called = True if status in ("page_committed", "recovered", "account_failed") else (
         False if status in ("no_ready_work", "serial_busy") else None)
     action = "LIVE_TICK_COMPLETE" if verified else "MANUAL_REVIEW"
