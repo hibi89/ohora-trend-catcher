@@ -165,6 +165,16 @@ class P50ManualPilotTests(unittest.TestCase):
                 "SELECT lane,COUNT(*) FROM jobs WHERE state='done' GROUP BY lane"
             ).fetchall()), {"A": 1, "B": 1, "C": 1})
 
+    def test_ctrl_c_exits_130_without_reporting_success(self):
+        from unittest.mock import patch
+        from three_api_p50_manual_pilot import main
+        with patch("three_api_p50_manual_pilot.run_p50",
+                   side_effect=KeyboardInterrupt):
+            with self.assertRaises(SystemExit) as stopped:
+                main(["--source", str(self.source),
+                      "--workspace", str(self.workspace)])
+        self.assertEqual(stopped.exception.code, 130)
+
     def test_page_limit_rejects_unbounded(self):
         for invalid in (0, 151, True):
             with self.subTest(invalid=invalid):
