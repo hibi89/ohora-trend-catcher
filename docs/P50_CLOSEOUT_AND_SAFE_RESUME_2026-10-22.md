@@ -113,7 +113,7 @@ if (Test-Path -LiteralPath $backup) {
 |---|---|---|
 | P0 | 로컬 레인 quota·기존 영수증·5 SQLite 및 RAW 백업 확인 | 읽기 전용 결과와 누락 내역 확보, 원본 불변 |
 | P1 | 별도 승인 및 오프라인 안전 확인 후 49계정 과거 수집 재개 | 85%/65분/실제 쿼터/커서/중복 요청 게이트 만족 |
-| P2 | 50계정 최대 365일 확보 및 원본 무결성 검증 | 계정별 범위/종료·차단·누락 공개 |
+| P2 | 50계정 최대 365일 확보 및 원본 무결성 검증 | 50계정 각각 365일 cutoff/window 증거, terminal 또는 receipt-backed cutoff cursor, 요청→Capture→RAW→history receipt 연결을 확인하고 차단/누락/unknown을 공개. `continuation_ready`는 미완료 |
 | P3 | 공식 294계정 확장 | 동결 설계·공식 roster·용량·비용 검토 후 승인 |
 | P4 | n8n, Sheets, 태깅, 대시보드 연동 | API 수집·분석·조회 분리; 갱신 시 F5 재수집 금지 |
 
@@ -123,3 +123,19 @@ if (Test-Path -LiteralPath $backup) {
 - `e579451`의 P50/Three API/C Contract/Frozen Guard는 성공, Runtime Integration [run 39750398082](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39750398082)은 **실패**. Linux 1,164건·Windows remaining 1,004건의 테스트에서 각각 동일한 **P6-089 상세 기록의 빠른 색인 누락** 1건이 실패했으며 기존 WinError32 문제와 구분한다. 마감 커밋은 이 색인을 바로잡는다.
 - 오늘 마감 커밋의 검증은 문서·가드 및 GitHub Actions 결과로 보고하며 새 Meta HTTP, 운영 SQLite, Vercel Production 검증은 수행하지 않는다.
 - 신규 채팅 복원: 본 문서 → 브랜치 `HANDOFF.md` → `STATUS.md` → `AGENTS.md` → `REQUIREMENTS.md` → 코드·Actions → 비공개 `hibi89/project-book/main/BOOK.md`의 p6 등록 기록. 다른 n8n 브랜치를 임의 병합하지 않는다.
+
+## 7. 2026-10-22 백업 메인 파일 읽기 전용 교차검증
+
+이 보충은 [P6-091](P6_TROUBLESHOOTING_LEDGER.md)의 후속 증거다. 조사 범위는 `%USERPROFILE%\Downloads\OHORA_P50_BACKUP_20261022_173524`의 다섯 SQLite 메인 파일과 `status.json`뿐이다. Capture/coordinator 두 파일은 `2026-10-22` 하위 폴더에 있다. 모든 SQLite 연결은 URI `mode=ro&immutable=1`로 열고 `quick_check`와 식별자 비출력 집합 비교만 수행했다.
+
+- 다섯 메인 파일 모두 `PRAGMA quick_check=ok`.
+- backup RAW 집계: 50 accounts, 1,140 posts/observations, contract/raw receipt 각 285.
+- daily capture/coordinator: 150 captures, captured intents, request bindings, jobs가 서로 맞음.
+- history: 50 accounts, 135 requests가 모두 `committed`; history Capture도 135 captures/intents. 49 `continuation_ready`, 1 `window_covered`.
+- daily+history의 285 capture IDs는 contract/raw receipt 집합과 일치하며 receipt 참조도 연결됨.
+- 백업 coordinator lane A는 `halted=1, usage_limit`; B/C는 unhalted. 이는 이 백업 스냅샷에 사용량 보호 중단이 저장됐음을 보이지만 현재 운영 레인 상태나 정확한 API 사용률을 확정하지 않는다.
+- 백업의 WAL-mode 파일에 동반 `-wal`/`-shm`가 없었다. [SQLite WAL 규칙](https://www.sqlite.org/wal.html)에 따라 WAL 파일은 DB의 영구 상태에 포함될 수 있으며, `immutable=1` 검사는 main DB만 읽고 sidecar 상태를 증명하지 않는다. 따라서 `quick_check=ok`는 빠진 WAL이 없었음 또는 스냅샷의 최신성 증명이 아니다. active workspace와 backup 간 불일치도 여전히 미해결이다.
+
+**운영 판단: P50은 재개 준비 완료가 아니다.** 49계정 resume와 quota 변경은 금지 상태로 유지한다. 귀가 후 canonical root와 백업 생성 방식/시각을 확인하고, SQLite가 지원하는 일관된 read-only 상태에서 sidecar를 포함한 검증을 수행한다. 다음날 최신 요청 격리는 합성 테스트로 확인됐지만 이 결과가 live DB의 분리·무손상을 증명하지는 않는다. CI는 코드 검증이며 실제 수집 성공이 아니다.
+
+다음날 최신 수집의 비파괴 기준은 기존 synthetic `test_next_day_latest_preserves_existing_history_state`: 다음 KST 날짜 coordinator/capture를 사용하고 history account rows, history receipts, history Capture bytes가 변경되지 않는 것을 확인한다. Restart/dedup 기준은 crash-window close/reopen 테스트가 같은 미확정 HTTP를 재전송하지 않고 기존 Capture/RAW 증거를 복구하는지 확인한다. 두 검증 모두 offline/injected sender 범위다.
