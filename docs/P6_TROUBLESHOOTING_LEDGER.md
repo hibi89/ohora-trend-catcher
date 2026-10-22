@@ -1,12 +1,12 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
-> Index: [P6-085 n8n runner clone selection](docs/P6_TROUBLESHOOTING_LEDGER.md) · Wildcard/first-match replaced with explicit repo-root resolution; implementation commit `fed83ee`, 17/17 focused checks PASS; branch push pending.
+> Index: [P6-085 n8n runner clone selection](docs/P6_TROUBLESHOOTING_LEDGER.md) · Wildcard/first-match replaced with explicit repo-root resolution; implementation commit `fed83ee`, 17/17 focused checks PASS; origin push was verified at `e38c5db`.
 > Index: [P6-084 Google Sheets output boundary](docs/P6_TROUBLESHOOTING_LEDGER.md) · User decision: add Google Sheets as a derived n8n output after SQLite/RAW; keep P6 collection and source-of-truth unchanged. Spec is documentation-only; implementation deferred until n8n core is complete.
 > Index: [P6-083 credential-backed n8n alert route (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Owner selected credential-based auth and deferred channel; endpoint/credential and operational activation pending. Do not enable global `$env` access; `$vars` are plan-restricted. No product/runtime change yet.
 
 ### P6-085 — 2026-10-22 · n8n runner path could select an unintended clone
 - **증상/범위:** Daily workflow Execute Command searched `OneDrive\\Desktop\\*\\ohora-trend-catcher\\raw_v2\\p6_n8n_tick.ps1` and ran the first match. With multiple clones, this was nondeterministic and could select a different checkout/branch.
 - **원인/수정:** Workflow encoded clone discovery by wildcard instead of the user's specified working root. A first exact-path draft omitted the `ohora-trend-catcher` directory; safe path-only verification caught it before execution. Its first regression assertion also expected double-escaped separators while JSON parsing returns single separators; fixture corrected. The command now constructs the exact repo root from `%USERPROFILE%` plus ASCII code points for the Korean parent directory, checks the concrete runner with `Test-Path -LiteralPath`, and invokes only that path. No wildcard remains; P6 internals unchanged.
-- **검증/안전:** `tests.test_three_api_n8n_tick tests.test_p6_troubleshooting_handoff_guard`: 17/17 PASS. Safe PowerShell resolution returned `C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher\raw_v2\p6_n8n_tick.ps1`; runner not invoked. `git diff --check` PASS. No n8n import, Meta request, or DB/RAW/Capture write. Implementation commit: `fed83eec19c2d0b869cb17e12a3ab604e055cae8`; origin push pending. Rollback only the workflow command and its assertions.
+- **검증/안전:** `tests.test_three_api_n8n_tick tests.test_p6_troubleshooting_handoff_guard`: 17/17 PASS. Safe PowerShell resolution returned `C:\Users\haein\OneDrive\Desktop\2차 프로젝트 아카이브\ohora-trend-catcher\raw_v2\p6_n8n_tick.ps1`; runner not invoked. `git diff --check` PASS. No n8n import, Meta request, or DB/RAW/Capture write. Implementation commit: `fed83eec19c2d0b869cb17e12a3ab604e055cae8`; origin push confirmed when follow-up documentation commit `e38c5db6ef1a223035c24cce4dc07b4969b2b1c1` was verified. Rollback only the workflow command and its assertions.
 
 ### P6-084 — 2026-10-22 · Google Sheets as a derived n8n output
 - **결정/이유:** 사용자는 팀 공유·분석을 위해 Google Sheets를 최종 소비처에 추가하되 P6/RAW/SQLite의 전체 원본·이력·커서 기준 역할을 유지하도록 요청했다. 실제 Sheets 연동은 기존 n8n 핵심 자동화 완성 뒤 진행한다. 동결 P6 설계와 타 작업자의 구현 파일은 변경하지 않는다.
@@ -401,7 +401,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
-| P6-085 | n8n runner 경로 선택 | wildcard first-match 제거, 지정된 working root만 실행 | 17/17 focused PASS; `fed83ee`; push pending |
+| P6-085 | n8n runner 경로 선택 | wildcard first-match 제거, 지정된 working root만 실행 | 17/17 focused PASS; `fed83ee`; origin push verified at `e38c5db` |
 | P6-084 | Google Sheets 출력 경계 | durable receipt 기반 증분 export, post_id idempotency, ack 후 checkpoint, 장애 격리 | 명세만 작성; n8n core 완료 후 구현 |
 | P6-083 | n8n 자격증명 기반 알림 경로 | 사용자가 credential 방식 선택, 공급자/채널은 추후 결정 | OPEN; channel credential, endpoint, mock delivery 및 운영 활성화 pending |
 | P6-082 | n8n 경고 웹훅 환경 접근 | 2.44.5 `$env` 허용 설정/실제 발송 확인이 미완료; 프로필에 1 active schedule 존재 | OPEN; global env 접근 유지 여부 및 credential 통합 확인 |
