@@ -56,6 +56,22 @@ def export_observations(db_path, *, after_id=0, limit=500):
         ).fetchone()
         if ambiguous is not None:
             raise ValueError("Ambiguous RAW receipts for observation")
+        # Do not advance the cursor past an observation without RAW evidence.
+        # A receipt committed later must remain eligible for export.
+        first_unverified = db.execute(
+            """SELECT o.id FROM post_observations o
+               JOIN posts p ON p.post_id=o.post_id
+               WHERE o.id>? AND NOT EXISTS (
+                   SELECT 1 FROM three_api_raw_receipts r
+                   WHERE r.account_key=p.account_key
+                     AND json_extract(r.payload_json,'$.request_id')=o.request_id
+               )
+               ORDER BY o.id LIMIT 1""",
+            (after_id,),
+        ).fetchone()
+        if first_unverified is not None:
+            rows = [row for row in rows
+                    if row["observation_id"] < first_unverified["id"]]
         output = []
         seen_observation_ids = set()
         for row in rows:
