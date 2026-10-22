@@ -18,6 +18,8 @@ def ingest_offline_history_response(capture, raw_writer, request, response):
         raise ValueError("Explicit offline history contract required")
     if response.request_id != request.request_id:
         raise ValueError("Response request mismatch")
+    if not 200 <= response.http_status < 300:
+        raise ValueError("Successful fixture response required")
     existing = capture.get_capture_for_request(request.request_id)
     if existing is not None:
         if existing.request.request_spec_digest != request.request_spec_digest:
