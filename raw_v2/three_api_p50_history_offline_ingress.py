@@ -51,6 +51,14 @@ def ingest_and_commit_offline_history_page(
             or not isinstance(current["cursor"], str)
             or not current["cursor"] or current["cursor"] != request.cursor):
         raise ValueError("Verified history anchor and matching cursor required")
+    # The terminal flag and oldest timestamp must be consistent with the
+    # verified response. Never allow a caller to mark an arbitrary page done.
+    from datetime import datetime
+    if type(terminal) is not bool:
+        raise ValueError("Explicit terminal flag required")
+    if oldest_post_at is not None and (not isinstance(oldest_post_at, datetime)
+            or oldest_post_at.utcoffset() is None):
+        raise ValueError("Timezone-aware oldest timestamp required")
     receipt = ingest_offline_history_response(
         capture, raw_writer, request, response)
     from three_api_p50_history_commit import commit_persisted_history_page
