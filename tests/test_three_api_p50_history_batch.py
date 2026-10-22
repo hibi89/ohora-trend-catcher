@@ -23,6 +23,10 @@ def page(number, cursor, next_cursor, terminal=False):
 
 
 class OfflineHistoryBatchTests(unittest.TestCase):
+    def store(self):
+        return SimpleNamespace(read=lambda key: {
+            "state": "continuation_ready", "cursor": "tail"})
+
     def test_two_serial_pages_use_ingress_in_order(self):
         pages = [page(1, "tail", "cursor-2"),
                  page(2, "cursor-2", None, terminal=True)]
@@ -33,7 +37,7 @@ class OfflineHistoryBatchTests(unittest.TestCase):
                     if kwargs["terminal"] else "continuation_ready"}}
         with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page",
                    side_effect=ingest):
-            result = ingest_offline_history_batch(None, None, None, pages)
+            result = ingest_offline_history_batch(self.store(), None, None, pages)
         self.assertEqual(calls, [("tail", "cursor-2"), ("cursor-2", None)])
         self.assertEqual(result["pages_committed"], 2)
         self.assertEqual(result["network_requests"], 0)
@@ -52,7 +56,7 @@ class OfflineHistoryBatchTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Duplicate"):
                 ingest_offline_history_batch(None, None, None, pages)
             with self.assertRaisesRegex(ValueError, "budget"):
-                ingest_offline_history_batch(None, None, None, pages, max_pages=1)
+                ingest_offline_history_batch(self.store(), None, None, pages, max_pages=1)
             ingest.assert_not_called()
 
     def test_chain_mismatch_preflight_blocks_all_writes(self):
@@ -75,6 +79,18 @@ class OfflineHistoryBatchTests(unittest.TestCase):
         with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page") as ingest:
             with self.assertRaisesRegex(ValueError, "requires continuation cursor"):
                 ingest_offline_history_batch(None, None, None, pages)
+            ingest.assert_not_called()
+
+    def test_unanchored_second_account_blocks_first_account_write(self):
+        pages = [page(1, "tail", "next"), page(2, "other-tail", None, terminal=True)]
+        pages[1]["request"].account_key = "P50_US_002"
+        def read(key):
+            return {"state": "continuation_ready",
+                    "cursor": "tail" if key == "P50_US_001" else "different"}
+        with patch("three_api_p50_history_batch.ingest_and_commit_offline_history_page") as ingest:
+            with self.assertRaisesRegex(ValueError, "unverified persisted cursor"):
+                ingest_offline_history_batch(
+                    SimpleNamespace(read=read), None, None, pages)
             ingest.assert_not_called()
 
     def test_first_commit_failure_stops_remaining_pages(self):
