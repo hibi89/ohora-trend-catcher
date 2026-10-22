@@ -57,6 +57,7 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.calls = 0
         self.names = []
         self.next_cursors = []
+        self.post_count = 1
 
         def sender(prepared, timeout):
             self.calls += 1
@@ -69,7 +70,11 @@ class HistoryHTTPIntegration(unittest.TestCase):
             response.payload["business_discovery"]["username"] = username
             post = response.payload["business_discovery"]["media"]["data"][0]
             post["username"] = username
-            post["id"] = str(1000000000 + self.calls)
+            post["id"] = str(1000000000 + self.calls * 10)
+            for extra in range(1, self.post_count):
+                repeated = dict(post)
+                repeated["id"] = str(1000000000 + self.calls * 10 + extra)
+                response.payload["business_discovery"]["media"]["data"].append(repeated)
             if next_cursor is not None:
                 response.payload["business_discovery"]["media"]["paging"] = {
                     "cursors": {"after": next_cursor}}
@@ -155,6 +160,32 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.step()["status"], "blocked_unknown_http")
         self.assertEqual(self.calls, 0)
         self.assertEqual(self.store.read(account["key"])["state"], "blocked_unknown_http")
+
+    def test_full_page_without_cursor_is_blocked_not_terminal(self):
+        self.anchor(1)
+        self.names = ["nail_us_1"]
+        self.next_cursors = [None]
+        self.post_count = 4
+        result = self.step()
+        self.assertEqual(result["status"], "blocked_missing_cursor")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["state"],
+                         "blocked_missing_cursor")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 0)
+        self.assertEqual(self.calls, 1)
+
+    def test_reconcile_committed_page_lane_hold_after_crash(self):
+        self.anchor(1)
+        self.names = ["nail_us_1", "nail_us_1"]
+        self.assertEqual(self.step()["status"], "recovered")
+        request_id = self.store.db.execute(
+            "SELECT request_id FROM history_requests WHERE account_key=?",
+            (self.accounts[0]["key"],)).fetchone()[0]
+        self.coordinator.db.execute(
+            "UPDATE lanes SET halted=1,reason=?,ready_at=? WHERE lane='A'",
+            ("history_pending:" + request_id, "2026-10-22T22:00:00+00:00"))
+        self.assertEqual(self.step()["status"], "recovered")
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 2)
 
     def test_fair_round_of_fifty_pages(self):
         for ordinal in range(1, 51):
