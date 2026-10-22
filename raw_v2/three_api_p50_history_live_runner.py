@@ -407,7 +407,11 @@ def run_history(source, workspace, *, environment, max_pages=5000,
                         break
                 counts = dict(store.db.execute(
                     "SELECT state,COUNT(*) FROM history_accounts GROUP BY state").fetchall())
+                finished = counts.get("window_covered", 0) + counts.get("terminal_verified", 0)
                 return {"status": _final_history_status(events, coordinator),
+                        "collection_complete": finished == len(accounts),
+                        "completed_accounts": finished,
+                        "remaining_accounts": len(accounts) - finished,
                         "pages_committed": committed, "attempted_steps": len(events),
                         "account_states": counts,
                         "last_account": events[-1].get("account_key") if events else None,
