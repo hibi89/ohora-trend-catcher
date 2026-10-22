@@ -98,6 +98,20 @@ class HistoricalFixtureE2E(unittest.TestCase):
                                 oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
                                 terminal=True)
                     self.assertEqual(store.read(keys[0])["cursor"], "tail-1")
+                    from dataclasses import replace as replace_request
+                    from three_api_p50_history_commit import commit_persisted_history_page
+                    from types import SimpleNamespace
+                    persisted = journal.get_capture("cap-" + request.request_id)
+                    unsafe_request = replace_request(persisted.request, history_offline_only=False)
+                    unsafe_record = replace_request(persisted, request=unsafe_request)
+                    with patch.object(journal, "get_capture", return_value=unsafe_record):
+                        with self.assertRaisesRegex(ValueError, "offline history Capture"):
+                            commit_persisted_history_page(
+                                store, journal, writer, account_key=keys[0],
+                                capture_id=persisted.capture_id,
+                                oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
+                                terminal=True)
+                    self.assertEqual(store.read(keys[0])["pages_verified"], 0)
                     result = ingest_and_commit_offline_history_page(
                         store, journal, writer, request, response,
                         oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
