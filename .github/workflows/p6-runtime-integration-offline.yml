@@ -62,6 +62,8 @@ on:
       - 'tests/test_three_api_epochs.py'
       - 'tests/test_three_api_job_binding.py'
       - 'tests/run_offline.py'
+      - 'tests/test_offline_shards.py'
+      - 'tests/test_offline_shard_inventory.py'
       - '.github/workflows/p6-runtime-integration-offline.yml'
   push:
     paths:
@@ -124,6 +126,8 @@ on:
       - 'tests/test_three_api_epochs.py'
       - 'tests/test_three_api_job_binding.py'
       - 'tests/run_offline.py'
+      - 'tests/test_offline_shards.py'
+      - 'tests/test_offline_shard_inventory.py'
       - '.github/workflows/p6-runtime-integration-offline.yml'
   workflow_dispatch:
 

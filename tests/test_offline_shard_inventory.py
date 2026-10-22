@@ -55,18 +55,60 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(len(unique_discovered_cases(suite)),1)
 
     def test_group_selection_cannot_duplicate_remaining_tests(self):
-        class Remaining(unittest.TestCase):
-            def test_remaining(self):
-                pass
+        remaining_groups = tuple(
+            group for group in GROUP_NAMES if group.startswith("remaining")
+        )
+        self.assertTrue(remaining_groups)
 
-        cases=unique_discovered_cases(unittest.TestSuite([
-            Remaining("test_remaining"),Remaining("test_remaining")]))
-        self.assertIn("remaining",GROUP_NAMES)
-        self.assertEqual(group_for_case(cases[0]),"remaining")
-        self.assertEqual(select_group(unittest.TestSuite(cases),
-                                      "remaining").countTestCases(),1)
+        expected_by_group = {}
+        for group in remaining_groups:
+            for index in range(10_000):
+                cls = type(
+                    f"RemainingFixture{index}",
+                    (unittest.TestCase,),
+                    {"test_remaining": lambda self: None},
+                )
+                case = cls("test_remaining")
+                if group_for_case(case) == group:
+                    expected_by_group[group] = case
+                    break
+            else:
+                self.fail(f"No synthetic test identity found for {group}")
+
+        cases = list(expected_by_group.values())
+        duplicated_nested_suite = unittest.TestSuite([
+            unittest.TestSuite([cases[0], cases[0]]),
+            unittest.TestSuite(cases[1:]),
+        ])
+        unique = unique_discovered_cases(duplicated_nested_suite)
+        self.assertEqual(
+            {case.id() for case in unique},
+            {case.id() for case in cases},
+        )
+        self.assertEqual(len(unique), len(cases))
+
+        original_assignments = {
+            case.id(): group_for_case(case) for case in unique
+        }
+        rerun_assignments = {
+            case.id(): group_for_case(case)
+            for case in unique_discovered_cases(unittest.TestSuite(reversed(unique)))
+        }
+        reordered_assignments = {
+            case.id(): group_for_case(case)
+            for case in unique_discovered_cases(unittest.TestSuite(reversed(cases)))
+        }
+        self.assertEqual(original_assignments, rerun_assignments)
+        self.assertEqual(original_assignments, reordered_assignments)
+
+        for group in remaining_groups:
+            self.assertEqual(
+                list(iter_cases(select_group(unittest.TestSuite(unique), group))),
+                [expected_by_group[group]],
+            )
+
         with self.assertRaises(ValueError):
-            select_group(unittest.TestSuite(cases),"observations")
+            select_group(unittest.TestSuite(unique),"observations")
 
 
 if __name__=="__main__":
