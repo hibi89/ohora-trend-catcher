@@ -4,7 +4,7 @@ No HTTP and no RAW writes; capture and RAW receipts must already exist.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from three_api_runtime_contract import validate_raw_receipt
 
 
@@ -23,8 +23,27 @@ def commit_persisted_history_page(store, journal, raw_writer, *,
         raise ValueError("Cursor evidence mismatch")
     if record.cursor_state.page != request.page:
         raise ValueError("Page evidence mismatch")
-    if not isinstance(oldest_post_at, datetime) and oldest_post_at is not None:
-        raise ValueError("Invalid oldest post timestamp")
+    # Never trust caller-supplied completion dates over persisted Capture evidence.
+    timestamps = []
+    for post in record.normalized_posts:
+        value = post.get("timestamp")
+        if not isinstance(value, str):
+            raise ValueError("History post missing timestamp evidence")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Invalid persisted history timestamp") from exc
+        if parsed.utcoffset() is None:
+            raise ValueError("History timestamp must include timezone")
+        timestamps.append(parsed.astimezone(timezone.utc))
+    actual_oldest = min(timestamps) if timestamps else None
+    if oldest_post_at is not None:
+        if not isinstance(oldest_post_at, datetime) or oldest_post_at.utcoffset() is None:
+            raise ValueError("Invalid oldest post timestamp")
+        if actual_oldest is None or oldest_post_at.astimezone(timezone.utc) != actual_oldest:
+            raise ValueError("Oldest post timestamp differs from persisted Capture")
+    elif actual_oldest is not None:
+        raise ValueError("Missing oldest post timestamp from persisted Capture")
     receipt = raw_writer.get_raw_receipt(capture_id)
     if receipt is None:
         raise ValueError("Missing durable RAW receipt")
