@@ -27,6 +27,7 @@ class P50HistoryStore:
         self.db = sqlite3.connect(self.path, isolation_level=None, timeout=30)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA busy_timeout=30000")
+        self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS history_accounts (
             account_key TEXT PRIMARY KEY,
@@ -105,7 +106,7 @@ class P50HistoryStore:
             if row["cursor"] != expected_cursor:
                 raise ValueError("History cursor changed; stale page rejected")
             if row["state"] not in ("ready", "continuation_ready"):
-                raise ValueError("Completed history cannot be advanced")
+                raise ValueError("Blocked or completed history cannot be advanced")
             existing = self.db.execute(
                 "SELECT * FROM history_receipts WHERE capture_id=?", (capture_id,)).fetchone()
             if existing is not None:
