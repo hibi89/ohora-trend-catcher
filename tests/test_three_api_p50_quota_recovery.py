@@ -58,13 +58,13 @@ class QuotaRecoveryTests(unittest.TestCase):
                              [("A", 1), ("B", 0), ("C", 1)])
         self.assertFalse(release_verified_lane(self.db, "B", self.ok, now=self.now))
 
-    def test_cooldown_and_hold_reason_preserved(self):
+    def test_verified_meta_recovery_overrides_local_cooldown_but_not_other_reasons(self):
         later = (self.now + timedelta(hours=1)).isoformat()
         with closing(sqlite3.connect(self.db)) as db, db:
             db.execute("UPDATE lanes SET ready_at=? WHERE lane='B'", (later,))
-        self.assertFalse(release_verified_lane(self.db, "B", self.ok, now=self.now))
+        self.assertTrue(release_verified_lane(self.db, "B", self.ok, now=self.now))
         with closing(sqlite3.connect(self.db)) as db, db:
-            db.execute("UPDATE lanes SET reason='missing_usage',ready_at=? WHERE lane='B'",
+            db.execute("UPDATE lanes SET halted=1,reason='missing_usage',ready_at=? WHERE lane='B'",
                        ("2026-10-22T00:00:00+00:00",))
         self.assertFalse(release_verified_lane(self.db, "B", self.ok, now=self.now))
 
