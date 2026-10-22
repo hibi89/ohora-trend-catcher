@@ -28,7 +28,8 @@ def build_verified_serial_runner(coordinator, capture, raw, transport):
     None of the injected HTTP ports are called. The caller must separately
     authorize any later step and explicitly control network/scheduler access.
     """
-    if (type(coordinator) is not Coordinator or type(capture) is not CaptureJournal
+    from three_api_p50_coordinator import P50Coordinator
+    if (type(coordinator) not in (Coordinator, P50Coordinator) or type(capture) is not CaptureJournal
             or type(raw) is not ContractRawWriter
             or type(transport) is not ThreeLaneMetaTransport):
         raise SerialBootstrapError("Original coordinator/Capture/RAW/three-lane ports required")
