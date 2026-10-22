@@ -16,6 +16,8 @@ def ingest_offline_history_response(capture, raw_writer, request, response):
         raise ValueError("History request required")
     if getattr(request, "history_offline_only", None) is not True:
         raise ValueError("Explicit offline history contract required")
+    if getattr(request, "request_spec", None) is None or request.request_spec.limit != 4:
+        raise ValueError("History requests must retain four-post page limit")
     if response.request_id != request.request_id:
         raise ValueError("Response request mismatch")
     if not 200 <= response.http_status < 300:
