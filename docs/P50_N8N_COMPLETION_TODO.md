@@ -2,7 +2,9 @@
 
 ## Latest upstream / host recheck — 2026-10-22
 
-**2026-10-22 KST · 최신 재확인:** P50 소유 브랜치 tip `0b330fc0d04317a2949b42bf83e7310b4afe9cef`. P50 history CLI·recover dispatch는 여전히 pilot entrypoint에 연결되지 않았고 n8n pin은 `10ebaf8` 유지. P50 offline validation `39737113080`/`39737108191` and History Tests `39737108250` SUCCESS. Three API `39737113093` and P6 Runtime `39737113072` IN_PROGRESS; C Contract `39737113042` and Frozen Design Guard `39737113228` SUCCESS. 로컬 Windows n8n CLI 2.40.7 설치, n8n 프로세스/5678·5680·5681 listener 없음. 원격 학원 n8n host는 자료가 없어 미확인. P50 첫 연동 목표는 Windows 로컬 n8n + 기존 PowerShell runner(A안)로 정하되 운영 instance/schedule은 비활성 유지; 별도 instance 격리와 가동승인은 미완료. Meta 실호출·운영 DB 변경·P294 활성화·main 병합 없음.
+**2026-10-22 KST · newest recheck (supersedes the older snapshot immediately below):** `git fetch origin` completed. n8n branch origin/HEAD remains `1c4a1f5c87c067a7d6254db7fb3353c8179aa843`; P50 owner branch advanced to `112bb2aefcbf006eedebcd3837afdf98534ca85d`. P50 Actions at that exact tip: **6/6 SUCCESS**, including `history-offline`. New `raw_v2/three_api_p50_cycle.py` exposes `latest`, `history`, `status`; read-only status rejects live flags, while latest/history require both explicit live and owner-approval flags. `history` may first finish pending latest work and then invoke the history runner. `recover` is not a separate CLI mode. New CLI and history receipt contract are **not yet integrated in n8n**; keep the n8n engine pin `10ebaf8` until offline contract/E2E and same-SHA relevant CI pass. Local Windows n8n 2.40.7 is installed, no process/listeners at check time; workflow/schedule stays inactive. No Meta/operational data operation, schedule activation, P294, or main merge.
+
+**2026-10-22 KST · 이전 snapshot (superseded):** P50 owner tip `0b330fc0d04317a2949b42bf83e7310b4afe9cef` and its then-current CI/host observations are historical. Use the newer snapshot above for current state.
 
 Detailed volume and operating-window analysis: [Simulation v2.0 analysis](docs/P50_N8N_SIMULATION_V2_2026-10-22.md).
 

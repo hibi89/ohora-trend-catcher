@@ -1,4 +1,6 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-107 interrupted full offline suite (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · `python tests/run_offline.py` discovered 1,018 tests; user interruption cancelled the process before summary. Partial output showed RAW-v2/batch-recovery ERROR/FAIL; exact totals/root cause unconfirmed. Focused n8n suite separately passed 20 tests +6 subtests. No engine fix or data/live impact.
+> Index: [P6-108 P6 incident index guard caught missing table row (RESOLVED)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Expected incident-index/detail parity; actual P6-107 detail lacked the required table row. Added the row; focused guard + n8n suite 20 PASS +6 subtests. Documentation-only, no runtime/data impact.
 > Index: [P6-103 recovery-only n8n outcome misclassified (RESOLVED)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Fix `2a09fb3`: recovered Capture commits report no new Meta call; validated recovery pages count as progress. Focused tests 20 PASS +6 subtests, serial-lock 8/8; all 6 Actions SUCCESS including Runtime Integration `39733073179`.
 > Index: [P6-102 handoff-guard incident index omission (RESOLVED)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Run `39731218625` passed Linux and all Windows runtime shards after adding missing P6-101/P6-102 quick-index rows; focused local guard 4 PASS +2 subtests. No code/data impact.
 > Index: [P6-104 n8n host target decision](docs/P6_TROUBLESHOOTING_LEDGER.md) · Use A (local Windows n8n + P50 runner) as the low-effort P50 integration target; schedule stays inactive. [F] CLI 2.40.7 installed, process/listeners absent; remote academy host unknown. [D] B requires a new authenticated agent bridge.
@@ -18,6 +20,23 @@
 - **Data safety:** The failing suite is offline; no Meta call, operational DB/RAW/Capture mutation, schedule activation, P294 run, or main merge occurred.
 - **Commit / rollback:** This n8n branch adds only this incident report and handoff status. Roll back only the local docs record if evidence is superseded; preserve all detailed incident history and P50 files.
 - **Prevention:** For every P50 owner branch update, require incident-index/detail equality in CI. Distinguish documentation guard failures from engine failures and require same-SHA complete CI before considering a pin change.
+
+### P6-108 — 2026-10-22 · P6 incident index guard caught missing table row (RESOLVED)
+
+- **Observed / expected:** After adding P6-107's detailed entry and Markdown quick link, `python -m pytest -q tests/test_p6_troubleshooting_handoff_guard.py tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py` produced 1 failure, 19 passed, 6 subtests passed. The guard expected the pipe-table ID set to equal the detailed `### P6-NNN` set; actual reported only `P6-107` missing from the table.
+- **Confirmed cause / fix:** The new entry had a top-of-file `> Index:` Markdown link but no matching row in the separate pipe-table index. Added a P6-107 pipe-table row; no product code or existing record changed.
+- **Affected files / data safety:** `docs/P6_TROUBLESHOOTING_LEDGER.md` only. No runtime/API/network or operational data access.
+- **Verification:** Exact focused command above before the fix: FAIL (1 failed, 19 passed, 6 subtests). Post-fix exact command: `python -m pytest -q tests/test_p6_troubleshooting_handoff_guard.py tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py` → **20 passed, 6 subtests passed**; `git diff --check` PASS. Repair commit SHA will be added after commit.
+- **Rollback / prevention:** Revert only the P6-107 quick-index row if it is proven malformed; keep detailed incident history. Future incidents must update both the Markdown index and pipe-table index.
+
+### P6-107 — 2026-10-22 · Full offline suite interrupted after partial failures (OPEN / cause unconfirmed)
+
+- **Observed scope:** On n8n branch `codex/p6-readiness-hardening-20261019` at base HEAD `1c4a1f5c87c067a7d6254db7fb3353c8179aa843`, first the focused n8n command passed (20 tests + 6 handoff subtests). Then `python tests/run_offline.py` discovered 1,018 tests. User interruption stopped the still-running process before its final summary; the process was subsequently sent Ctrl+C. State: **CANCELLED**, local execution session 36791; no GitHub run ID.
+- **Symptoms / confirmed cause:** Partial output displayed ERROR results in batch-recovery/raw-integrity/RAW-v2 tests and one FAIL `test_export_failure_keeps_recovered_slot_in_cooldown`. Other visible examples included `test_already_committed_part_is_not_counted_or_observed_twice`, `test_archived_auth_error_preserves_successes_and_blocks_resume`, and `test_backup_and_replay_with_no_api`. Because the test process was interrupted, exact total failures, final traceback summary, and root cause are **unconfirmed**; do not infer a product regression from the partial output or claim full-suite PASS.
+- **Affected files / alternatives:** No source or test file was modified in response. No repeated repair attempt was made. Continue by rerunning the failing modules in isolation with captured complete output, then classify fixtures versus implementation. Keep this outside the P50 engine ownership boundary unless evidence directly identifies an n8n-owned file.
+- **Data safety:** This was the repository's offline test runner; no Meta request, schedule/workflow activation, operational DB/RAW/Capture edit, P294 operation, or main merge. Final process totals are unavailable.
+- **Repair / rollback:** No repair commit exists; recorded against base HEAD above. A future fix must update this incident with exact reproduction, fix SHA, and test state. No rollback needed now.
+- **Prevention / next action:** Do not rerun the entire suite just to recreate noise before the test owners triage the partial failures. Execute the affected test modules separately, capture full stdout/stderr, and distinguish CANCELLED from FAIL/PASS in reports.
 ### P6-105 — 2026-10-22 · P50 offline test fixture/receipt contract mismatch (RESOLVED)
 
 - **Observed symptoms:** At P50 owner branch tip `d322ae345197d827aa0ac81553281b78a2590662`, P50 offline validation run `39738595564` and P50 Offline History Tests run `39738587930` failed. The P50 offline run executed 102 tests and errored in `test_invalid_tail_timestamp_rejected_before_store_write`.
@@ -597,6 +616,8 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-108 | Handoff guard / incident index | 신규 상세 사고에 Markdown quick link만 추가하고 pipe-table row 누락 | row 보완; focused handoff guard + n8n tests 20 PASS +6 subtests PASS; repair SHA commit 후 갱신 |
+| P6-107 | Full offline test run | 1,018 cases discovered; process user-interrupted before final totals, partial RAW-v2 errors/failure visible | OPEN / cause unconfirmed; full suite CANCELLED; isolate modules and capture final output |
 | P6-106 | P50 owner incident-index mismatch (OPEN) | `ff7eeb4` RAW run `39739590508` fails because P6-081–086 detail rows lack index entries; engine not implicated | P50 owner repairs quick index; rerun guard before calling full CI green |
 | P6-105 | P50 offline test fixture/receipt contract mismatch (RESOLVED) | `e67788a` isolates timestamp unit test; latest P50 offline jobs on `ff7eeb4` pass; history last passed on prior `d82a90b`; broader same-tip CI pending | Keep n8n pin `10ebaf8` until all owner CI and n8n history contract are verified |
 | P6-104 | n8n execution host target | Local n8n CLI exists; no runtime; remote academy host unknown | Choose A as P50 pilot target; isolate profile and keep schedules inactive; B requires a new authenticated agent bridge |
