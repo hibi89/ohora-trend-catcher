@@ -125,9 +125,16 @@ class CyclePlanner:
                 continue
             body = __import__('json').loads(receipt[0]); media = body.get('media',{})
             posts = media.get('data',[]); paging = media.get('paging') or {}
-            cursor = (paging.get('cursors') or {}).get('after') if paging.get("next") else None
+            # Use the same cursor-only pagination rule as the live fetcher.
+            # Old Graph responses can omit paging.next while retaining after.
+            cursor = (paging.get("cursors") or {}).get("after") if posts else None
             if paging.get("next") and not cursor:
                 raise ValueError("Saved page missing continuation cursor")
+            if cursor is not None:
+                if not isinstance(cursor,str) or not re.fullmatch(r"[A-Za-z0-9_+=/\\-]{1,2048}",cursor):
+                    raise ValueError("Saved page has invalid cursor")
+                if cursor == row["cursor_before"]:
+                    raise ValueError("Saved page cursor did not advance")
             dates = [datetime.fromisoformat(p['timestamp'].replace('Z','+00:00')) for p in posts if p.get('timestamp')]
             self.acknowledge(dict(row),receipt_id=f"p50v2-{row['cycle']}-{row['lane']}-{row['ordinal']}",
                 posts=posts,next_cursor=cursor,exhausted=cursor is None,
