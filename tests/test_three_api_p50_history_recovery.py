@@ -76,6 +76,7 @@ class HistoryRecoveryTests(unittest.TestCase):
                     max_steps=2)
             self.assertEqual(calls, ["cap-1", "cap-2"])
             self.assertEqual(len(result["completed"]), 2)
+            self.assertEqual(result["status"], "completed")
             self.assertEqual(store.read(account)["state"], "terminal_verified")
             self.assertEqual(result["network_requests"], 0)
 
