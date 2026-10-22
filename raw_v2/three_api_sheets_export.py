@@ -74,6 +74,18 @@ def export_observations(db_path, *, after_id=0, limit=500):
         if blocked_on_gap:
             rows = [row for row in rows
                     if row["observation_id"] < first_unverified["id"]]
+        # The downstream upsert key must uniquely identify an observation.
+        duplicate_key = db.execute(
+            """SELECT o.request_id, o.post_id
+               FROM post_observations o
+               WHERE o.id>? AND (? IS NULL OR o.id<?)
+               GROUP BY o.request_id, o.post_id
+               HAVING COUNT(*)>1 LIMIT 1""",
+            (after_id, first_unverified["id"] if blocked_on_gap else None,
+             first_unverified["id"] if blocked_on_gap else None),
+        ).fetchone()
+        if duplicate_key is not None:
+            raise ValueError("Duplicate observation_key in RAW observations")
         output = []
         seen_observation_ids = set()
         for row in rows:
