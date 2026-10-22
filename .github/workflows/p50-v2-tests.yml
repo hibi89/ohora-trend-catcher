@@ -16,3 +16,5 @@ jobs:
         run: python -m py_compile raw_v2/p50_cycle_engine_v2.py raw_v2/p50_v2_collector.py raw_v2/p50_quota_policy.py
       - name: Run P50 cycle tests
         run: python -m unittest discover -s tests -p 'test_p50_cycle_v2.py' -v
+      - name: Run quota policy tests
+        run: python -m unittest discover -s tests -p 'test_p50_quota_policy.py' -v
