@@ -270,8 +270,10 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 0)
         self.assertEqual(self.step()["status"], "quota_hold")
         self.assertEqual(self.calls, 1)
+        # Missing usage correctly prevents any successful RAW contract table
+        # from being created. The stable observations table must stay empty.
         self.assertEqual(self.raw._db.execute(
-            "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 0)
+            "SELECT COUNT(*) FROM post_observations").fetchone()[0], 0)
 
     def test_unknown_http_result_blocks_without_automatic_retry(self):
         self.anchor(1)
