@@ -45,13 +45,13 @@ class DataReportTests(unittest.TestCase):
                     finished_reason TEXT,cursor TEXT);
                 CREATE TABLE jobs(state TEXT);
                 CREATE TABLE lanes(lane TEXT,usage REAL,halted INT,ready_at TEXT);
-                CREATE TABLE schedule_state(round_no INT,lane_index INT,
+                CREATE TABLE schedule_state(id INTEGER PRIMARY KEY,round_no INT,lane_index INT,
                     ordinal INT,slot_count INT,ready_at TEXT);
             """)
             planner.execute("INSERT INTO accounts VALUES(1,0,NULL,'SECRET_CURSOR')")
             planner.execute("INSERT INTO jobs VALUES('done')")
             planner.execute("INSERT INTO lanes VALUES('A',35.0,0,NULL)")
-            planner.execute("INSERT INTO schedule_state VALUES(1,0,2,0,NULL)")
+            planner.execute("INSERT INTO schedule_state VALUES(1,1,0,2,0,NULL)")
             planner.commit()
             planner.close()
             result=report(root, include_details=True, sample_count=1)
