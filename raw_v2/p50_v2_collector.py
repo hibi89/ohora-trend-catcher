@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+import traceback
 from urllib.parse import urlencode
 from urllib.request import Request
 from urllib.error import HTTPError
@@ -26,29 +27,6 @@ from three_api_usage import parse_usage
 FIELDS = ("id,caption,media_type,media_product_type,media_url,permalink,"
           "timestamp,like_count,comments_count,thumbnail_url,view_count")
 CURSOR = re.compile(r"^[A-Za-z0-9_=-]{1,512}$")
-
-
-def usage_percent(headers):
-    found = []
-    for key in ("x-app-usage", "x-business-use-case-usage"):
-        raw = headers.get(key)
-        if raw is None:
-            continue
-        obj = json.loads(raw)
-        if isinstance(obj, dict):
-            values = [obj] if key == "x-app-usage" else list(obj.values())
-            for value in values:
-                if isinstance(value, list):
-                    values2 = value
-                else:
-                    values2 = [value]
-                for entry in values2:
-                    if isinstance(entry, dict):
-                        for field in ("call_count", "total_cputime", "total_time", "estimated_time_to_regain_access"):
-                            number = entry.get(field)
-                            if type(number) in (int,float) and 0 <= number <= 100:
-                                found.append(number)
-    return max(found) if found else None
 
 
 def fetch(lane, username, cursor, caller, token, version, sender):
@@ -92,7 +70,7 @@ def fetch(lane, username, cursor, caller, token, version, sender):
     # Preserve the stricter observed maximum when both headers are available.
     app_usage=parse_usage({'x-app-usage':headers['x-app-usage']}) if 'x-app-usage' in headers else None
     observed=max(v for v in (scoped,app_usage) if v is not None) if scoped is not None or app_usage is not None else None
-    return posts,next_cursor,oldest,observed,bd
+    return posts,next_cursor,oldest,observed,bd,{'app': 'x-app-usage' in headers,'business': 'x-business-use-case-usage' in headers}
 
 
 def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_usage=None):
@@ -164,7 +142,7 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
             ordinal=job["ordinal"]
             ref,caller,token=credentials[lane]
             try:
-                posts,cursor,oldest,usage,body=fetch(
+                posts,cursor,oldest,usage,body,header_presence=fetch(
                     lane,accounts[ordinal-1]["username"],job["cursor"],
                     caller,token,version,sender)
                 # Missing usage means halt this lane after the committed page.
@@ -184,6 +162,12 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
                 planner.acknowledge(job,receipt_id=receipt,posts=posts,
                     next_cursor=cursor,exhausted=cursor is None,
                     oldest_published_at=oldest)
+                # A successful page with no utilization header must not silently
+                # disable a healthy lane: verify with a scoped caller probe.
+                if usage is None:
+                    observation=probe_lane(lane,env,sender=sender)
+                    usage=observation["usage_percent"] if observation["quota_verified"] else None
+                    print(json.dumps({"event":"quota_after_page","lane":lane,"header_presence":header_presence,"verified":observation["quota_verified"],"usage":usage}),flush=True)
                 planner.set_usage(lane,usage)
                 done+=1
                 print(json.dumps({"event":"page_saved","lane":lane,"cycle":job["cycle"],"ordinal":ordinal,"posts":len(posts),"usage":usage,"receipt":receipt}),flush=True)
