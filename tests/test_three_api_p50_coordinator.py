@@ -23,7 +23,22 @@ class P50CoordinatorTests(unittest.TestCase):
                 self.assertEqual(tuple(jobs[0]), (1, 1, "A", "front"))
                 self.assertEqual(tuple(jobs[1]), (1, 2, "C", "catchup"))
                 self.assertEqual(tuple(jobs[2]), (1, 3, "B", "catchup"))
-                self.assertEqual(tuple(jobs[-1]), (50, 3, "B", "catchup"))
+                self.assertEqual(tuple(jobs[3]), (2, 1, "B", "front"))
+                self.assertEqual(tuple(jobs[4]), (2, 2, "A", "catchup"))
+                self.assertEqual(tuple(jobs[6]), (3, 1, "C", "front"))
+                self.assertEqual(tuple(jobs[-1]), (50, 3, "C", "catchup"))
+                self.assertEqual(
+                    dict(coordinator.db.execute(
+                        "SELECT lane,COUNT(*) FROM jobs WHERE page=1 GROUP BY lane"
+                    ).fetchall()),
+                    {"A": 17, "B": 17, "C": 16},
+                )
+                self.assertEqual(
+                    dict(coordinator.db.execute(
+                        "SELECT lane,COUNT(*) FROM jobs GROUP BY lane"
+                    ).fetchall()),
+                    {"A": 50, "B": 50, "C": 50},
+                )
                 self.assertEqual(coordinator.db.execute(
                     "SELECT COUNT(*) FROM jobs WHERE account_ordinal > 50"
                 ).fetchone()[0], 0)
