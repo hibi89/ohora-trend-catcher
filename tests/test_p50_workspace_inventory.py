@@ -45,6 +45,16 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(len(files), 1)
             self.assertEqual(files[0]["relative_path"], "p50_raw.sqlite")
 
+    def test_missing_wal_is_warning_not_recovery_permission(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "history.sqlite").write_bytes(b"main-only")
+            result = inspect(root)
+            self.assertIn("WAL_NOT_PRESENT_FOR:history.sqlite", result["warnings"])
+            self.assertIn("READ_ONLY_INVENTORY_CANNOT_PROVE_SNAPSHOT_CONSISTENCY",
+                          result["warnings"])
+            self.assertEqual((root / "history.sqlite").read_bytes(), b"main-only")
+
     def test_symlink_root_refused(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
