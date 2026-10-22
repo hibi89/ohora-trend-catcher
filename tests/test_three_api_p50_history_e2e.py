@@ -81,6 +81,23 @@ class HistoricalFixtureE2E(unittest.TestCase):
                             oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
                             terminal=1)
                     self.assertEqual(store.read(keys[0])["pages_verified"], 0)
+                    from three_api_p50_history_commit import commit_persisted_history_page
+                    # A stale Capture must not be able to advance a different active cursor.
+                    original_read = store.read
+                    def stale_read(key):
+                        row = original_read(key)
+                        if key == keys[0]:
+                            return dict(row, cursor="newer-cursor")
+                        return row
+                    from unittest.mock import patch
+                    with patch.object(store, "read", side_effect=stale_read):
+                        with self.assertRaisesRegex(ValueError, "active account cursor"):
+                            commit_persisted_history_page(
+                                store, journal, writer, account_key=keys[0],
+                                capture_id="cap-" + request.request_id,
+                                oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
+                                terminal=True)
+                    self.assertEqual(store.read(keys[0])["cursor"], "tail-1")
                     result = ingest_and_commit_offline_history_page(
                         store, journal, writer, request, response,
                         oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
