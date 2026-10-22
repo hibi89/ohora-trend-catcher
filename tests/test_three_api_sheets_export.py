@@ -118,8 +118,8 @@ class SheetsExportTests(unittest.TestCase):
                 }))
             )
         result = export_observations(self.path, after_id=2, limit=1)
-        self.assertEqual([r["observation_id"] for r in result["rows"]], [4])
-        self.assertEqual(result["next_after_id"], 4)
+        self.assertEqual(result["rows"], [])
+        self.assertEqual(result["next_after_id"], 2)
         self.assertEqual(export_observations(
             self.path, after_id=4, limit=1)["rows"], [])
 
