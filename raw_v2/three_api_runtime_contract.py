@@ -304,19 +304,23 @@ class RequestEnvelope:
     # Parse/store HISTORY only for explicitly supplied OFFLINE fixture evidence.
     # This flag is never live Meta approval, never a transport capability.
     history_offline_only: bool = False
+    history_live_approved: bool = False
 
     def __post_init__(self) -> None:
         if self.contract_version != CONTRACT_VERSION:
             raise ValueError("Unsupported contract version")
         object.__setattr__(self, "requested_at", utc(self.requested_at))
+        if type(self.history_live_approved) is not bool:
+            raise ValueError("Live history flag must be an explicit boolean")
         if type(self.history_offline_only) is not bool:
             raise ValueError("Offline history flag must be an explicit boolean")
         if self.phase == "history":
-            if (self.history_offline_only is not True or self.cursor is None
-                    or self.request_spec.limit != 4):
-                raise ValueError("History lane requires explicit offline-only proof")
-        elif self.history_offline_only:
-            raise ValueError("Offline history flag is not a front/catchup grant")
+            if (self.history_offline_only == self.history_live_approved
+                    or self.cursor is None or self.request_spec.limit != 4
+                    or not 1 <= self.account_ordinal <= 50):
+                raise ValueError("History requires exactly one explicit P50 history capability")
+        elif self.history_offline_only or self.history_live_approved:
+            raise ValueError("History flag is not a front/catchup grant")
         if self.lane not in ("A", "B", "C") or self.request_spec.lane != self.lane:
             raise ValueError("Lane mismatch")
         if self.request_spec.username != self.username or self.request_spec.after != self.cursor:
