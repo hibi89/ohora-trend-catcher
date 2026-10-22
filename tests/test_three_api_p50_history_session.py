@@ -22,6 +22,18 @@ class HistorySessionTests(unittest.TestCase):
         with P50HistoryStore(self.path) as store:
             store.initialize(self.keys, date(2025, 10, 22))
 
+    def test_invalid_budget_rejected_before_store_access(self):
+        class ForbiddenStore:
+            def __getattr__(self, name):
+                raise AssertionError("Store accessed before budget validation")
+        for budget in (0, 51, True, 1.5, "10"):
+            with self.subTest(budget=budget), self.assertRaisesRegex(
+                    ValueError, "step budget"):
+                run_offline_history_session(
+                    ForbiddenStore(), None, None, self.keys, self.names,
+                    latest_complete_keys=set(self.keys), captured_pages={},
+                    max_steps=budget)
+
     def test_empty_session_does_not_advance(self):
         with P50HistoryStore(self.path) as store:
             result = run_offline_history_session(
