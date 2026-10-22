@@ -36,8 +36,6 @@ def _needs_latest(workspace):
     if not candidates:
         raise ValueError("P50 latest coordinator missing; refusing implicit workspace initialization")
     latest = candidates[-1]
-    if latest.parent.name != datetime.now(KST).date().isoformat():
-        raise ValueError("P50 latest coordinator belongs to another KST day; manual review required")
     if latest.is_symlink() or latest.parent.is_symlink():
         raise ValueError("Symlink P50 coordinator is forbidden")
     with closing(sqlite3.connect(latest.resolve().as_uri() + "?mode=ro", uri=True)) as db:
