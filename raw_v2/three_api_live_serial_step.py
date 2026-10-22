@@ -58,7 +58,7 @@ class LiveSerialStep:
         # Explicitly isolated P50 mode; all other coordinators remain 294-only.
         from three_api_p50_coordinator import P50Coordinator
         from three_api_p50_roster import validate_p50_roster, PilotRosterError
-        is_p50 = type(self.coordinator) is P50Coordinator
+        is_p50 = type(getattr(self, "coordinator", None)) is P50Coordinator
         expected_count = 50 if is_p50 else 294
         if not isinstance(accounts, (list, tuple)) or len(accounts) != expected_count:
             raise LiveSerialStepError("Selected roster size mismatch")
