@@ -226,6 +226,7 @@ class P50N8nTickTests(unittest.TestCase):
             environment_loader=self._loader)
         self.assertEqual(result["action"], "LIVE_TICK_COMPLETE", result)
         self.assertEqual(result["storage_verification"]["done_job_delta"], 1)
+        self.assertFalse(result["live_meta_called"])
 
     def test_missing_receipt_delta_fails_closed(self):
         result = adapter.tick(

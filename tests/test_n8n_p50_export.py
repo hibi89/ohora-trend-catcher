@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import unittest
 
 
@@ -68,6 +70,57 @@ class P50N8nExportTests(unittest.TestCase):
         routes = connections['Operator review required?']['main']
         self.assertEqual(routes[0][0]['node'], 'Stop P50 run for operator review')
         self.assertEqual(routes[1][0]['node'], 'Keep result in n8n execution')
+
+    def test_recovery_only_result_is_progress_without_claiming_a_meta_call(self):
+        node = shutil.which('node')
+        if node is None:
+            self.skipTest('Node.js is required to execute the n8n Code node fixture')
+        workflow = json.loads((ROOT / 'kq3_294_collection' /
+                               'n8n_p50_daily_collection.json').read_text(encoding='utf-8'))
+        code = next(n for n in workflow['nodes']
+                    if n['name'] == 'Validate P50 runner result')['parameters']['jsCode']
+        runner = (
+            "const fs=require('fs');"
+            "const p=JSON.parse(fs.readFileSync(0,'utf8'));"
+            "const out=new Function('$input',p.code)({all:()=>[{json:{stdout:JSON.stringify(p.result)}}]});"
+            "process.stdout.write(JSON.stringify(out[0].json));"
+        )
+        cases = [
+            ('recovered-only', {
+                'action': 'LIVE_TICK_COMPLETE', 'mode': 'P50_EXPLICIT_SERIAL',
+                'status': 'recovered', 'committed_pages': 0, 'recovered_pages': 1,
+                'account_failures': 0, 'attempted_steps': 1, 'live_meta_called': False,
+                'storage_verification': {'status': 'verified', 'receipt_delta': 1},
+            }, 'collection_progress', False),
+            ('invalid-recovery-count', {
+                'action': 'LIVE_TICK_COMPLETE', 'mode': 'P50_EXPLICIT_SERIAL',
+                'status': 'recovered', 'committed_pages': 0, 'recovered_pages': -1,
+                'account_failures': 0, 'attempted_steps': 1, 'live_meta_called': False,
+                'storage_verification': {'status': 'verified', 'receipt_delta': 1},
+            }, 'manual_review', False),
+            ('new-page', {
+                'action': 'LIVE_TICK_COMPLETE', 'mode': 'P50_EXPLICIT_SERIAL',
+                'status': 'page_committed', 'committed_pages': 1, 'recovered_pages': 0,
+                'account_failures': 0, 'attempted_steps': 1, 'live_meta_called': True,
+                'storage_verification': {'status': 'verified', 'receipt_delta': 1},
+            }, 'collection_progress', True),
+            ('serial-wait', {
+                'action': 'LIVE_TICK_COMPLETE', 'mode': 'P50_EXPLICIT_SERIAL',
+                'status': 'serial_busy', 'committed_pages': 0, 'recovered_pages': 0,
+                'account_failures': 0, 'attempted_steps': 1, 'live_meta_called': False,
+                'storage_verification': {'status': 'verified', 'receipt_delta': 0},
+            }, 'waiting', False),
+        ]
+        for name, result, expected_state, expected_call in cases:
+            with self.subTest(case=name):
+                completed = subprocess.run(
+                    [node, '-e', runner], input=json.dumps({'code': code, 'result': result}),
+                    text=True, capture_output=True, check=True)
+                actual = json.loads(completed.stdout)
+                self.assertEqual(actual['state'], expected_state)
+                self.assertEqual(actual['live_meta_called'], expected_call)
+                if name == 'recovered-only':
+                    self.assertFalse(actual['alert_required'])
 
 
 if __name__ == '__main__':
