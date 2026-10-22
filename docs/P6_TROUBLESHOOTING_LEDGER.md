@@ -401,6 +401,13 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
+| P6-087 | P50 수동 history | PowerShell 원클릭, Capture/RAW 복구, 50계정 공정 순환, 실 Meta 미호출 | 합성 CI PASS; Windows·실 HTTP 미검증 |
+| P6-086 | P50 history 커서 | 앵커 없는 NULL cursor 발행 금지 | 안전 차단 |
+| P6-085 | P50 v3 안전·KST | 테스트 SQLite 핸들, KST cutoff 판정 보정 | 실 HTTP 미검증 |
+| P6-084 | P50 체크포인트 | RAW·Capture 확인 뒤 상태 전이 | 저장 계약 회귀 |
+| P6-083 | Windows fixture | WinError32 잠긴 DB connection 자원 정리 | 재실행 필요 |
+| P6-082 | P50 회귀 | Windows 18 tests 오류 추적 | 일부 fixture 수정 |
+| P6-081 | P50 긴급 수동 실행 | 기존 latest-only 150 jobs 병목 규명 | P6-087 실행기 추가 |
 | P6-080 | n8n 저장 검증 | read-only receipt baseline/delta, 레인 count를 결과·알림으로 전달 | 23/23 focused PASS; actual pilot readback pending |
 | P6-079 | n8n 결과·승인·알림 연동 | live opt-in, structured progress/attention, redacted webhook; 16/16 PASS | inactive export; runtime import/webhook pending |
 | P6-078 | B/C quota 재개 gate | post-cooldown Capture evidence or explicit dashboard attestation; C also requires no-competing-traffic confirmation | B/C not resumed; 69/69 focused offline PASS |
