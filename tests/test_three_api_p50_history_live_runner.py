@@ -59,6 +59,7 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.next_cursors = []
         self.post_count = 1
         self.fail_first = False
+        self.post_date = '2026-10-21T10:00:00+0000'
 
         def sender(prepared, timeout):
             self.calls += 1
@@ -76,6 +77,7 @@ class HistoryHTTPIntegration(unittest.TestCase):
             post = response.payload["business_discovery"]["media"]["data"][0]
             post["username"] = username
             post["id"] = str(1000000000 + self.calls * 10)
+            post["timestamp"] = self.post_date
             for extra in range(1, self.post_count):
                 repeated = dict(post)
                 repeated["id"] = str(1000000000 + self.calls * 10 + extra)
@@ -165,6 +167,30 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.step()["status"], "blocked_unknown_http")
         self.assertEqual(self.calls, 0)
         self.assertEqual(self.store.read(account["key"])["state"], "blocked_unknown_http")
+
+    def test_crossing_365_day_window_stops_without_more_http(self):
+        self.anchor(1)
+        self.names = ["nail_us_1"]
+        self.post_date = "2025-10-20T12:00:00+0000"
+        result = self.step()
+        self.assertEqual(result["state"], "window_covered")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], None)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 1)
+        self.assertEqual(self.step()["status"], "no_ready_work")
+        self.assertEqual(self.calls, 1)
+
+    def test_reopen_real_sqlite_resumes_from_verified_cursor(self):
+        self.anchor(1)
+        self.names = ["nail_us_1", "nail_us_1"]
+        self.assertEqual(self.step()["status"], "recovered")
+        first_cursor = self.store.read(self.accounts[0]["key"])["cursor"]
+        history_path = self.store.path
+        self.store.close()
+        self.store = P50HistoryStore(history_path)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], first_cursor)
+        self.assertEqual(self.step()["status"], "recovered")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 2)
+        self.assertEqual(self.calls, 2)
 
     def test_full_page_without_cursor_is_blocked_not_terminal(self):
         self.anchor(1)
