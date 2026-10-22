@@ -5,7 +5,7 @@
 **현재 브랜치:** `codex/p6-readiness-hardening-20261019`
 **P2 소스 수정 커밋:** `0278cae64da5ec52430eaa034ca32ed0360d69c3` (문서 동기화 커밋도 같은 작업 브랜치에 포함)
 **확인된 origin 브랜치 HEAD:** `4e1469225a17d28285b09132fdb7175fbee49e1e` (2026-10-22 fetch 완료)
-**P50 엔진 origin tip:** `690383f2e3e02f4e6c7614f201731e3d1e7773e2`
+**P50 엔진 origin tip:** `83215ca074884408fd8d08fa7216439c3dc7fff7`
 
 ## 최근 사용자 지시와 현재 우선순위
 
@@ -33,15 +33,17 @@
 
 - 기존 HANDOFF에는 별도의 사용자 승인으로 수행된 P50 A 레인 1페이지 성공 기록이 있다: HTTP 200, 안전 usage 0%, 게시물 관측 4건, durable receipt/Capture ack/coordinator 완료를 read-only로 확인했다. 이번 P1/P2 수정 중 새 Meta 요청은 없었다.
 - 이번 격리 E2E는 코드/워크플로의 오프라인 결과 라우팅만 검증했다. 예약 운영 workflow는 비활성이다. 운영 n8n 인스턴스, 예약 cadence/budget, 경고 채널/자격증명은 미확정 또는 보류 상태다.
-- P50 upstream은 `690383f`까지 진행했다. 추가/수정된 history modules가 있으나 최신 `three_api_p50_manual_pilot.py`는 기존 `run_p50`과 latest용 flags만 제공하므로 n8n에서 history를 안전하게 호출할 owner CLI 계약이 아직 없다. Keep pin `10ebaf8`. Prior upstream CI `39727639343` at `c4944f1` failed as described in the P6 ledger; the combined-status query for `690383f` returned no contexts, so latest CI is unknown.
+- P50 upstream은 `83215ca`까지 진행했다. 추가/수정된 history modules가 있으나 최신 `three_api_p50_manual_pilot.py`는 기존 `run_p50`과 latest용 flags만 제공하므로 n8n에서 history를 안전하게 호출할 owner CLI 계약이 아직 없다. Keep pin `10ebaf8`. Prior upstream CI `39727639343` at `c4944f1` failed as described in the P6 ledger; the combined-status query for `83215ca` returned no contexts, so latest CI is unknown.
+- 로컬 n8n 인프라 read-only probe: CLI `2.40.7` 설치, n8n/Node 실행 프로세스 0, 포트 5678/5680/5681 listener 0, Docker service 미설치. 이는 이 Windows PC의 상태만 나타내며 원격 학원 n8n host는 미확인이다.
 - Simulation v2/v3 illustrative throughput uses `H=max(0,Q−L−C−R)`, with P50 `L≤150`; `Q`, `C`, `R`, actual posts, quota sharing and latency remain unknown. If `Q≤L+C+R` persists, history cannot progress. Example page/day estimates are hypothetical, not measured Meta capacity.
 - P294 활성화와 Google Sheets 연동은 미완료 후속 범위다. Google 계정 인증/스프레드시트 ID는 Sheets 단계가 실제 시작될 때 요청한다.
 
 ## Git 및 문서 상태
 
 - 로컬 브랜치에는 P2 소스 커밋 `0278cae`와 문서 동기화 변경이 포함되어 있다. 가장 최근 성공한 `git fetch origin`에서 n8n 브랜치 기준점은 `4e1469225a17d28285b09132fdb7175fbee49e1e`였고, 이후 커밋의 원격 반영 여부는 현재 GitHub ref로 확인해야 한다.
-- 일반 `git fetch` 첫 시도는 `.git/FETCH_HEAD` ACL로 실패했으나, 승인된 권한 상승 재시도는 성공했다. P50 origin feature ref는 `690383f2e3e02f4e6c7614f201731e3d1e7773e2`로 갱신됐다.
+- 일반 `git fetch` 첫 시도는 `.git/FETCH_HEAD` ACL로 실패했으나, 승인된 권한 상승 재시도는 성공했다. P50 origin feature ref는 `83215ca074884408fd8d08fa7216439c3dc7fff7`로 갱신됐다.
 - 수정 상세 및 테스트 증거는 `docs/P50_GPT_PROGRESS_REPORT_2026-10-22.md`, `docs/P50_N8N_COMPLETION_TODO.md`, `docs/P6_TROUBLESHOOTING_LEDGER.md`에 있다. HANDOFF/STATUS 상단 요약도 이번 P1/P2 및 v3 자료를 가리킨다.
+- GitHub checks on pushed P2/docs SHA `3e5967278d26e483e7ec213cd86fe5646a3b6e6a`: Three API and C Contract **SUCCESS**, Frozen Design Guard **SUCCESS**; Runtime Linux and Windows remaining **FAIL** on the P6-101 index row omission. Added the missing P6-101/P6-102 rows; focused local guard is 4/4 +2 subtests PASS. Post-repair remote CI remains pending.
 - Project Book 색인 업데이트/재조회도 별도 필수 인계 작업이다.
 
 ## 다음 작업자가 먼저 할 일
