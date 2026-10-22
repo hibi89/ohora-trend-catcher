@@ -60,12 +60,13 @@ def export_observations(db_path, *, after_id=0, limit=500):
         # A receipt committed later must remain eligible for export.
         first_unverified = db.execute(
             """SELECT o.id FROM post_observations o
-               JOIN posts p ON p.post_id=o.post_id
-               WHERE o.id>? AND NOT EXISTS (
+               LEFT JOIN posts p ON p.post_id=o.post_id
+               LEFT JOIN accounts a ON a.account_key=p.account_key
+               WHERE o.id>? AND (p.post_id IS NULL OR a.account_key IS NULL OR NOT EXISTS (
                    SELECT 1 FROM three_api_raw_receipts r
                    WHERE r.account_key=p.account_key
                      AND json_extract(r.payload_json,'$.request_id')=o.request_id
-               )
+               ))
                ORDER BY o.id LIMIT 1""",
             (after_id,),
         ).fetchone()
