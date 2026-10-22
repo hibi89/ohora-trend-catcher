@@ -44,7 +44,11 @@ def export_observations(db_path, *, after_id=0, limit=500):
             (after_id, limit),
         ).fetchall()
         output = []
+        seen_observation_ids = set()
         for row in rows:
+            if row["observation_id"] in seen_observation_ids:
+                raise ValueError("Ambiguous RAW receipts for observation")
+            seen_observation_ids.add(row["observation_id"])
             capture = json.loads(row["payload_json"])
             matches = [p for p in capture["posts"] if p.get("id") == row["post_id"]]
             if len(matches) != 1:
