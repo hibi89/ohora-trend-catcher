@@ -29,6 +29,23 @@ class HistoryAnchorTests(unittest.TestCase):
                                    capture_id="missing")
             self.assertEqual(store.read(self.keys[0])["state"], "ready")
 
+    def test_early_latest_pages_cannot_anchor(self):
+        for page, phase in ((1, "front"), (2, "catchup")):
+            record = SimpleNamespace(
+                capture_id="capture-1",
+                request=SimpleNamespace(
+                    account_key=self.keys[0], phase=phase, page=page))
+            journal = SimpleNamespace(get_capture=lambda _: record)
+            def unexpected(_):
+                raise AssertionError("RAW should not be read")
+            raw = SimpleNamespace(get_raw_receipt=unexpected)
+            with P50HistoryStore(self.path) as store:
+                with self.assertRaises(ValueError):
+                    anchor_latest_tail(
+                        store, journal, raw, account_key=self.keys[0],
+                        capture_id="capture-1")
+                self.assertEqual(store.read(self.keys[0])["state"], "ready")
+
     def test_wrong_account_does_not_read_raw(self):
         record = SimpleNamespace(capture_id="capture-1",
             request=SimpleNamespace(account_key=self.keys[1], phase="front"))
