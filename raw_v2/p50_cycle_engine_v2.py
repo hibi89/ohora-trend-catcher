@@ -286,7 +286,7 @@ class CyclePlanner:
                 else:
                     self.db.execute("UPDATE schedule_state SET slot_count=slot_count+? WHERE id=1",
                                     (page_size,))
-                self.db.execute("COMMIT")
+            self.db.execute("COMMIT")
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
