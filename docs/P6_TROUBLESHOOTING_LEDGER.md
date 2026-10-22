@@ -1,3 +1,9 @@
+### P6-094 — 2026-10-22 · STATUS handoff pointer regression recurred
+- **Observed:** On `23eb01a`, Runtime Windows `offline-windows (remaining)` job `119848228336` failed 1 of 382 tests: `test_current_handoff_links_survive_chat_restart` could not find literal `docs/P6_TROUBLESHOOTING_LEDGER.md` in the first 2,000 characters of `STATUS.md`.
+- **Cause:** The current STATUS top summary had displaced the mandatory cross-chat pointer. This is a documentation regression, not evidence of a Meta collection failure; related prior incident: P6-093.
+- **Repair:** Prepended explicit `AGENTS.md` and `docs/P6_TROUBLESHOOTING_LEDGER.md` pointers to `STATUS.md` in commit [`046ea88`](https://github.com/hibi89/ohora-trend-catcher/commit/046ea8856b564d5dd0c98a53ef5fd845e7a2ba80). Independently fetched the new branch file and verified both literal paths within its first 2,000 characters.
+- **Verification boundary:** This is a static check, not a new local test execution. Six workflows for `046ea88` were queued/pending when checked; do not claim CI success yet. No Meta calls, operational DB, quota, main or P8 changes.
+
 ### P6-093 — 2026-10-22 · Current handoff index omitted AGENTS.md pointer
 - **Observed failure:** Documentation SHA `1c06ff80802c1797979856c4da0c929e61fb5249`: Runtime push [39765324429](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765324429) failed Linux `offline-runtime` and Windows `remaining`; Runtime PR [39765330241](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39765330241) also failed Linux. The exact assertion was `AssertionError: 'AGENTS.md' not found in ...`. Linux ran 1,175 tests and failed 2; Windows `remaining` ran 376 and failed 2. Both failures were the two first-2,000-character `HANDOFF.md`/`STATUS.md` subtests. No watchdog timeout occurred.
 - **Confirmed cause:** The latest summary retained the incident ledger link but omitted the literal `AGENTS.md` link inside the guard's first 2,000 characters. The historical link was below the tested prefix. This is a documentation-index regression, not an engine/test runtime fault.
@@ -454,6 +460,7 @@
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
 | P6-090 | 오프라인 shard 3-way 계약 | stale `remaining` 단일 그룹 주장, 경로 필터 누락 | `74aa66d`; focused 14/14, Windows 3 groups PASS/SKIP; `8763c65` 6/6 core CI SUCCESS |
+| P6-094 | STATUS handoff pointer regression | Windows remaining 1/382 failure; first-2,000-character ledger pointer absent | `046ea88` static pointer check PASS; new-SHA CI pending |
 | P6-093 | HANDOFF/STATUS current index pointer | AGENTS.md 링크가 first-2,000-character guard 밖으로 밀림 | `fa4a023`; focused guard 4/4, same-SHA 6/6 core CI SUCCESS |
 | P6-092 | P50 다음날 최신과거 분리 회귀 픽스처 | CaptureJournal 잘못된 context-manager 사용으로 WinError32 정리 실패 | `ff13186`; focused 7/7, P50 143 PASS/1 platform SKIP; final SHA 6/6 CI SUCCESS |
 | P6-091 | P50 active/backup 상태 불일치 | 운영 재개 증거 미확인; 원인 OPEN | read-only only; canonical DB/backup 확인 후 owner 판단 필요 |
