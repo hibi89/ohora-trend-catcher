@@ -126,13 +126,13 @@ class CyclePlanner:
                 self.db.execute("COMMIT")
                 return None
             account = self.db.execute("""
-                SELECT a.ordinal,a.cursor,COUNT(j.ordinal) AS pages
+                SELECT a.ordinal,a.cursor,COALESCE(SUM(j.post_count),0) AS posts,COUNT(j.ordinal) AS pages
                 FROM accounts a
                 LEFT JOIN jobs j ON j.ordinal=a.ordinal AND j.state='done'
                 WHERE a.finished=0
                 GROUP BY a.ordinal,a.cursor
                 HAVING COUNT(j.ordinal) < ?
-                ORDER BY pages ASC,a.ordinal ASC LIMIT 1
+                ORDER BY posts ASC,a.ordinal ASC LIMIT 1
             """,(MAX_CYCLES,)).fetchone()
             if account is None:
                 self.db.execute("COMMIT")
@@ -150,7 +150,7 @@ class CyclePlanner:
             """,(cycle,lane,account["ordinal"],account["cursor"]))
             self.db.execute("COMMIT")
             return {"cycle":cycle,"lane":lane,"ordinal":account["ordinal"],
-                    "cursor":account["cursor"],"limit":PAGE_LIMIT}
+                    "cursor":account["cursor"],"limit":PAGE_LIMIT - (account["posts"] % PAGE_LIMIT)}
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
