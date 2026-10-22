@@ -1,0 +1,33 @@
+name: P6 Sheets n8n Manual Pilot Offline
+on:
+  push:
+    paths:
+      - 'kq3_294_collection/n8n_p6_sheets_manual_pilot.json'
+      - 'tests/test_p6_sheets_manual_pilot.py'
+      - 'tests/test_three_api_sheets_export.py'
+      - 'raw_v2/three_api_sheets_export.py'
+      - '.github/workflows/p6-sheets-manual-pilot-offline.yml'
+  pull_request:
+    paths:
+      - 'kq3_294_collection/n8n_p6_sheets_manual_pilot.json'
+      - 'tests/test_p6_sheets_manual_pilot.py'
+      - 'tests/test_three_api_sheets_export.py'
+      - 'raw_v2/three_api_sheets_export.py'
+      - '.github/workflows/p6-sheets-manual-pilot-offline.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  offline-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate inactive n8n workflow and read-only Sheets export
+        run: python -m unittest discover -s tests -p 'test_p6_sheets_manual_pilot.py' -v && python -m unittest discover -s tests -p 'test_three_api_sheets_export.py' -v
