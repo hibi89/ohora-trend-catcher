@@ -55,8 +55,13 @@ class LiveSerialStep:
             raise LiveSerialStepError("Explicit live approval required")
         if not isinstance(requested_at, datetime) or requested_at.utcoffset() is None:
             raise LiveSerialStepError("Timezone-aware request time required")
-        if not isinstance(accounts, (list, tuple)) or len(accounts) != 294:
-            raise LiveSerialStepError("Official 294-account roster required")
+        # Explicitly isolated P50 mode; all other coordinators remain 294-only.
+        from three_api_p50_coordinator import P50Coordinator
+        from three_api_p50_roster import validate_p50_roster, PilotRosterError
+        is_p50 = type(self.coordinator) is P50Coordinator
+        expected_count = 50 if is_p50 else 294
+        if not isinstance(accounts, (list, tuple)) or len(accounts) != expected_count:
+            raise LiveSerialStepError("Selected roster size mismatch")
         # Reject missing A/B/C callers and forbidden offline evidence before
         # touching an injected transport or coordinator, even with bad rows.
         if not isinstance(caller_ids, dict) or set(caller_ids) != set(LANES):
@@ -64,8 +69,11 @@ class LiveSerialStep:
         if type(getattr(self, "evidence", None)) is PageEvidenceStore:
             raise LiveSerialStepError("Offline staging evidence cannot authorize live Meta collection")
         try:
-            validate_official_roster(accounts)
-        except RosterPreflightError as exc:
+            if is_p50:
+                validate_p50_roster(accounts)
+            else:
+                validate_official_roster(accounts)
+        except (RosterPreflightError, PilotRosterError) as exc:
             raise LiveSerialStepError(str(exc)) from None
         if any(caller_ids[lane] != self.executor.transport._lanes[lane]._caller_ig_id
                for lane in LANES):
