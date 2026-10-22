@@ -42,7 +42,7 @@ posts. No Sheets connector, network call, cursor table, or database writes.
    `observation_id`; repeated runs must not append duplicates.
 4. **Only after all Sheets writes are confirmed** persist `next_after_id`.
    On partial failure, replay the page; the upsert key makes it idempotent.
-5. Repeat while `has_more=true`; empty rows mean nothing new to export.
+5. Repeat while `has_more=true`; empty rows can also mean a pending RAW receipt gap.\n   Do not advance the checkpoint on an empty page. Check the RAW receipt\n   backlog before treating an empty result as fully synchronized.
 
 The cursor is **local to one immutable RAW DB**; do not share checkpoints
 across P50/294, DB resets or restored snapshots. Use separate destination
@@ -60,3 +60,7 @@ P6 owns the read-only export format, quality and replay tests. n8n Codex owns
 Google authentication, rate limits, batching, Sheets schema and destination
 updates. Do not make Sheets the source of truth or a cursor store for P6.
 No automatic API retries, no original RAW mutation, no engine redesign.
+
+## Cursor gap safety (2026-10-22)
+
+An observation with no matching RAW receipt is not exportable. The exporter now stops checkpoint advancement before the first such observation, even if later IDs have verified receipts. This prevents permanent loss if an earlier RAW receipt arrives late. The n8n consumer must not skip a gap or manually increment `after_id`. After a missing receipt is reconciled, replay the unchanged checkpoint and continue in observation ID order. Historical legacy gaps may require a separate explicit reconciliation policy; do not bypass this gate by modifying the authoritative RAW database.
