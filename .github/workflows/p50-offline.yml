@@ -25,3 +25,49 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_three_api_p50_*.py' -v
       - name: Read-only n8n export contract tests
         run: python -m unittest discover -s tests -p 'test_three_api_sheets_export.py' -v
+
+
+  p50-windows:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: P50 offline history and restart tests on actual Windows
+        shell: pwsh
+        run: python -m unittest discover -s tests -p 'test_three_api_p50_*.py' -v
+      - name: Prove PowerShell history command passes explicit operator flags without any HTTP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $shim = Join-Path $env:RUNNER_TEMP 'p50-cli-shim'
+          $null = New-Item -ItemType Directory -Force -Path $shim
+          $mockPython = Join-Path $shim 'python.cmd'
+          $mockCode = "@echo off" + [Environment]::NewLine + 'echo %* > "%P50_VERIFY_ARGS%"' + [Environment]::NewLine + "exit /b 0"
+          [IO.File]::WriteAllText($mockPython, $mockCode, [Text.Encoding]::ASCII)
+          $env:PATH = "$shim;$env:PATH"
+          if ((Get-Command python).Source -ne $mockPython) { throw 'Synthetic python shim not selected; cannot safely validate.' }
+          $env:P50_VERIFY_ARGS = Join-Path $env:RUNNER_TEMP 'p50-cli-history-args.txt'
+          & pwsh -NoProfile -Command '& .\p50.ps1 history -Live -Source synthetic.csv -Workspace synthetic-p50 -CredentialsDir synthetic-creds'
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $env:P50_VERIFY_ARGS)) { throw 'Windows P50 history command failed to launch.' }
+          $result = Get-Content $env:P50_VERIFY_ARGS -Raw
+          foreach ($required in @('three_api_p50_cycle.py', 'history', '--live', '--confirm-owner-approval', '--source', 'synthetic.csv', '--workspace', 'synthetic-p50', '--credentials-dir', 'synthetic-creds')) {
+            if (!$result.Contains($required)) { throw "Missing forwarded argument: $required" }
+          }
+          $env:P50_VERIFY_ARGS = Join-Path $env:RUNNER_TEMP 'p50-cli-status-args.txt'
+          & pwsh -NoProfile -Command '& .\p50.ps1 status -Source synthetic.csv -Workspace synthetic-p50'
+          if ($LASTEXITCODE -ne 0) { throw 'Windows P50 status wrapper failed.' }
+          $statusLine = Get-Content $env:P50_VERIFY_ARGS -Raw
+          if ($statusLine.Contains('--live') -or $statusLine.Contains('--confirm-owner-approval')) {
+            throw 'Read-only status accidentally forwarded live approval.'
+          }
+          $env:P50_VERIFY_ARGS = Join-Path $env:RUNNER_TEMP 'p50-cli-reject-args.txt'
+          & pwsh -NoProfile -Command '& .\p50.ps1 history -Source synthetic.csv -Workspace synthetic-p50' 2>$null
+          if ($LASTEXITCODE -eq 0 -or (Test-Path $env:P50_VERIFY_ARGS)) {
+            throw 'History without explicit -Live must be refused before Python or HTTP.'
+          }
+          Write-Host 'PASS: Windows history/live forwarding, status read-only, no-live refusal; real Meta calls 0.'
