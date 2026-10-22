@@ -121,12 +121,10 @@ def run(source,workspace,credentials_dir,*,max_requests,live,approved,verified_u
     # The operator must verify quotas for all three lanes before a live run.
     verified_usage = verified_usage or {}
     for lane in ("A","B","C"):
-        if lane in verified_usage:
-            planner.set_usage(lane, verified_usage[lane])
-        else:
-            state=planner.db.execute("SELECT usage FROM lanes WHERE lane=?", (lane,)).fetchone()
-            if state["usage"] is None:
-                planner.set_usage(lane,None)
+        state=planner.db.execute("SELECT usage FROM lanes WHERE lane=?", (lane,)).fetchone()
+        # Persisted API response usage outranks operator-provided startup hints.
+        if state["usage"] is None:
+            planner.set_usage(lane,verified_usage.get(lane))
     done=0
     try:
         while done < max_requests:
