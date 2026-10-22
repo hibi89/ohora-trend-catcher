@@ -12,8 +12,8 @@ def anchor_latest_tail(store, journal, raw_writer, *, account_key, capture_id,
         raise ValueError("Missing durable Capture record")
     if record.request.account_key != account_key:
         raise ValueError("Capture belongs to a different account")
-    if record.request.phase not in ("front", "catchup"):
-        raise ValueError("Only latest pages may anchor history")
+    if record.request.phase != "catchup" or record.request.page != 3:
+        raise ValueError("Only verified third latest page may anchor history")
     raw_receipt = raw_writer.get_raw_receipt(capture_id)
     if raw_receipt is None:
         raise ValueError("Missing durable RAW receipt")
