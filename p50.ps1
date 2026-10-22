@@ -6,7 +6,7 @@ param(
     [int] $MaxPages = 0,
     [string] $Source = "$env:USERPROFILE\Downloads\ohora_p50_roster_20261022.csv",
     [string] $Workspace = "$env:LOCALAPPDATA\OHORA_P50\p50",
-    [string] $CredentialsDir = "$env:USERPROFILE\OneDrive\Desktop"
+    [string] $CredentialsDir = "$env:USERPROFILE\OneDrive\Desktop\ohora_env_a_b_c"
 )
 $ErrorActionPreference = 'Stop'
 $runner = Join-Path $PSScriptRoot 'raw_v2\three_api_p50_cycle.py'
