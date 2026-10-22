@@ -92,6 +92,62 @@ class P50ManualPilotTests(unittest.TestCase):
             self.assertEqual(capture.execute("SELECT COUNT(*) FROM intents").fetchone()[0], 1)
         self.assertNotIn("synthetic-token", str(result))
 
+    def test_three_independent_lanes_commit_three_distinct_accounts(self):
+        """One bounded serial cycle uses A, B and C, each with verified RAW."""
+        import sqlite3
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import patch
+        from three_api_credentials import CredentialReference
+        from three_api_graph_http import GraphHTTPClient
+        from three_api_live_lane_router import ThreeLaneMetaTransport
+        from three_api_transport import MetaTransport
+        from test_three_api_serial_bootstrap import MockResponse
+
+        calls = []
+        lanes = {}
+        env = {"P6_META_GRAPH_VERSION": "v26.0"}
+        account_by_lane = {"A": (1, "nail_us_1"),
+                           "B": (2, "nail_us_2"),
+                           "C": (3, "nail_us_3")}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            env[f"P6_META_TOKEN_{lane}"] = "test-token-" + lane
+            env[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}",
+                                      f"P6_META_IG_ID_{lane})
+
+            def sender(request, timeout, *, lane=lane):
+                calls.append(lane)
+                index, username = account_by_lane[lane]
+                response = MockResponse()
+                response.payload["business_discovery"]["username"] = username
+                response.payload["business_discovery"]["media"]["data"][0]["username"] = username
+                response.payload["business_discovery"]["media"]["data"][0]["id"] = str(1234567890 + index)
+                return response
+
+            lanes[lane] = MetaTransport(
+                client=GraphHTTPClient(sender=sender, approved=True),
+                credentials=ref, caller_ig_id=caller,
+                token=env[f"P6_META_TOKEN_{lane}"])
+
+        with patch("three_api_p50_manual_pilot._transports",
+                   return_value=ThreeLaneMetaTransport(lanes)):
+            result = run_p50(self.source, self.workspace, live=True,
+                             approved=True, environment=env, max_pages=3)
+        self.assertEqual(result["status"], "page_committed")
+        self.assertEqual(result["committed_pages"], 3)
+        self.assertEqual(result["attempted_steps"], 3)
+        self.assertEqual(calls, ["A", "B", "C"])
+        kst_day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+        with sqlite3.connect(self.workspace / "p50_raw.sqlite") as raw:
+            self.assertEqual(raw.execute(
+                "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 3)
+            self.assertEqual(raw.execute(
+                "SELECT COUNT(*) FROM post_observations").fetchone()[0], 3)
+        with sqlite3.connect(self.workspace / kst_day / "coordinator.sqlite") as db:
+            self.assertEqual(dict(db.execute(
+                "SELECT lane,COUNT(*) FROM jobs WHERE state='done' GROUP BY lane"
+            ).fetchall()), {"A": 1, "B": 1, "C": 1})
+
     def test_page_limit_rejects_unbounded(self):
         for invalid in (0, 151, True):
             with self.subTest(invalid=invalid):
