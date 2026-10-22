@@ -45,6 +45,8 @@ def ingest_and_commit_offline_history_page(
     """Persist one synthetic page and advance its history cursor only afterward."""
     if getattr(request, "phase", None) != "history":
         raise ValueError("History request required")
+    if getattr(request, "history_offline_only", None) is not True:
+        raise ValueError("Explicit offline history request required")
     # Check expected cursor before any Capture or RAW write.
     current = store.read(request.account_key)
     if (current is None or current["state"] != "continuation_ready"
