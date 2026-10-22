@@ -186,7 +186,7 @@ class SheetsExportTests(unittest.TestCase):
         self.assertEqual(result["next_after_id"], 4)
 
     def test_malformed_raw_field_status_fails_closed(self):
-        for status in ([], "returned", {"p1": ["returned"]}):
+        for status in ([], "", "returned", {"p1": []}, {"p1": ""}, {"p1": ["returned"]}):
             with self.subTest(status=status):
                 with sqlite3.connect(self.path) as db:
                     db.execute(
