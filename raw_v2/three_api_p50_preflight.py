@@ -1,8 +1,7 @@
 """P50 offline entrypoint: validates the exact roster and previews 150 isolated jobs.
 
 No Graph HTTP, tokens, Capture or RAW writes. Never uses a P6/294 DB.
-The live P50 integration is deliberately disabled until the strict 294-only
-runner, RAW initializer, and approval gates have a separately tested P50 path.
+The P50 live dispatch remains disabled here; this CLI is offline-only.
 """
 from __future__ import annotations
 
