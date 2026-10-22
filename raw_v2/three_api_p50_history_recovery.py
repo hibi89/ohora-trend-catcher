@@ -51,6 +51,7 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
     # Only count still-eligible persisted work, not accounts already completed.
     budget_exhausted = bool(available)
     return {"status": "step_budget_exhausted" if budget_exhausted else
-            ("awaiting_persisted_page" if deferred else "no_eligible_cursor"),
+            ("awaiting_persisted_page" if deferred else
+             ("completed" if completed else "no_eligible_cursor")),
             "completed": completed, "network_requests": 0,
             "deferred_accounts": deferred}
