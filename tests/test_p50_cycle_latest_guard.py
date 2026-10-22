@@ -43,6 +43,19 @@ class P50CycleSafetyTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["status"], "quota_hold")
 
 
+    def test_history_incomplete_even_after_successful_page_is_nonzero(self):
+        with patch.object(cycle, "_needs_latest", return_value=False), \
+             patch.object(cycle, "run_history", return_value={
+                 "status": "recovered", "collection_complete": False,
+                 "completed_accounts": 1, "remaining_accounts": 49}), \
+             patch.object(cycle, "load_three_api_environment", return_value={}), \
+             patch("sys.stdout", new_callable=io.StringIO) as output:
+            code = cycle.main(["history", "--live", "--confirm-owner-approval",
+                               "--credentials-dir", "/synthetic",
+                               "--workspace", "/synthetic/p50"])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(output.getvalue())["remaining_accounts"], 49)
+
     def test_history_manual_review_returns_nonzero(self):
         with patch.object(cycle, "_needs_latest", return_value=False), \
              patch.object(cycle, "run_history", return_value={"status": "manual_review"}), \
