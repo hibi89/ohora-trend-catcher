@@ -1,4 +1,10 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+### P6-084 — 2026-10-22 · P50 365-day history checkpoint foundation
+- Added `raw_v2/three_api_p50_history_checkpoint.py`: pure offline cursor decision. Requires RAW and Capture verification before advancement; uncertain HTTP blocks; missing/repeated cursor blocks; explicit terminal or timestamp older than cutoff stops. Cursor remains opaque, not reconstructed from paging URL.
+- Added `tests/test_three_api_p50_history_checkpoint.py` with 11 unit cases. **Tests not executed in assistant environment; no success claim.**
+- **Not yet wired** into coordinator/transport, persistent per-account cursor table, day rollover, or actual 365-day backfill. These remain open. No Meta requests, operational DB changes, or main merge.
+- Rollback: revert commits `0c0ef03` and `19513d8` before integration.
+
 ### P6-083 — 2026-10-22 · Windows P50 suite second run and SQLite fixture handle repairs
 - **User-executed second result:** `Ran 18 tests in 0.942s; FAILED (errors=3, skipped=1)`. All three errors are `PermissionError [WinError 32]` during `TemporaryDirectory` cleanup: two P50 manual pilot fixtures (`capture.sqlite`, `coordinator.sqlite`) and one status fixture (`coordinator.sqlite`). The earlier batch-name assertion and workspace test error are gone.
 - **Root cause in fixtures:** Python `with sqlite3.connect(path) as db` controls transactions but does **not** close the connection. Windows forbids unlink of the still-open SQLite file. Replace fixture context managers with `contextlib.closing(sqlite3.connect(...))` for both tests; repairs `18373f4` (status) and `be29f38` (manual pilot). The production runner already uses ExitStack cleanup; do not modify it based on test-only lock evidence.
