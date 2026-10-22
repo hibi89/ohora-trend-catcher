@@ -131,6 +131,39 @@ class HistoryFixtureDispatcherTests(unittest.TestCase):
                 self.assertEqual(store.read(self.keys[1])["pages_verified"], 0)
                 ingress.assert_not_called()
 
+    def test_two_pages_same_account_in_one_serial_dispatch(self):
+        first = self.fixture(0)
+        second = self.fixture(0, cursor="next-0")
+        second["response"].next_cursor = "next-0-final"
+        pages = {(self.keys[0], "tail-0"): first,
+                 (self.keys[0], "next-0"): second}
+        captures = []
+        def persist_unique(store, journal, writer, batch, *, max_pages):
+            req = batch[0]["request"]
+            captures.append(req.cursor)
+            decision = store.commit_verified_page(
+                account_key=req.account_key, expected_cursor=req.cursor,
+                next_cursor=batch[0]["response"].next_cursor,
+                oldest_post_at=batch[0]["oldest_post_at"], terminal=False,
+                capture_id="capture-" + req.cursor,
+                raw_receipt_id="raw-" + req.cursor,
+                raw_receipt_verified=True, capture_verified=True)
+            return {"pages_committed": 1, "completed": [{
+                "account_key": req.account_key, "state": decision["state"]}]}
+        with patch("three_api_p50_history_fixture_runner.ingest_offline_history_batch",
+                   side_effect=persist_unique):
+            with P50HistoryStore(self.path) as store:
+                result = self.dispatch(store, pages)
+                self.assertEqual(result["pages_committed"], 2)
+                self.assertEqual(store.read(self.keys[0])["pages_verified"], 2)
+                self.assertEqual(store.read(self.keys[0])["cursor"], "next-0-final")
+                self.assertEqual(captures, ["tail-0", "next-0"])
+            with P50HistoryStore(self.path) as restarted:
+                result = self.dispatch(restarted, pages)
+                self.assertEqual(result["pages_committed"], 0)
+                self.assertEqual(restarted.read(self.keys[0])["pages_verified"], 2)
+                self.assertEqual(captures, ["tail-0", "next-0"])
+
     def test_repeated_cursor_rejected_before_any_account_commits(self):
         first = self.fixture(0)
         second = self.fixture(1)
