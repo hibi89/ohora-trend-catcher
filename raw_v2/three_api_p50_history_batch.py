@@ -34,10 +34,10 @@ def ingest_offline_history_batch(store, capture, raw_writer, pages, *, max_pages
         account_key = request.account_key
         if account_key not in first_cursors:
             first_cursors[account_key] = request.cursor
-        if account_key in expected_cursors and request.cursor != expected_cursors[account_key]:
-            raise ValueError("History fixture chain cursor mismatch")
         if account_key in expected_cursors and expected_cursors[account_key] is None:
             raise ValueError("History fixture follows terminal account page")
+        if account_key in expected_cursors and request.cursor != expected_cursors[account_key]:
+            raise ValueError("History fixture chain cursor mismatch")
         expected_cursors[account_key] = response.next_cursor
         if request.request_id in seen:
             raise ValueError("Duplicate history fixture request")
