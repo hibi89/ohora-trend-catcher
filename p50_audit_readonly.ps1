@@ -3,6 +3,8 @@
 $ErrorActionPreference = 'Stop'
 $inventory = Join-Path $PSScriptRoot 'raw_v2\p50_workspace_inventory.py'
 if (-not (Test-Path -LiteralPath $inventory -PathType Leaf)) { throw 'Inventory module missing' }
+if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { throw 'LOCALAPPDATA missing; cannot locate P50 safely' }
+if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) { throw 'USERPROFILE missing; cannot locate backup safely' }
 $local = Join-Path $env:LOCALAPPDATA 'OHORA_P50\p50'
 $backup = Join-Path $env:USERPROFILE 'Downloads\OHORA_P50_BACKUP_20261022_173524'
 Write-Output 'P50 READ-ONLY CANDIDATE INVENTORY; NOT CANONICAL PROOF'
