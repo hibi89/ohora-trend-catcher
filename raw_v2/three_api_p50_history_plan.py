@@ -24,12 +24,14 @@ def plan_next_history_page(store, account_keys, *, latest_complete_keys, max_pag
         row = store.read(key)
         if row is None or row["account_key"] != key:
             raise ValueError("History account not initialized")
-        if row["state"] not in ("ready", "continuation_ready"):
+        # Never dispatch an unanchored history cursor. A validated latest-tail
+        # receipt must establish the first cursor before live history begins.
+        if row["state"] == "ready":
             continue
-        if row["state"] == "continuation_ready" and not row["cursor"]:
+        if row["state"] != "continuation_ready":
+            continue
+        if not row["cursor"]:
             raise ValueError("Persisted continuation missing cursor")
-        if row["state"] == "ready" and row["cursor"] is not None:
-            raise ValueError("Uninitialized history has unexpected cursor")
         jobs.append({"account_key": key, "cursor": row["cursor"],
                      "verified_pages": row["pages_verified"],
                      "cutoff_day": date.fromisoformat(row["cutoff_day"]).isoformat(),
