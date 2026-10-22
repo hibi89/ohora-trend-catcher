@@ -5,9 +5,9 @@
 ## 한눈에 보는 상태
 
 - **n8n 전담 브랜치:** `codex/p6-readiness-hardening-20261019`, 로컬 작업 트리 clean.
-- **n8n 원격 HEAD:** `63fbabb0f6e430a9b5b26ecff706ecd9ad460b18` — GitHub branch API에서 재확인. HEAD의 check-runs **16/16 SUCCESS**.
-- **P50 엔진 소유 브랜치:** `feature/p6-50-account-pilot-20261022`, 현재 원격 tip `d322ae345197d827aa0ac81553281b78a2590662`.
-- **최신 P50 CI:** `d322ae3`의 P50 offline validation run `39738595564`와 P50 Offline History Tests run `39738587930`가 같은 test-fixture 오류로 FAIL. Three API `39738595497`, P6 Runtime `39738595611`은 마지막 조회 때 pending. C Contract와 Frozen Design Guard는 SUCCESS. P50 branch 전체를 녹색으로 간주하면 안 된다.
+- **n8n 검증 기준:** 직전 코드 SHA `63fbabb0f6e430a9b5b26ecff706ecd9ad460b18` check-runs 16/16 SUCCESS. 그 뒤 docs-only 보고서/인수인계 갱신을 같은 작업 브랜치에 push했으며, 최종 SHA와 해당 CI 상태는 이 보고서 갱신 직후 확인한다.
+- **P50 엔진 소유 브랜치:** `feature/p6-50-account-pilot-20261022`, 현재 원격 tip `d7940b8a2c6f85c69f4718ced4e487217d46f359`.
+- **최신 P50 CI:** 이전 tip `d322ae3`의 P50 offline/history runs `39738595564`/`39738587930`는 fixture mismatch로 실패했다. P50 담당자가 `e67788a`에서 timestamp 단위 테스트와 receipt 검증 통합 테스트를 분리한 뒤, 최신 tip `d7940b8`의 offline `39739102068` 및 history `39739097146` 성공. 같은 SHA의 Three API `39739102078`은 IN_PROGRESS, P6 Runtime `39739102073`과 RAW `39739097155`는 마지막 조회 때 PENDING; C Contract와 Frozen Design Guard SUCCESS. 전체 P50 CI 아직 미완료.
 - **수집/운영:** 문서에 기록된 과거 승인 A-lane 1페이지 실수집 증거는 존재한다. 이 보고 작업에서는 Meta 호출 0, 운영 DB/RAW 수정 0, n8n 시작·워크플로 활성화 0, P294 활성화 0, main 병합 0.
 - **최종 목표 진행:** P50-first 개발 중. 기존 오프라인 n8n latest/mock 경로는 있고, 운영 n8n 자동수집 및 P50 history 실행·재개 연동은 미완료다.
 
@@ -23,9 +23,9 @@
 
 ## 최신 P50 병목과 원인
 
-P50 `d322ae3`의 source를 GitHub에서 확인했다. `three_api_p50_manual_pilot.py` 진입점에는 `--source`, `--workspace`, `--max-pages`, `--live`, `--confirm-owner-approval`, `--credentials-dir`만 있고 `history/status/recover` dispatcher가 없다. history anchor/fixture 관련 엔진 코드가 일부 추가됐지만, n8n이 호출할 history CLI와 결과/영수증 계약이 아직 준비됐다고 볼 수 없다. 따라서 n8n pin은 `10ebaf8`을 유지한다.
+P50 `d7940b8`의 source를 GitHub에서 확인했다. `three_api_p50_manual_pilot.py` 진입점에는 `--source`, `--workspace`, `--max-pages`, `--live`, `--confirm-owner-approval`, `--credentials-dir`만 있고 `history/status/recover` dispatcher가 없다. history anchor/fixture 관련 엔진 코드가 일부 추가됐지만, n8n이 호출할 history CLI와 결과/영수증 계약이 아직 준비됐다고 볼 수 없다. 따라서 n8n pin은 `10ebaf8`을 유지한다.
 
-최신 두 P50 offline job의 로그에서 다음 fixture 오류가 확인됐다.
+이전 `d322ae3`에서 두 P50 offline job에 다음 fixture 오류가 발생했으며, 최신 담당자 수정 후 관련 offline/history job이 성공했다.
 
 - 실패 테스트: `test_invalid_tail_timestamp_rejected_before_store_write`
 - 실제 증상: `validate_raw_receipt()`가 synthetic `SimpleNamespace`에서 `capture_id`를 읽다가 `AttributeError`.
@@ -36,15 +36,15 @@ P50 `d322ae3`의 source를 GitHub에서 확인했다. `three_api_p50_manual_pilo
 
 ## n8n 브랜치 검증 및 Git
 
-- n8n branch HEAD `63fbabb0f6e430a9b5b26ecff706ecd9ad460b18`는 로컬 `HEAD`와 GitHub 원격 branch tip이 일치한다.
-- GitHub check-runs: **16/16 SUCCESS** (Windows 오프라인 shards, offline runtime/tests, contract, frozen-design SHA guards).
+- 문서 갱신 전 code HEAD `63fbabb0f6e430a9b5b26ecff706ecd9ad460b18`는 원격과 일치했고, 보고서/docs-only 변경을 기존 브랜치에 push했다. 마지막 SHA와 Actions를 최종 재확인할 것.
+- 직전 n8n SHA `63fbabb` GitHub check-runs: **16/16 SUCCESS** (Windows 오프라인 shards, offline runtime/tests, contract, frozen-design SHA guards).
 - 마지막 로컬 집중 실행 기록: `python -m pytest -q tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py tests/test_p6_troubleshooting_handoff_guard.py` → **20 passed, 6 subtests passed**.
-- 이 turn에서는 코드 변경이나 새 test 실행을 하지 않았다. 문서 갱신은 별도 docs-only commit/push 후 SHA와 CI를 다시 확인해야 한다.
+- 이번 turn의 코드 변경은 없고, 문서 검사 `git diff --check` PASS 및 handoff guard **4 passed + 2 subtests passed**를 실행했다. Docs-only push 이후 branch SHA/Actions는 완료 보고 기준으로 최종 확인한다.
 - main 병합 및 강제 push 금지.
 
 ## 다음 담당 GPT가 이어서 할 일
 
-1. 우선 P50 담당자의 fixture 수정 및 `d322ae3` 후속 CI 결과를 재확인한다. 현재 FAIL/PENDING을 PASS로 취급하지 않는다.
+1. 최신 `d7940b8`의 Three API, Runtime, RAW Actions가 끝난 뒤 같은 SHA의 전체 결과를 재확인한다. pending/in-progress는 PASS가 아니다.
 2. P50 소유자가 실제 CLI, 상태/영수증 JSON 계약, `latest/history/status/recover`와 offline verification SHA를 제공할 때까지 n8n pin `10ebaf8`을 유지한다. 엔진/커서 코드는 이 n8n 작업자가 수정하지 않는다.
 3. 새 엔진 계약에 맞춰 n8n mock latest → receipt verify → history → 다음 KST 날짜 재개 경로를 오프라인에서 추가 검증한다. 중복 실행 lock, 상태 전이, RAW/Capture/receipt 교차검증, failure alert redaction을 확인한다.
 4. n8n 운영 프로필 격리와 command allowlist를 확인하고, 알림 대상 credential을 정한다. 알림 채널은 사용자가 “나중에”로 보류했다.
