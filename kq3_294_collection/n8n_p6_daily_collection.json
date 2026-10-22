@@ -38,7 +38,7 @@
     },
     {
       "parameters": {
-        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$script=Get-ChildItem -Path (Join-Path $env:USERPROFILE 'OneDrive\\Desktop\\*\\ohora-trend-catcher\\raw_v2\\p6_n8n_tick.ps1') -File | Select-Object -First 1; if(-not $script){exit 2}; & $script.FullName\""
+        "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$root=Join-Path $env:USERPROFILE ('OneDrive\\Desktop\\' + (-join (0x32,0xcc28,0x20,0xd504,0xb85c,0xc81d,0xd2b8,0x20,0xc544,0xce74,0xc774,0xbe0c | ForEach-Object {[char]$_})) + '\\ohora-trend-catcher'); $script=Join-Path $root 'raw_v2\\p6_n8n_tick.ps1'; if(-not (Test-Path -LiteralPath $script -PathType Leaf)){exit 2}; & $script\""
       },
       "id": "p6-bounded-runner",
       "name": "P6 read gates and run at most three pages",

@@ -178,6 +178,11 @@ class N8nTickTests(unittest.TestCase):
                        if n["type"] == "n8n-nodes-base.executeCommand")
         self.assertRegex(command, re.compile(r"p6_n8n_tick\.ps1", re.I))
         self.assertTrue(command.isascii())
+        self.assertIn("OneDrive\\Desktop\\' + (-join (0x32,0xcc28,0x20,0xd504,0xb85c,0xc81d,0xd2b8,0x20,0xc544,0xce74,0xc774,0xbe0c", command)
+        self.assertIn("'\\ohora-trend-catcher'); $script=Join-Path $root", command)
+        self.assertIn("Test-Path -LiteralPath $script -PathType Leaf", command)
+        self.assertNotIn("Get-ChildItem", command)
+        self.assertNotIn("Select-Object -First 1", command)
         launcher = (Path(__file__).parents[1] / "raw_v2" /
                     "p6_n8n_tick.ps1").read_text(encoding="utf-8")
         self.assertRegex(launcher, r"'--max-pages',\s*'3'")
