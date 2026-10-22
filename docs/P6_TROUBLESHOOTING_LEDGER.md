@@ -1,4 +1,12 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+
+### P6-075 — 2026-10-22 · CI 실행 방식에 따른 `src` import 오류 격리 수정
+- **현상/원인:** 기준 work-branch SHA `ec12dec2cb93d2d6d8c30c1824d09f3140ad2d49`의 P6 Runtime Integration Offline run [39697700523](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39697700523)에서 Linux 및 Windows remaining 작업 모두 `tests/test_collection_schedule.py`의 `from src.collection_schedule import decide, main` 임포트에 `ModuleNotFoundError: No module named 'src'`가 발생했다. CI의 `python tests/run_offline.py` 직접 실행은 `tests/`를 `sys.path[0]`로 사용하므로 저장소 루트 패키지 경로가 보장되지 않는 실행 모드 차이로 진단했다. 수집 Meta 오류가 아니다.
+- **최소 수정:** `tests/run_offline.py`에서 오프라인 unittest discovery 이전 저장소 루트를 `sys.path`에 명시 추가한다. `python -m tests.run_offline`과 직접 스크립트 실행을 모두 지원한다. 코드 커밋 [646bdf2](https://github.com/hibi89/ohora-trend-catcher/commit/646bdf284e3d9b6e1d2685adf1f03d5fd1df42c1), 격리 브랜치 `fix/p6-offline-import-path-20261022`, base work branch를 전혀 수정하지 않는다.
+- **검증 상태:** P6 Frozen Design Guard run [39706360576](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39706360576) **PASS**. P6 Runtime Integration Offline run [39706360595](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39706360595), RAW v2 Offline Tests run [39706360568](https://github.com/hibi89/ohora-trend-catcher/actions/runs/39706360568) **RUNNING/PENDING at this checkpoint; not claimed PASS**. 통과 여부는 해당 실행의 최종 결론으로 확인한다.
+- **데이터·롤백:** Meta API 요청 0회, 운영 DB/CSV/RAW 변경 0회. 변경 파일 `tests/run_offline.py` 한 곳. 필요하면 격리 브랜치 커밋을 적용하지 않거나 해당 코드 변경만 revert. main 및 활성 운영 브랜치 미병합.
+- **사용자 범위 변경:** 긴급 50계정 V10 후속 개발 불필요. 사용자에 따르면 오늘 50계정 자료는 확보되었으며 V8/V9 수동 일일 수집으로 별도 관리한다. 이번 개발 목표는 공식 294계정 A/B/C P6 n8n 자동 수집·Catch-up·365일 history 완성이다. 사용자 제공 사실이지 GitHub 운영 결과로 인증된 것은 아니다.
+
 > Index: [P6-074 scheduled no-progress recheck](docs/P6_TROUBLESHOOTING_LEDGER.md) · n8n 09:05 trigger success, no new page; A=0 eligible, B/C held.
 
 ### P6-074 — 2026-10-22 · 09:05 예약 tick 무진척 재확인
