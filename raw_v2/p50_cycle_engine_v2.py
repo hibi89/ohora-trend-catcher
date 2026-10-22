@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import sqlite3
+import math
 
 LANES = ("A", "B", "C")
 ACCOUNTS = 50
@@ -47,7 +48,7 @@ class CyclePlanner:
           receipt_id TEXT, post_count INTEGER,
           PRIMARY KEY(cycle,lane,ordinal));
         CREATE TABLE IF NOT EXISTS lanes(
-          lane TEXT PRIMARY KEY, usage INTEGER, halted INTEGER NOT NULL DEFAULT 0,
+          lane TEXT PRIMARY KEY, usage REAL, halted INTEGER NOT NULL DEFAULT 0,
           ready_at TEXT);
         """)
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(lanes)')}
@@ -61,7 +62,7 @@ class CyclePlanner:
 
     def set_usage(self, lane, usage, *, now=None):
         if lane not in LANES or (usage is not None and
-                                  (type(usage) is not int or not 0 <= usage <= 100)):
+                                  (type(usage) not in (int, float) or not math.isfinite(usage) or not 0 <= usage <= 100)):
             raise ValueError("Invalid lane or usage")
         halted = usage is None or usage >= MAX_USAGE
         until = iso((now or datetime.now(timezone.utc)) + timedelta(minutes=COOLDOWN_MINUTES)) if halted else None
