@@ -1,5 +1,7 @@
 """P50 deterministic offline tests: manual continuous A/B/C rounds."""
 import sys
+import json
+import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -126,6 +128,48 @@ class CycleTests(unittest.TestCase):
             j=p.next_job(now=T)
             self.assertEqual((j["round"],j["cycle"],j["lane"],j["ordinal"]),
                              (21,21,"A",1))
+            p.db.close()
+
+    def test_recover_false_terminal_full_page_from_existing_raw(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            first=p.next_job(now=T)
+            p.acknowledge(first,receipt_id="saved",posts=posts(8),
+                          next_cursor=None,exhausted=True,now=T)
+            self.assertEqual(p.summary()["finished_accounts"],1)
+            raw=sqlite3.connect(":memory:")
+            raw.execute("""CREATE TABLE pages(cycle INTEGER,lane TEXT,
+                ordinal INTEGER,response_json TEXT)""")
+            bd={"media":{"data":posts(8),"paging":{
+                "cursors":{"after":"validafter"}}}}
+            raw.execute("INSERT INTO pages VALUES (?,?,?,?)",
+                        (1,"A",1,json.dumps(bd)))
+            self.assertEqual(p.reopen_false_exhausted_accounts(raw),[1])
+            self.assertEqual(p.reopen_false_exhausted_accounts(raw),[])
+            account=p.db.execute("SELECT cursor,finished FROM accounts WHERE ordinal=1").fetchone()
+            self.assertEqual((account["cursor"],account["finished"]),("validafter",0))
+            # A has already fetched its 8-post slot. Do not double-collect.
+            second=p.next_job(now=T)
+            self.assertEqual((second["lane"],second["ordinal"]),("A",2))
+            raw.close()
+            p.db.close()
+
+    def test_does_not_reopen_proven_short_terminal_page(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=new_planner(d)
+            first=p.next_job(now=T)
+            p.acknowledge(first,receipt_id="saved",posts=posts(3),
+                          next_cursor=None,exhausted=True,now=T)
+            raw=sqlite3.connect(":memory:")
+            raw.execute("""CREATE TABLE pages(cycle INTEGER,lane TEXT,
+                ordinal INTEGER,response_json TEXT)""")
+            bd={"media":{"data":posts(3),"paging":{
+                "cursors":{"after":"maybeafter"}}}}
+            raw.execute("INSERT INTO pages VALUES (?,?,?,?)",
+                        (1,"A",1,json.dumps(bd)))
+            self.assertEqual(p.reopen_false_exhausted_accounts(raw),[])
+            self.assertEqual(p.summary()["finished_accounts"],1)
+            raw.close()
             p.db.close()
 
     def test_reserved_job_is_not_duplicated(self):
