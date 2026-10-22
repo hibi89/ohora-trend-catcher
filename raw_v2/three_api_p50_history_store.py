@@ -96,6 +96,8 @@ class P50HistoryStore:
             raise ValueError("Capture identifier required")
         if not isinstance(raw_receipt_id, str) or not raw_receipt_id:
             raise ValueError("RAW receipt identifier required")
+        if capture_id == raw_receipt_id:
+            raise ValueError("Capture and RAW receipt identities must differ")
         if raw_receipt_verified is not True or capture_verified is not True or uncertain_http is True:
             raise ValueError("Verified RAW and Capture receipts required; uncertain HTTP blocked")
         self.db.execute("BEGIN IMMEDIATE")
