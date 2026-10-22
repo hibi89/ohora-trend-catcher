@@ -120,6 +120,7 @@ class SheetsExportTests(unittest.TestCase):
         result = export_observations(self.path, after_id=2, limit=1)
         self.assertEqual(result["rows"], [])
         self.assertEqual(result["next_after_id"], 2)
+        self.assertTrue(result["has_more"])
         self.assertEqual(export_observations(
             self.path, after_id=4, limit=1)["rows"], [])
 
@@ -139,6 +140,7 @@ class SheetsExportTests(unittest.TestCase):
         result = export_observations(self.path, after_id=2)
         self.assertEqual(result["rows"], [])
         self.assertEqual(result["next_after_id"], 2)
+        self.assertTrue(result["has_more"])
 
     def test_orphan_account_blocks_cursor(self):
         with sqlite3.connect(self.path) as db:
@@ -161,6 +163,7 @@ class SheetsExportTests(unittest.TestCase):
         result = export_observations(self.path, after_id=2)
         self.assertEqual(result["rows"], [])
         self.assertEqual(result["next_after_id"], 2)
+        self.assertTrue(result["has_more"])
 
     def test_late_receipt_restores_ordered_export(self):
         with sqlite3.connect(self.path) as db:
