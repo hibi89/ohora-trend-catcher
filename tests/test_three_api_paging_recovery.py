@@ -12,13 +12,16 @@ from three_api_paging_recovery import (
 )
 
 
-def evidence_row(request_id, *, chain_ok=True):
+def evidence_row(request_id, *, chain_ok=True, nested=True):
+    page = {
+        "data": [{"id": f"media-{n}"} for n in range(4)],
+        "paging": {"cursors": {"after": f"opaque-cursor-{request_id}"}},
+    }
+    # Live response_evidence.safe_body_json retains Business Discovery nesting.
+    body = {"business_discovery": {"media": page}} if nested else page
     return {
         "request_id": request_id,
-        "safe_body_json": json.dumps({
-            "data": [{"id": f"media-{n}"} for n in range(4)],
-            "paging": {"cursors": {"after": f"opaque-cursor-{request_id}"}},
-        }),
+        "safe_body_json": json.dumps(body),
         "stored_terminal": True,
         "stored_response_cursor": None,
         "capture_present": chain_ok,
@@ -50,6 +53,35 @@ class PagingRecoveryTests(unittest.TestCase):
         self.assertTrue(all(row["mutations"] == [] and row["network_requests"] == 0
                             for row in plan["rows"]))
         self.assertTrue(all("opaque-cursor" not in str(row) for row in plan["rows"]))
+
+    def test_direct_normalized_synthetic_fixture_still_supported(self):
+        plan = build_paging_recovery_plan([evidence_row("normalized", nested=False)])
+        self.assertEqual(plan["summary"]["cursor_candidate_review_required"], 1)
+
+    def test_nested_evidence_without_next_url_is_continuation_candidate(self):
+        plan = build_paging_recovery_plan([evidence_row("nested-after-only")])
+        row = plan["rows"][0]
+        self.assertEqual(row["status"], "cursor_candidate_review_required")
+        self.assertEqual(row["pagination_status"], "cursor_candidate")
+        self.assertEqual(row["records"], 4)
+        self.assertEqual(row["network_requests"], 0)
+        self.assertEqual(row["mutations"], [])
+        self.assertNotIn("opaque-cursor", str(row))
+
+    def test_malformed_nested_evidence_fails_closed(self):
+        row = evidence_row("invalid-wrapper")
+        row["safe_body_json"] = json.dumps({"business_discovery": {"media": []}})
+        plan = build_paging_recovery_plan([row])
+        self.assertEqual(plan["rows"][0]["status"], "evidence_invalid")
+        self.assertEqual(plan["summary"]["cursor_candidate_review_required"], 0)
+
+    def test_oversized_nested_page_fails_closed(self):
+        row = evidence_row("too-many")
+        page = json.loads(row["safe_body_json"])
+        page["business_discovery"]["media"]["data"].append({"id": "extra"})
+        row["safe_body_json"] = json.dumps(page)
+        plan = build_paging_recovery_plan([row])
+        self.assertEqual(plan["rows"][0]["status"], "evidence_invalid")
 
     def test_incomplete_capture_or_receipt_chain_is_not_recoverable(self):
         plan = build_paging_recovery_plan([evidence_row("request-a", chain_ok=False)])

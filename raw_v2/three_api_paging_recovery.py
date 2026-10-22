@@ -12,6 +12,27 @@ import json
 from three_api_paging import validate_page_edge
 
 
+def _page_from_safe_evidence(payload):
+    """Accept the actual Business Discovery envelope or a normalized page.
+
+    The persisted safe response evidence keeps business_discovery.media;
+    synthetic normalized fixtures use a top-level data list. Neither form
+    permits trusting or following a paging.next URL.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid response evidence")
+    if "business_discovery" in payload:
+        discovery = payload["business_discovery"]
+        if not isinstance(discovery, dict) or not isinstance(discovery.get("media"), dict):
+            raise ValueError("Missing Business Discovery media evidence")
+        page = discovery["media"]
+    else:
+        page = payload
+    if not isinstance(page.get("data"), list) or len(page["data"]) > 4:
+        raise ValueError("Invalid four-post page evidence")
+    return page
+
+
 def build_paging_recovery_plan(rows):
     """Inspect evidence rows and return a redacted, non-mutating repair plan.
 
@@ -29,11 +50,12 @@ def build_paging_recovery_plan(rows):
         seen_requests.add(request_id)
         try:
             payload = json.loads(row["safe_body_json"])
-            edge = validate_page_edge(payload)
+            page = _page_from_safe_evidence(payload)
+            edge = validate_page_edge(page)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             planned.append({"request_id": request_id, "status": "evidence_invalid"})
             continue
-        after = payload.get("paging", {}).get("cursors", {}).get("after")
+        after = edge["next_cursor"]
         mismatch = bool(row.get("stored_terminal")) and not row.get("stored_response_cursor") and bool(after)
         immutable_chain_ok = all(row.get(key) is True for key in (
             "capture_present", "raw_receipt_present", "capture_raw_digest_match"))
