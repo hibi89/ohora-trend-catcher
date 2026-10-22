@@ -120,6 +120,28 @@ class HistoryRecoveryTests(unittest.TestCase):
                             captured_pages=malformed)
             self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
 
+    def test_invalid_later_page_preflight_blocks_all_commits(self):
+        with P50HistoryStore(self.path) as store:
+            account = self.keys[0]
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            captured = {
+                (account, "tail"): {
+                    "capture_id": "cap-1", "oldest_post_at": None, "terminal": True},
+                (self.keys[1], "future"): {
+                    "capture_id": "cap-2", "oldest_post_at": "not-a-date",
+                    "terminal": False},
+            }
+            with patch("three_api_p50_history_recovery.commit_persisted_history_page") as commit:
+                with self.assertRaisesRegex(ValueError, "evidence"):
+                    recover_history_pages(
+                        store, None, None, self.keys, self.names,
+                        latest_complete_keys={account}, captured_pages=captured)
+                commit.assert_not_called()
+            self.assertEqual(store.read(account)["cursor"], "tail")
+
     def test_invalid_step_budget_rejected(self):
         with P50HistoryStore(self.path) as store:
             with self.assertRaises(ValueError):
