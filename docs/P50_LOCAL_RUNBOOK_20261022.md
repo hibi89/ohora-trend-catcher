@@ -1,3 +1,17 @@
+## CURRENT 2026-10-22 manual history command (operator only; Windows not yet tested)
+From repository root after checkout/pull of `feature/p6-50-account-pilot-20261022` and successful local offline tests:
+
+```powershell
+.\\p50.ps1 status
+# ONLY at the separately operator-approved collection time:
+.\\p50.ps1 history -Live
+# Next day's separate latest refresh, then return to history when needed:
+.\\p50.ps1 latest -Live
+# Ctrl+C ends the current session; rerunning history resumes from durable state.
+```
+
+Defaults: `%USERPROFILE%\\Downloads\\ohora_p50_roster_20261022.csv`, `%LOCALAPPDATA%\\OHORA_P50\\p50`, `%USERPROFILE%\\OneDrive\\Desktop` for existing `.env.api_a/b/c`. Override with `-Source`, `-Workspace`, `-CredentialsDir` if your local paths differ. If `history` cannot verify page-three latest Capture/RAW it first continues pending fixed latest jobs; it never assumes V10/V11 four-post records are sufficient. Missing quota/unknown HTTP/full four-post page with no cursor remain blocked; do not clear holds automatically. **Synthetic offline CI is not Windows or Meta-live verification.** Stop all other collectors using the same A/B/C credentials first. No unattended scheduler exists.
+
 # P50 3-API pilot — local runbook (2026-10-22)
 
 **Scope:** 50 selected accounts (US 18, KR 16, JP 16), isolated from the original 294-account engine. Do not merge the draft PR into main.
