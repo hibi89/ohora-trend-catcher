@@ -133,7 +133,17 @@ def run_offline_history_fixture_dispatch(
             available.remove(key)
     pending = plan_next_history_page(
         store, keys, latest_complete_keys=available, max_pages=1)["jobs"]
-    if len(completed) >= max_pages and pending:
+    # A bounded batch may end after the last supplied page while other
+    # anchored accounts still require a fixture. Report that accurately
+    # without mutating or skipping their durable cursors.
+    all_pending = plan_next_history_page(
+        store, keys, latest_complete_keys=complete, max_pages=50)["jobs"]
+    waiting = [
+        job["account_key"] for job in all_pending
+        if (job["account_key"], job["cursor"]) not in fixture_pages
+    ]
+    deferred = list(dict.fromkeys(deferred + waiting))
+    if len(completed) >= max_pages and all_pending:
         status = "step_budget_exhausted"
     elif deferred:
         status = "awaiting_fixture"
