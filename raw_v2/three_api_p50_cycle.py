@@ -82,11 +82,13 @@ def main(argv=None):
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--confirm-owner-approval", action="store_true")
     args = parser.parse_args(argv)
+    stage = 'validate_arguments'
     try:
         if args.max_pages is not None:
             ceiling = 150 if args.mode == "latest" else 50000 if args.mode == "history" else 0
             if not 1 <= args.max_pages <= ceiling:
                 raise ValueError("--max-pages outside permitted mode-specific range")
+        stage = 'dispatch_mode'
         if args.mode == "status":
             if args.live or args.confirm_owner_approval or args.credentials_dir:
                 raise ValueError("Read-only status cannot accept live options")
@@ -97,8 +99,10 @@ def main(argv=None):
                 raise ValueError("Live operation requires both explicit approval flags")
             environment = os.environ
             if args.credentials_dir is not None:
+                stage = 'load_credentials'
                 environment = load_three_api_environment(
                     args.credentials_dir, base_environment=os.environ)
+            stage = 'run_latest_or_history'
             if args.mode == "latest":
                 with serial_tick_lock(Path(args.workspace).expanduser() / "operator"):
                     result = run_p50(
@@ -109,6 +113,7 @@ def main(argv=None):
                 # Resume only pending fixed P50 latest jobs, never start a
                 # blanket re-fetch of all existing observations.
                 latest_result = None
+                stage = 'inspect_latest_completion'
                 if _needs_latest(args.workspace):
                     with serial_tick_lock(Path(args.workspace).expanduser() / "operator"):
                         latest_result = run_p50(
@@ -128,6 +133,7 @@ def main(argv=None):
                     }
                     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
                     return 2
+                stage = 'run_history'
                 result = run_history(
                     args.source, args.workspace, environment=environment,
                     live=True, approved=True, max_pages=args.max_pages or 5000)
@@ -147,8 +153,11 @@ def main(argv=None):
         return 0
     except KeyboardInterrupt:
         parser.exit(130, "P50 interrupted; existing receipts and cursors preserved.\n")
-    except (ValueError, TypeError, RuntimeError, OSError, sqlite3.Error):
-        parser.exit(2, "P50 safely stopped; inspect account states and local setup.\n")
+    except (ValueError, TypeError, RuntimeError, OSError, sqlite3.Error) as exc:
+        # Never print exception messages: they can contain paths, API details,
+        # request parameters, or secrets. Stage and class are safe diagnostics.
+        parser.exit(2, "P50 safely stopped; stage=" + stage +
+                    " error_type=" + type(exc).__name__ + "\n")
 
 
 if __name__ == "__main__":
