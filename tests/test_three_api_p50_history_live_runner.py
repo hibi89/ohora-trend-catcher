@@ -388,9 +388,15 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 1)
         self.assertEqual(self.raw._db.execute(
             "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
-        self.assertEqual(self.step()["status"], "quota_hold")
-        self.assertEqual(self.calls, 1)
-        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 0)
+        self.usage_percent = 40
+        followup = self.step()
+        self.assertEqual(followup["status"], "recovered")
+        self.assertEqual(followup["lane"], "B")
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 1)
+        held = self.coordinator.db.execute(
+            "SELECT halted,reason FROM lanes WHERE lane='A'").fetchone()
+        self.assertEqual((held["halted"], held["reason"]), (1, "usage_limit"))
 
     def test_missing_usage_stops_and_keeps_cursor_without_resend(self):
         self.anchor(1)
@@ -418,10 +424,13 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.step()["status"], "recovered")
         first_cursor = self.store.read(self.accounts[0]["key"])["cursor"]
         self.now += timedelta(minutes=66)
-        self.assertEqual(self.step()["status"], "quota_hold")
-        self.assertEqual(self.calls, 1)
+        self.usage_percent = 40
+        followup = self.step()
+        self.assertEqual(followup["status"], "recovered")
+        self.assertEqual(followup["lane"], "B")
+        self.assertEqual(self.calls, 2)
         self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], first_cursor)
-        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 0)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 1)
         lane = self.coordinator.db.execute(
             "SELECT halted,reason FROM lanes WHERE lane='A'").fetchone()
         self.assertEqual(lane["halted"], 1)
