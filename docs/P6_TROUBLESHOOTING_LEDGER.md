@@ -1,7 +1,15 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
+> Index: [P6-083 credential-backed n8n alert route (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · Owner selected credential-based auth and deferred channel; endpoint/credential and operational activation pending. Do not enable global `$env` access; `$vars` are plan-restricted. No product/runtime change yet.
 > Index: [P6-082 n8n alert webhook env-access blocker (OPEN)](docs/P6_TROUBLESHOOTING_LEDGER.md) · alert URL expressions rely on `$env`; runtime env-access configuration and actual delivery remain unverified; no global security relaxation made.
 > Index: [P6-081 n8n native import verification](docs/P6_TROUBLESHOOTING_LEDGER.md) · fixed missing workflow ID; actual installed runtime 2.44.5 scratch round trip: 2 workflows, both inactive; 23/23 focused PASS.
 > Index: [P6-080 n8n receipt readback](docs/P6_TROUBLESHOOTING_LEDGER.md) · approved tick compares the read-only before/after durable receipt counts to committed pages; mock tests 23/23 PASS; runtime store access pending.
+
+### P6-083 — 2026-10-22 · n8n credential-backed alert decision / OPEN
+- **결정/근거:** Owner selected credential-based alerting and chose to defer the destination/channel. This rejects enabling `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, which exposes instance process environment to workflow expressions/Code nodes. Official n8n custom-variable docs state `$vars` are available only for n8n Cloud Pro/Enterprise or self-hosted Business/Enterprise; the installed local profile's license was not verified, so `$vars` cannot be assumed. Source: https://docs.n8n.io/build/code-in-n8n/define-custom-variables/.
+- **현재 구현/미완료:** Both repository workflow exports still use `$env.OHORA_P6_ALERT_WEBHOOK`; no n8n alert credential or destination exists. A channel-specific node/credential contract cannot be finalized without choosing the provider. The user separately approved profile deduplication and one schedule activation with `OHORA_P6_LIVE_APPROVED` off, but those mutations were not performed because an active workflow may enter an unconfigured alert branch and leave failures unreported. This is an operational readiness gate, not a Meta-call gate.
+- **검증 상태:** `tests.test_three_api_n8n_tick`, `tests.test_p6_resume_b_guarded`, `tests.test_p6_troubleshooting_handoff_guard`: 23/23 PASS. A disposable local n8n 2.44.5 expression smoke attempt was cancelled before completion; actual expression evaluation, alert delivery, and schedule activation remain unverified. Read-only profile snapshot: three daily records, one active. No Meta request and no profile/P6/RAW/Capture DB mutation.
+- **대안/결과:** Keep existing runtime settings unchanged; preserve export as inactive; await the user's provider choice, then bind n8n Credentials without placing secrets in workflow JSON or Git. After credential and mock receiver checks, reconcile/activate exactly one daily schedule; keep live Meta approval disabled. Rollback is limited to reverting the eventual workflow/credential reference and restoring the pre-change profile backup.
+- **수정 commit SHA:** pending documentation commit.
 > Index: [P6-079 n8n result gate and alert wiring](docs/P6_TROUBLESHOOTING_LEDGER.md) · workflow export remains inactive; 20/20 original focused PASS; default AppContainer temp ACL failure recurred during later verification and the same suite passed 23/23 with workspace TEMP/TMP.
 > Index: [P6-078 B/C resume evidence gate](docs/P6_TROUBLESHOOTING_LEDGER.md) · The guarded B/C helper requires fresh usage below 85%, elapsed cooldown, explicit approval and (for C) a no-competing-C-traffic attestation; 69/69 focused PASS.
 
@@ -379,7 +387,8 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
-| P6-082 | n8n 경고 웹훅 환경 접근 | 2.44.5 `$env` 허용 설정/실제 발송 확인이 미완료; 프로필에 1 active schedule 존재 | OPEN; 보안 설정 완화/credential 통합 및 운영 반영 승인 대기 |
+| P6-083 | n8n 자격증명 기반 알림 경로 | 사용자가 credential 방식 선택, 공급자/채널은 추후 결정 | OPEN; channel credential, endpoint, mock delivery 및 운영 활성화 pending |
+| P6-082 | n8n 경고 웹훅 환경 접근 | 2.44.5 `$env` 허용 설정/실제 발송 확인이 미완료; 프로필에 1 active schedule 존재 | OPEN; global env 접근 유지 여부 및 credential 통합 확인 |
 | P6-081 | n8n export/import 호환성 | missing daily workflow ID 수정; n8n 2.40.7 isolated round-trip, both inactive | 23/23 focused PASS; operational activation pending |
 | P6-080 | n8n 저장 검증 | read-only receipt baseline/delta, 레인 count를 결과·알림으로 전달 | 23/23 focused PASS; actual pilot readback pending |
 | P6-079 | n8n 결과·승인·알림 연동 | live opt-in, structured progress/attention, redacted webhook; 16/16 PASS | inactive export; runtime import/webhook pending |
