@@ -2,7 +2,9 @@
 
 ## Latest recheck / n8n environment decision — 2026-10-22
 
-**2026-10-22 KST · 최신 재확인:** P50 소유 브랜치 tip `880321e09aae83eaa138e902e2f5e3a4b5bdcaa1`. P50 history CLI·recover dispatch는 여전히 pilot entrypoint에 연결되지 않았고 n8n pin은 `10ebaf8` 유지. P50 offline validation `39736753792` SUCCESS; current validation `39736758843` and history tests `39736753512` IN_PROGRESS. Three API `39736758978` PENDING, P6 Runtime `39736759028` PENDING, C Contract `39736759051` and Frozen Design Guard `39736759011` SUCCESS. 로컬 Windows n8n CLI 2.40.7 설치, n8n 프로세스/5678·5680·5681 listener 없음. 원격 학원 n8n host는 자료가 없어 미확인. P50 첫 연동 목표는 Windows 로컬 n8n + 기존 PowerShell runner(A안)로 정하되 운영 instance/schedule은 비활성 유지; 별도 instance 격리와 가동승인은 미완료. Meta 실호출·운영 DB 변경·P294 활성화·main 병합 없음.
+**2026-10-22 KST · 최신 재확인:** P50 소유 브랜치 tip `0b330fc0d04317a2949b42bf83e7310b4afe9cef`. P50 history CLI·recover dispatch는 여전히 pilot entrypoint에 연결되지 않았고 n8n pin은 `10ebaf8` 유지. P50 offline validation `39737113080`/`39737108191` and History Tests `39737108250` SUCCESS. Three API `39737113093` and P6 Runtime `39737113072` IN_PROGRESS; C Contract `39737113042` and Frozen Design Guard `39737113228` SUCCESS. 로컬 Windows n8n CLI 2.40.7 설치, n8n 프로세스/5678·5680·5681 listener 없음. 원격 학원 n8n host는 자료가 없어 미확인. P50 첫 연동 목표는 Windows 로컬 n8n + 기존 PowerShell runner(A안)로 정하되 운영 instance/schedule은 비활성 유지; 별도 instance 격리와 가동승인은 미완료. Meta 실호출·운영 DB 변경·P294 활성화·main 병합 없음.
+
+Detailed volume and operating-window analysis: [Simulation v2.0 analysis](docs/P50_N8N_SIMULATION_V2_2026-10-22.md).
 
 ### A/B host comparison (planning assessment, not production activation)
 
