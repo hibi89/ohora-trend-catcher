@@ -78,6 +78,8 @@ class SheetsExportTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "Duplicate observation_key"):
             export_observations(self.path, limit=1)
+        with self.assertRaisesRegex(ValueError, "Duplicate observation_key"):
+            export_observations(self.path, after_id=2, limit=1)
 
     def test_duplicate_raw_receipt_fails_closed(self):
         with sqlite3.connect(self.path) as db:
