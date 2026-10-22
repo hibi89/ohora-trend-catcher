@@ -1,3 +1,5 @@
+> **2026-10-22 · P6-075 CI 격리 복구 착수 / 사용자 최신 범위:** 긴급 50계정 V10 개발 범위 제외; 사용자에 따르면 오늘 50계정 데이터 확보, 향후 V8/V9 수동. 본 프로젝트는 **공식 294계정 P6 n8n 완성**에 집중. 원래 branch `ec12dec`는 수정하지 않고 `fix/p6-offline-import-path-20261022`에서 `tests/run_offline.py`의 스크립트 방식 `src` import 오류 수정 커밋 `646bdf2`. [P6-075 기록](docs/P6_TROUBLESHOOTING_LEDGER.md). Frozen Guard PASS; runtime/RAW CI는 체크 시각 **진행 중, 완료 확인 전**. A/B/C 레인, 수집 quota/보존, 동결 설계 불변. 기존 활성 n8n/Meta/운영 DB 건드리지 않음. B hold 및 live 커서 복구, 294계정 지속 backfill은 미완료. 본 PR에서 원래 P6 branch/main 병합 금지.
+
 > **2026-10-22 09:06 KST · P6-074 scheduled no-progress recheck:** [P6-074 ledger](docs/P6_TROUBLESHOOTING_LEDGER.md) · Active n8n P6 trigger succeeded at 09:05:15 KST; P6 remains 321 receipts / 1284 observations / 1065 unique. A ready/0 eligible; B `live_pending_usage` held/216 eligible; C `usage_limit` held/74 eligible with cooldown to 09:45 KST; all lanes dispatchable=0. No reset, retry, manual tick, quota/cooldown bypass, or assistant Meta call. Full collection incomplete. Remote P6-072 emergency handoff and P6-073 09:00 diagnosis are preserved separately. No main merge.
 > Operating instructions: [AGENTS.md](AGENTS.md).
 >
