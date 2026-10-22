@@ -61,3 +61,7 @@ When observation ID 3 has no matching RAW receipt but ID 4 does, the Sheets expo
 ## 8. Strict RAW metric and status validation (2026-10-22)
 
 Empty list/string RAW `post_field_status` containers (including nested per-post values) are malformed and now rejected instead of being treated as absent. A Reels `view_count` marked `returned` must be a nonnegative JSON integer: `0` remains valid, but `true`, negative numbers, numeric strings and fractional values are rejected. Focused regression fixtures cover these cases. The implementation and tests are committed, **not yet confirmed PASS by the full Python suite**. The GitHub checkout attempt from this runtime returned `Could not resolve host: github.com`; use a reachable local checkout for actual unit execution.
+
+## 9. n8n export gap backoff (2026-10-22)
+
+The read-only export sets `has_more=true` for a blocking RAW receipt/post/account integrity gap, even if `rows=[]` and `next_after_id` does not advance. This preserves downstream awareness of unfinished work but **does not** authorize tight-loop retries. The n8n owner should back off, investigate RAW integrity, and replay the same checkpoint after reconciliation. A clean end returns `rows=[]`, `has_more=false` and the unchanged checkpoint. Added regression fixtures are **not yet verified by an executed Python test suite**.
