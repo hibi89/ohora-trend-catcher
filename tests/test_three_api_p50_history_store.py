@@ -48,6 +48,39 @@ class P50HistoryStoreTests(unittest.TestCase):
                 self.commit(store, expected_cursor="next-1", next_cursor="next-2")
             self.assertEqual(store.read(self.keys[0])["pages_verified"], 1)
 
+    def test_latest_tail_anchor_survives_restart(self):
+        self.initialize()
+        with P50HistoryStore(self.path) as store:
+            result = store.anchor_verified_latest_tail(
+                account_key=self.keys[0], next_cursor="tail-cursor",
+                capture_id="latest-capture", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            self.assertEqual(result["state"], "continuation_ready")
+        with P50HistoryStore(self.path) as store:
+            self.assertEqual(store.read(self.keys[0])["cursor"], "tail-cursor")
+            self.assertEqual(store.read(self.keys[0])["pages_verified"], 0)
+
+    def test_latest_tail_anchor_cannot_overwrite_cursor(self):
+        self.initialize()
+        with P50HistoryStore(self.path) as store:
+            args = dict(account_key=self.keys[0], next_cursor="tail-cursor",
+                        capture_id="latest-capture", raw_receipt_id="latest-raw",
+                        raw_receipt_verified=True, capture_verified=True)
+            store.anchor_verified_latest_tail(**args)
+            with self.assertRaises(ValueError):
+                store.anchor_verified_latest_tail(**args)
+            self.assertEqual(store.read(self.keys[0])["cursor"], "tail-cursor")
+
+    def test_latest_tail_anchor_rejects_missing_evidence(self):
+        self.initialize()
+        with P50HistoryStore(self.path) as store:
+            with self.assertRaises(ValueError):
+                store.anchor_verified_latest_tail(
+                    account_key=self.keys[0], next_cursor="tail",
+                    capture_id="latest-capture", raw_receipt_id="latest-raw",
+                    raw_receipt_verified=False, capture_verified=True)
+            self.assertEqual(store.read(self.keys[0])["state"], "ready")
+
     def test_identical_receipt_identifiers_rejected(self):
         self.initialize()
         with P50HistoryStore(self.path) as store:
