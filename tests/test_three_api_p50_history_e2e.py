@@ -75,7 +75,7 @@ class HistoricalFixtureE2E(unittest.TestCase):
                             oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
                             terminal="true")
 
-                    with self.assertRaisesRegex(ValueError, "terminal boolean"):
+                    with self.assertRaisesRegex(ValueError, "terminal flag"):
                         ingest_and_commit_offline_history_page(
                             store, journal, writer, request, response,
                             oldest_post_at=datetime(2026, 10, 19, 10, tzinfo=timezone.utc),
