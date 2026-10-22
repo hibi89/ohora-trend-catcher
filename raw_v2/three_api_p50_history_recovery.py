@@ -22,8 +22,7 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
         latest_complete_keys=latest_complete_keys, captured_pages=captured_pages)
     available = {j['account_key'] for j in backlog['ready']}
     deferred = [j['account_key'] for j in backlog['awaiting_persisted_page']]
-    budget_exhausted = False
-    for step in range(max_steps):
+    for _ in range(max_steps):
         job = prepare_history_request(
             store, account_keys, usernames,
             latest_complete_keys=available, lane=lane)
@@ -49,6 +48,7 @@ def recover_history_pages(store, journal, raw_writer, account_keys, usernames, *
         elif (key[0], store.read(key[0])["cursor"]) not in captured_pages:
             available.discard(key[0])
             deferred.append(key[0])
+    # Only count still-eligible persisted work, not accounts already completed.
     budget_exhausted = bool(available)
     return {"status": "step_budget_exhausted" if budget_exhausted else
             ("awaiting_persisted_page" if deferred else "no_eligible_cursor"),
