@@ -1,5 +1,5 @@
 # P6 트러블슈팅·기술부채·설계 판단 기록 (Living Incident Ledger)
-> Index: [P6-077 safe numeric failure diagnostics](docs/P6_TROUBLESHOOTING_LEDGER.md) · diagnostic exposes bounded code/subcode/usage integers only; tests 65/65 PASS.
+> Index: [P6-078 nested Business Discovery evidence repair (isolated, tests pending)](docs/P6_TROUBLESHOOTING_LEDGER.md) · [P6-077 safe numeric failure diagnostics](docs/P6_TROUBLESHOOTING_LEDGER.md) · diagnostic exposes bounded code/subcode/usage integers only; tests 65/65 PASS.
 
 ### P6-078 — 2026-10-22 · Nested Business Discovery safe-response shape missing from offline 49-row repair planner (CODE PATCH, NOT APPLIED)
 - **Observed / scope:** Previous read-only inspection of 49 completed page-1 rows showed stored safe response evidence nested at `business_discovery.media`, with four posts and `paging.cursors.after` but no `paging.next`; coordinator had `terminal=1` and no response cursor. The existing `build_paging_recovery_plan` called `validate_page_edge` on the outer envelope, which requires top-level `data`, so actual nested evidence would be classified `evidence_invalid` even though its cursor is a candidate. Prior 49-row synthetic tests hid this by using only direct `data` fixtures.
