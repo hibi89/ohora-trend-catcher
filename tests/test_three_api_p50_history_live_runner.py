@@ -38,6 +38,10 @@ class HistoryFinalStatusTests(unittest.TestCase):
                                                    coordinator), "quota_hold")
             self.assertEqual(_final_history_status([{"status": "manual_review"}],
                                                    coordinator), "manual_review")
+            for blocked in ("blocked_missing_cursor", "blocked_unverified_page",
+                            "blocked_unknown_http", "account_blocked"):
+                self.assertEqual(_final_history_status([{"status": blocked}],
+                                                       coordinator), blocked)
 
     def test_unheld_lane_does_not_invent_quota_hold(self):
         with closing(sqlite3.connect(":memory:")) as db:
