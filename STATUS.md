@@ -1,5 +1,17 @@
 Operating instructions: [AGENTS.md](AGENTS.md) · [docs/P6_TROUBLESHOOTING_LEDGER.md](docs/P6_TROUBLESHOOTING_LEDGER.md).
 
+## P50 latest queue / 2026-10-23 — operational next step (CI tests pending)
+
+Windows operator confirmed A/B/C quota probe + explicit release at 1% each; latest `2026-10-23` **53/150 pages done**, 97 remaining, no account failures, B held after reaching 85% again; `ready_at=2026-10-23 01:20:37 KST` but that is *not* automatic quota recovery. A/C remained unhalted, no eligible work found; exact per-lane dependency counts and number of page-1 accounts complete must be measured, not assumed.
+
+New read-only CLI `python raw_v2/three_api_p50_queue_diagnostic.py` prints `front_accounts_completed`, per-page coverage and A/B/C eligible vs held vs predecessor/cursor counts. Offline test command `python -m unittest discover -s tests -p test_three_api_p50_queue_diagnostic.py -v` (new tests committed, Windows run pending). Queue code `aa36809`+`9988901`, tests `1b7fada`+`6fcb1de`.
+
+**n8n false-success prevention:** `raw_v2/three_api_p50_cycle.py` change `f2155e5` adds `collection_complete` to the latest CLI JSON and returns code 2 for unfinished `no_ready_work` or `serial_busy`; a successfully committed bounded page remains exit 0 with `collection_complete=false`. Tests `tests/test_three_api_p50_cycle_completion.py` commit `2bc2d64`. These new tests/CI and the fixed CLI on real Windows are **unverified** at time of writing; do not claim full completion or deployed n8n. See [P6-097](docs/P6_TROUBLESHOOTING_LEDGER.md) and [P6-098](docs/P6_TROUBLESHOOTING_LEDGER.md).
+
+Recovery runbook: first check the diagnostic read-only. At or after B's ready_at, explicitly re-probe B usage, release only if <85 via `three_api_p50_quota_recovery.py --lane B --live --confirm-owner-approval --apply --credentials-dir <local-private-dir>`; resume `p50.ps1 latest -Live -MaxPages 150` after verifying code/test success. Never reset state, override cooldown, reassign fixed pages, or schedule unattended live calls without separate approval.
+
+Operating instructions: [AGENTS.md](AGENTS.md) · [docs/P6_TROUBLESHOOTING_LEDGER.md](docs/P6_TROUBLESHOOTING_LEDGER.md).
+
 ## P50 LIVE latest pilot / 2026-10-23 — partial success, B quota hold
 
 Owner's Windows evidence: focused quota recovery tests **5/5 PASS**; approved caller-scoped probes A/B/C returned HTTP 200, 1% usage and `released=true`; new-day P50 latest committed **53/150 pages (1+52)** with **0 account failures**; `no_ready_work` then returned. Lifetime stats from local read-only bridge: latest jobs 150 done on 2026-10-22 + 53 done on 2026-10-23; 438 RAW receipts, 1,752 post observations, 1,555 unique posts, history 235 verified pages. **Only B is quota held**, with `ready_at=2026-10-22T16:20:37.371659+00:00` (2026-10-23 01:20:37 KST); A/C unhalted, but no immediately dispatchable page was found. The precise block reason per lane and page-1 coverage are pending local diagnostic, not assumed. **No full-day or n8n completion claim.**
