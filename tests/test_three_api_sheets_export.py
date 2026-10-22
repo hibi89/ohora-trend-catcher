@@ -77,6 +77,8 @@ class SheetsExportTests(unittest.TestCase):
                           FROM three_api_raw_receipts WHERE capture_id='cap-1'""")
         with self.assertRaisesRegex(ValueError, "Ambiguous RAW receipts"):
             export_observations(self.path)
+        with self.assertRaisesRegex(ValueError, "Ambiguous RAW receipts"):
+            export_observations(self.path, limit=1)
 
     def test_symlinked_raw_database_is_rejected(self):
         link = Path(self.tmp.name) / "linked.sqlite"
