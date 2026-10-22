@@ -53,6 +53,13 @@ class HistoricalFixtureE2E(unittest.TestCase):
                             "target_ig_user_id": original.target_ig_user_id,
                             "spec": spec}))
                     response = make_response(request)
+                    # Durable Capture and RAW survive a journal restart before cursor commit.
+                    first_receipt = ingest_offline_history_response(
+                        journal, writer, request, response)
+                    self.assertIsNotNone(first_receipt)
+                    self.assertEqual(store.read(keys[0])["pages_verified"], 0)
+                    journal.close()
+                    journal = CaptureJournal(str(base / "capture.sqlite"))
                     result = ingest_and_commit_offline_history_page(
                         store, journal, writer, request, response,
                         oldest_post_at=datetime(2026, 10, 19, tzinfo=timezone.utc),
