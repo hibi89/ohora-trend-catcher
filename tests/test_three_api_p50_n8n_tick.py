@@ -1,10 +1,12 @@
 """Synthetic storage/runner tests for the P50 n8n boundary only."""
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from raw_v2 import three_api_p50_n8n_tick as adapter
 
@@ -95,6 +97,29 @@ class P50N8nTickTests(unittest.TestCase):
         self.assertFalse(result["live_meta_called"])
         self.assertEqual(self.called[0][1]["max_pages"], 1)
         self.assertFalse(self.workspace.exists())
+
+    def test_pilot_loader_requires_an_explicit_separate_engine_root(self):
+        engine = self.base / "engine"
+        raw_v2 = engine / "raw_v2"
+        raw_v2.mkdir(parents=True)
+        (raw_v2 / "three_api_p50_manual_pilot.py").write_text(
+            "def run_p50(): return 'engine-root'\n"
+            "def load_three_api_environment(): return 'loader'\n",
+            encoding="utf-8")
+        old_path = list(adapter.sys.path)
+        try:
+            with patch.dict(os.environ, {"OHORA_P50_ENGINE_ROOT": str(engine)}):
+                pilot = adapter._load_pilot()
+                self.assertEqual(pilot.run_p50(), "engine-root")
+                self.assertEqual(adapter.sys.path[0], str(raw_v2))
+        finally:
+            adapter.sys.modules.pop("three_api_p50_manual_pilot", None)
+            adapter.sys.path[:] = old_path
+
+    def test_pilot_loader_fails_closed_without_engine_root(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "engine root"):
+                adapter._load_pilot()
 
     def test_live_gate_without_approval_never_loads_credentials_or_calls_runner(self):
         result = adapter.tick(self.source, self.workspace, live=True, approved=False,

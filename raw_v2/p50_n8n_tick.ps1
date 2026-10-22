@@ -4,6 +4,14 @@ if (-not (Test-Path -LiteralPath $python)) {
     $python = 'C:\Users\haein\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
 }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$engineRoot = Join-Path $repo '.tmp\p50_engine'
+$expectedEngineCommit = '9f165b897169ec466171ab2d39fc469b6ecdc9ce'
+$engineCommit = (& git -C $engineRoot rev-parse HEAD 2>$null | Out-String).Trim()
+if ($engineCommit -cne $expectedEngineCommit -or
+        -not (Test-Path -LiteralPath (Join-Path $engineRoot 'raw_v2\three_api_p50_manual_pilot.py') -PathType Leaf)) {
+    throw 'Pinned P50 engine revision is unavailable.'
+}
+$env:OHORA_P50_ENGINE_ROOT = $engineRoot
 $roster = $env:OHORA_P50_ROSTER
 if (-not $roster -or -not (Test-Path -LiteralPath $roster -PathType Leaf)) {
     throw 'P50 roster is unavailable.'

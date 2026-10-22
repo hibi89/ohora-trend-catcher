@@ -87,7 +87,13 @@ def _snapshot(workspace, *, day: date):
 
 
 def _load_pilot():
-    raw_v2 = str(Path(__file__).resolve().parent)
+    engine_root = os.environ.get("OHORA_P50_ENGINE_ROOT")
+    if not isinstance(engine_root, str) or not engine_root:
+        raise RuntimeError("Pinned P50 engine root is not configured")
+    raw_v2_path = Path(engine_root).expanduser().resolve() / "raw_v2"
+    if not (raw_v2_path / "three_api_p50_manual_pilot.py").is_file():
+        raise RuntimeError("Pinned P50 pilot entrypoint is unavailable")
+    raw_v2 = str(raw_v2_path)
     if raw_v2 not in sys.path:
         sys.path.insert(0, raw_v2)
     import three_api_p50_manual_pilot as pilot
