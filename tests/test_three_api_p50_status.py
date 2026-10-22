@@ -23,6 +23,16 @@ class P50StatusTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             inspect_p50(Path(self.temp.name) / "production")
 
+    def test_reject_symlinked_workspace(self):
+        target = Path(self.temp.name) / "actual"
+        target.mkdir()
+        try:
+            self.root.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Directory symlinks unavailable on this platform")
+        with self.assertRaises(ValueError):
+            inspect_p50(self.root)
+
     def test_counts_raw_and_daily_jobs_without_writes(self):
         self.root.mkdir()
         raw = self.root / "p50_raw.sqlite"
