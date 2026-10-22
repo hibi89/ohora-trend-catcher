@@ -36,6 +36,62 @@ class P50ManualPilotTests(unittest.TestCase):
             run_p50(self.source, self.workspace, live=True, approved=False)
         self.assertFalse(self.workspace.exists())
 
+    def test_injected_graph_response_commits_p50_raw_and_capture(self):
+        """Exercise real P50 serial ports with synthetic HTTP, never a socket."""
+        import sqlite3
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import patch
+        from three_api_credentials import CredentialReference
+        from three_api_graph_http import GraphHTTPClient
+        from three_api_live_lane_router import ThreeLaneMetaTransport
+        from three_api_transport import MetaTransport
+        from test_three_api_serial_bootstrap import MockResponse
+
+        calls = []
+        lanes = {}
+        env = {"P6_META_GRAPH_VERSION": "v26.0"}
+        for lane, caller in (("A", "1001"), ("B", "1002"), ("C", "1003")):
+            env[f"P6_META_TOKEN_{lane}"] = f"synthetic-token-{lane}"
+            env[f"P6_META_IG_ID_{lane}"] = caller
+            ref = CredentialReference(lane, f"P6_META_TOKEN_{lane}",
+                                      f"P6_META_IG_ID_{lane}")
+
+            def fake_sender(request, timeout, *, lane=lane):
+                calls.append(lane)
+                response = MockResponse()
+                response.payload["business_discovery"]["username"] = "nail_us_1"
+                response.payload["business_discovery"]["media"]["data"][0]["username"] = "nail_us_1"
+                return response
+
+            client = GraphHTTPClient(sender=fake_sender, approved=True)
+            lanes[lane] = MetaTransport(client=client, credentials=ref,
+                                        caller_ig_id=caller,
+                                        token=env[f"P6_META_TOKEN_{lane}"])
+
+        transport = ThreeLaneMetaTransport(lanes)
+        with patch("three_api_p50_manual_pilot._transports", return_value=transport):
+            result = run_p50(self.source, self.workspace, live=True,
+                             approved=True, environment=env, max_pages=1)
+
+        self.assertEqual(result["status"], "page_committed")
+        self.assertEqual(result["committed_pages"], 1)
+        self.assertEqual(result["attempted_steps"], 1)
+        self.assertEqual(calls, ["A"])
+        day_kst = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+        with sqlite3.connect(self.workspace / "p50_raw.sqlite") as raw:
+            self.assertEqual(raw.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 50)
+            self.assertEqual(raw.execute("SELECT COUNT(*) FROM post_observations").fetchone()[0], 1)
+            self.assertEqual(raw.execute(
+                "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
+        with sqlite3.connect(self.workspace / day_kst / "coordinator.sqlite") as control:
+            self.assertEqual(control.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 150)
+            self.assertEqual(control.execute(
+                "SELECT state FROM jobs WHERE account_ordinal=1 AND page=1"
+            ).fetchone()[0], "done")
+        with sqlite3.connect(self.workspace / day_kst / "capture.sqlite") as capture:
+            self.assertEqual(capture.execute("SELECT COUNT(*) FROM intents").fetchone()[0], 1)
+        self.assertNotIn("synthetic-token", str(result))
+
     def test_page_limit_rejects_unbounded(self):
         for invalid in (0, 151, True):
             with self.subTest(invalid=invalid):
