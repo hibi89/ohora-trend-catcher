@@ -38,7 +38,7 @@
 
 ## 4. P50 엔진·n8n·데이터 상태
 
-- n8n은 검토된 P50 엔진 SHA `10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb`에 고정되어 있다. P50 담당 브랜치 `feature/p6-50-account-pilot-20261022`의 최신 tip은 `04df3817e3c983f5457d1a8a111e4c1affecd354`다. P50 offline/history workflows는 성공했으며, P6 Runtime은 pending·Three API offline은 in progress였다. 최신 CLI에는 latest 실행만 있고 status는 별도 read-only command이며, history/recover CLI와 n8n receipt contract가 없어 pin은 `10ebaf8`로 유지한다.
+- n8n은 검토된 P50 엔진 SHA `10ebaf895e228cd1ed09cc349d9fcb5ddcd139fb`에 고정되어 있다. P50 담당 브랜치 `feature/p6-50-account-pilot-20261022`의 최신 tip은 `04df3817e3c983f5457d1a8a111e4c1affecd354`다. P50 offline/history workflows는 성공했으며, P6 Runtime `39734635964`과 Three API offline `39734635988`은 취소 상태였고 취소 원인은 확인되지 않았다. 최신 CLI에는 latest 실행만 있고 status는 별도 read-only command이며, history/recover CLI와 n8n receipt contract가 없어 pin은 `10ebaf8`로 유지한다.
 - n8n workflow는 비활성이다. 로컬 n8n CLI 2.40.7은 설치되어 있으나 현재 프로세스/listener는 없고, 원격 n8n 운영 주소/host는 확인되지 않았다.
 - 알림 채널은 사용자가 “나중에”로 미뤘다. Google Sheets는 이후 단계이며 인증/스프레드시트 ID를 아직 요청하지 않았다.
 - P294, unattended scheduling, 추가 live collection은 보류다. P50/P294 간 DB·커서·이력 독립성을 유지한다.

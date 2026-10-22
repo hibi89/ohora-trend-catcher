@@ -45,7 +45,7 @@
 
 ## Git 및 문서 상태
 
-- P6-103 source commit push 이후 GitHub branch API에서 origin ref가 `2a09fb346721893a749df4b74ab7a427551a38d3`임을 재확인했다. P50 owner branch is `feature/p6-50-account-pilot-20261022` at `04df3817e3c983f5457d1a8a111e4c1affecd354`; P50 offline/history Actions passed; P6 Runtime was pending and Three API was in progress at latest check.
+- P6-103 source commit push 이후 GitHub branch API에서 origin ref가 `2a09fb346721893a749df4b74ab7a427551a38d3`임을 재확인했다. P50 owner branch is `feature/p6-50-account-pilot-20261022` at `04df3817e3c983f5457d1a8a111e4c1affecd354`; P50 offline/history Actions passed; P6 Runtime `39734635964` and Three API `39734635988` were CANCELLED at latest recheck; cause unconfirmed.
 - 수정 상세 및 테스트 증거는 `docs/P50_GPT_PROGRESS_REPORT_2026-10-22.md`, `docs/P50_N8N_COMPLETION_TODO.md`, `docs/P6_TROUBLESHOOTING_LEDGER.md`에 있다. HANDOFF/STATUS 상단 요약도 이번 P1/P2 및 v3 자료를 가리킨다.
 - GitHub Actions on `2a09fb346721893a749df4b74ab7a427551a38d3`: Frozen Design Guard `39733073246`, C Contract `39733073167`, Three API offline `39733073258`, Frozen Guard `39733068560`, RAW v2 offline `39733068493` **SUCCESS**; P6 Runtime Integration Offline `39733073179` completed **SUCCESS**. Focused local suite is 20 passed +6 subtests and serial-lock is 8/8.
 - Project Book 색인 업데이트/재조회는 다음 인계 작업이다.
