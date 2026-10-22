@@ -11,7 +11,7 @@ from raw_v2.p6_resume_b_guarded import run
 NOW = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
 
 
-def make_workspace(root, *, fresh_usage=None, received_at=None):
+def make_workspace(root, *, lane="B", fresh_usage=None, received_at=None):
     day = "2026-10-22"
     folder = root / day
     folder.mkdir(parents=True)
@@ -25,13 +25,17 @@ def make_workspace(root, *, fresh_usage=None, received_at=None):
             CREATE TABLE job_request_bindings(job_id INTEGER PRIMARY KEY, request_id TEXT UNIQUE,
                 request_digest TEXT, reserved_at TEXT);
         """)
-        db.execute("INSERT INTO lanes VALUES('B',1,'live_pending_usage',?)",
-                   (ready_at.isoformat(),))
-        db.execute("INSERT INTO jobs VALUES(451,151,1,'B','front','leased','l','later')")
-        db.execute("INSERT INTO jobs VALUES(454,152,1,'B','front','pending',NULL,NULL)")
-        db.execute("INSERT INTO job_request_bindings VALUES(451,'req-failed','digest','then')")
+        reason = "live_pending_usage" if lane == "B" else "usage_limit"
+        db.execute("INSERT INTO lanes VALUES(?,?,?,?)",
+                   (lane, 1, reason, ready_at.isoformat()))
+        if lane == "B":
+            db.execute("INSERT INTO jobs VALUES(451,151,1,'B','front','leased','l','later')")
+            db.execute("INSERT INTO jobs VALUES(454,152,1,'B','front','pending',NULL,NULL)")
+            db.execute("INSERT INTO job_request_bindings VALUES(451,'req-failed','digest','then')")
+        else:
+            db.execute("INSERT INTO jobs VALUES(900,1,2,'C','catchup','pending',NULL,NULL)")
         if fresh_usage is not None:
-            db.execute("INSERT INTO jobs VALUES(450,150,1,'B','front','done',NULL,NULL)")
+            db.execute("INSERT INTO jobs VALUES(450,150,1,?,'front','done',NULL,NULL)", (lane,))
             db.execute("INSERT INTO job_request_bindings VALUES(450,'req-safe','digest','then')")
         db.commit()
     finally:
@@ -117,8 +121,8 @@ class GuardedBResumeTests(unittest.TestCase):
             db = sqlite3.connect(root / "2026-10-22" / "coordinator.sqlite")
             try:
                 self.assertEqual(db.execute(
-                    "SELECT source,usage_percent FROM lane_resume_evidence").fetchone(),
-                    ("operator_attested_meta_dashboard", 42))
+                    "SELECT source,usage_percent,shared_quota_confirmed FROM lane_resume_evidence").fetchone(),
+                    ("operator_attested_meta_dashboard", 42, 0))
                 self.assertEqual(db.execute(
                     "SELECT halted,reason FROM lanes WHERE lane='B'").fetchone(),
                     (0, None))
@@ -142,6 +146,27 @@ class GuardedBResumeTests(unittest.TestCase):
                         run(root, "2026-10-22", True, now=NOW,
                             verified_usage_percent=usage,
                             evidence_observed_at=observed_at.isoformat())
+
+    def test_c_resume_requires_current_usage_and_shared_quota_confirmation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            make_workspace(root, lane="C")
+            observed = (NOW - timedelta(seconds=30)).isoformat()
+            with self.assertRaisesRegex(ValueError, "conditions not met"):
+                run(root, "2026-10-22", True, lane="C", now=NOW,
+                    verified_usage_percent=40, evidence_observed_at=observed)
+            result = run(root, "2026-10-22", True, lane="C", now=NOW,
+                         verified_usage_percent=40, evidence_observed_at=observed,
+                         confirm_no_competing_c_traffic=True)
+            self.assertEqual(result["lane"], "C")
+            self.assertTrue(result["lane_resumed"])
+            db = sqlite3.connect(root / "2026-10-22" / "coordinator.sqlite")
+            try:
+                self.assertEqual(db.execute(
+                    "SELECT lane,usage_percent,shared_quota_confirmed FROM lane_resume_evidence"
+                ).fetchone(), ("C", 40, 1))
+            finally:
+                db.close()
 
 
 if __name__ == "__main__":

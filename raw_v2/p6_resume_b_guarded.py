@@ -1,4 +1,4 @@
-"""Explicit, guarded B-lane resume after manual verification. No Meta calls.
+"""Explicit, guarded B/C lane resume after manual verification. No Meta calls.
 
 Preserves the immutable failed request and never retries it. Operator must
 supply --approve-b-resume; otherwise this is read-only. Does not dispatch work.
@@ -12,8 +12,11 @@ from pathlib import Path
 import sqlite3
 import sys
 
-def run(workspace: Path, day: str, approve: bool, *, now=None,
-        verified_usage_percent=None, evidence_observed_at=None):
+def run(workspace: Path, day: str, approve: bool, *, lane="B", now=None,
+        verified_usage_percent=None, evidence_observed_at=None,
+        confirm_no_competing_c_traffic=False):
+    if lane not in ("B", "C"):
+        raise ValueError("Only blocked B/C lanes can use this resume gate")
     root = workspace.expanduser()
     control = root / day / "coordinator.sqlite"
     capture = root / day / "capture.sqlite"
@@ -26,17 +29,18 @@ def run(workspace: Path, day: str, approve: bool, *, now=None,
         if approve:
             db.execute("BEGIN IMMEDIATE")
         try:
-            lane = db.execute(
-                "SELECT halted,reason,ready_at FROM lanes WHERE lane='B'"
+            lane_state = db.execute(
+                "SELECT halted,reason,ready_at FROM lanes WHERE lane=?", (lane,)
             ).fetchone()
             candidate = db.execute(
                 "SELECT j.id,j.state,j.lane,j.page,"
                 "EXISTS(SELECT 1 FROM job_request_bindings b WHERE b.job_id=j.id) AS bound "
-                "FROM jobs j WHERE j.lane='B' AND j.page=1 AND j.state='pending' "
+                "FROM jobs j WHERE j.lane=? AND j.state='pending' "
+                "AND (?='C' OR j.page=1) "
                 "AND NOT EXISTS (SELECT 1 FROM job_request_bindings b WHERE b.job_id=j.id) "
-                "ORDER BY j.account_ordinal LIMIT 1"
+                "ORDER BY j.account_ordinal,j.page LIMIT 1", (lane, lane)
             ).fetchone()
-            if lane is None or candidate is None:
+            if lane_state is None or candidate is None:
                 raise ValueError("Required B-lane evidence missing")
             db.execute("ATTACH DATABASE ? AS capture_ro",
                        (capture.resolve().as_uri()+"?mode=ro",))
@@ -47,13 +51,13 @@ def run(workspace: Path, day: str, approve: bool, *, now=None,
                 "JOIN capture_ro.captures cap USING(request_id) "
                 "JOIN job_request_bindings b USING(request_id) "
                 "JOIN jobs j ON j.id=b.job_id "
-                "WHERE j.lane='B' AND j.state='done' AND i.outcome='captured' "
+                "WHERE j.lane=? AND j.state='done' AND i.outcome='captured' "
                 "AND cap.processed_receipt IS NOT NULL "
                 "AND r.classification='safe' AND r.http_status BETWEEN 200 AND 299 "
-                "ORDER BY r.received_at DESC"
+                "ORDER BY r.received_at DESC", (lane,)
             ).fetchall()
             now = now or datetime.now(timezone.utc)
-            ready = datetime.fromisoformat(lane["ready_at"])
+            ready = datetime.fromisoformat(lane_state["ready_at"])
             fresh_safe_usage = None
             for evidence in evidence_rows:
                 try:
@@ -87,13 +91,14 @@ def run(workspace: Path, day: str, approve: bool, *, now=None,
                     evidence_source = "operator_attested_meta_dashboard"
             safe = (
                 fresh_safe_usage is not None
-                and candidate["lane"] == "B"
-                and candidate["page"] == 1
+                and candidate["lane"] == lane
+                and (lane != "B" or candidate["page"] == 1)
                 and candidate["state"] == "pending"
                 and candidate["bound"] == 0
-                and lane["halted"] == 1
-                and lane["reason"] == "live_pending_usage"
+                and lane_state["halted"] == 1
+                and lane_state["reason"] == ("live_pending_usage" if lane == "B" else "usage_limit")
                 and ready <= now
+                and (lane != "C" or confirm_no_competing_c_traffic is True)
             )
             if not safe:
                 raise ValueError("Guarded B-lane resume conditions not met")
@@ -101,32 +106,36 @@ def run(workspace: Path, day: str, approve: bool, *, now=None,
                 if evidence_source == "operator_attested_meta_dashboard":
                     db.execute("""CREATE TABLE IF NOT EXISTS lane_resume_evidence(
                         evidence_id TEXT PRIMARY KEY,
-                        lane TEXT NOT NULL CHECK(lane='B'),
+                        lane TEXT NOT NULL CHECK(lane IN ('B','C')),
                         source TEXT NOT NULL CHECK(source='operator_attested_meta_dashboard'),
                         observed_at TEXT NOT NULL,
                         usage_percent INTEGER NOT NULL CHECK(usage_percent BETWEEN 0 AND 84),
+                        shared_quota_confirmed INTEGER NOT NULL CHECK(shared_quota_confirmed IN (0,1)),
                         recorded_at TEXT NOT NULL
                     )""")
-                    evidence_id = "b-resume-" + manual_observed_at.astimezone(
+                    evidence_id = lane.lower() + "-resume-" + manual_observed_at.astimezone(
                         timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
                     db.execute(
-                        "INSERT INTO lane_resume_evidence VALUES(?,?,?,?,?,?)",
-                        (evidence_id, "B", evidence_source,
+                        "INSERT INTO lane_resume_evidence VALUES(?,?,?,?,?,?,?)",
+                        (evidence_id, lane, evidence_source,
                          manual_observed_at.isoformat(), fresh_safe_usage,
+                         int(confirm_no_competing_c_traffic is True),
                          now.isoformat()))
                 changed = db.execute(
                     "UPDATE lanes SET halted=0,reason=NULL "
-                    "WHERE lane='B' AND halted=1 AND reason='live_pending_usage' "
+                    "WHERE lane=? AND halted=1 AND reason=? "
                     "AND ready_at<=?",
-                    (now.isoformat(),)
+                    (lane, "live_pending_usage" if lane == "B" else "usage_limit",
+                     now.isoformat())
                 ).rowcount
                 if changed != 1:
                     raise ValueError("B lane state changed")
                 db.execute("COMMIT")
             return {
-                "mode": "MANUAL_B_RESUME" if approve else "READ_ONLY_B_RESUME_PREFLIGHT",
+                "mode": f"MANUAL_{lane}_RESUME" if approve else f"READ_ONLY_{lane}_RESUME_PREFLIGHT",
                 "safe_conditions": True,
                 "lane_resumed": bool(approve),
+                "lane": lane,
                 "fresh_safe_usage_percent": fresh_safe_usage,
                 "usage_evidence_source": evidence_source,
                 "failed_requests_replayed": False,
@@ -142,7 +151,9 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--workspace", type=Path, required=True)
     p.add_argument("--day", required=True)
-    p.add_argument("--approve-b-resume", action="store_true")
+    p.add_argument("--lane", choices=("B", "C"), default="B")
+    p.add_argument("--approve-resume", action="store_true")
+    p.add_argument("--confirm-no-competing-c-traffic", action="store_true")
     p.add_argument("--verified-usage-percent", type=int,
                    help="Operator-verified Meta dashboard usage for lane B")
     p.add_argument("--evidence-observed-at",
@@ -150,9 +161,11 @@ def main():
     a = p.parse_args()
     try:
         print(json.dumps(run(
-            a.workspace, a.day, a.approve_b_resume,
+            a.workspace, a.day, a.approve_resume, lane=a.lane,
             verified_usage_percent=a.verified_usage_percent,
-            evidence_observed_at=a.evidence_observed_at), sort_keys=True))
+            evidence_observed_at=a.evidence_observed_at,
+            confirm_no_competing_c_traffic=a.confirm_no_competing_c_traffic),
+            sort_keys=True))
     except (ValueError,sqlite3.Error,OverflowError):
         sys.exit("B resume refused: safety conditions not met.")
 
