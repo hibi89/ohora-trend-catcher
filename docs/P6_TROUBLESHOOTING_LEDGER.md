@@ -26,7 +26,7 @@
 - **Observed / expected:** After adding P6-107's detailed entry and Markdown quick link, `python -m pytest -q tests/test_p6_troubleshooting_handoff_guard.py tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py` produced 1 failure, 19 passed, 6 subtests passed. The guard expected the pipe-table ID set to equal the detailed `### P6-NNN` set; actual reported only `P6-107` missing from the table.
 - **Confirmed cause / fix:** The new entry had a top-of-file `> Index:` Markdown link but no matching row in the separate pipe-table index. Added a P6-107 pipe-table row; no product code or existing record changed.
 - **Affected files / data safety:** `docs/P6_TROUBLESHOOTING_LEDGER.md` only. No runtime/API/network or operational data access.
-- **Verification:** Exact focused command above before the fix: FAIL (1 failed, 19 passed, 6 subtests). Post-fix exact command: `python -m pytest -q tests/test_p6_troubleshooting_handoff_guard.py tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py` → **20 passed, 6 subtests passed**; `git diff --check` PASS. Repair commit SHA will be added after commit.
+- **Verification:** Exact focused command above before the fix: FAIL (1 failed, 19 passed, 6 subtests). Post-fix exact command: `python -m pytest -q tests/test_p6_troubleshooting_handoff_guard.py tests/test_three_api_p50_n8n_tick.py tests/test_n8n_p50_export.py` → **20 passed, 6 subtests passed**; `git diff --check` PASS. Repair row/documentation committed in `bdd82bb`.
 - **Rollback / prevention:** Revert only the P6-107 quick-index row if it is proven malformed; keep detailed incident history. Future incidents must update both the Markdown index and pipe-table index.
 
 ### P6-107 — 2026-10-22 · Full offline suite interrupted after partial failures (OPEN / cause unconfirmed)
@@ -616,7 +616,7 @@
 
 | ID | 분야 | 사건·결정 | 현재 결론 |
 |---|---|---|---|
-| P6-108 | Handoff guard / incident index | 신규 상세 사고에 Markdown quick link만 추가하고 pipe-table row 누락 | row 보완; focused handoff guard + n8n tests 20 PASS +6 subtests PASS; repair SHA commit 후 갱신 |
+| P6-108 | Handoff guard / incident index | 신규 상세 사고에 Markdown quick link만 추가하고 pipe-table row 누락 | row 보완; focused handoff guard + n8n tests 20 PASS +6 subtests PASS; documentation repair commit `bdd82bb` |
 | P6-107 | Full offline test run | 1,018 cases discovered; process user-interrupted before final totals, partial RAW-v2 errors/failure visible | OPEN / cause unconfirmed; full suite CANCELLED; isolate modules and capture final output |
 | P6-106 | P50 owner incident-index mismatch (OPEN) | `ff7eeb4` RAW run `39739590508` fails because P6-081–086 detail rows lack index entries; engine not implicated | P50 owner repairs quick index; rerun guard before calling full CI green |
 | P6-105 | P50 offline test fixture/receipt contract mismatch (RESOLVED) | `e67788a` isolates timestamp unit test; latest P50 offline jobs on `ff7eeb4` pass; history last passed on prior `d82a90b`; broader same-tip CI pending | Keep n8n pin `10ebaf8` until all owner CI and n8n history contract are verified |
