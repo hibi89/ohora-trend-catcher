@@ -328,7 +328,9 @@ def _latest_captures(coordinator, journal, accounts):
 def _final_history_status(events, coordinator):
     """Preserve explicit failure, otherwise surface any durable quota hold."""
     status = events[-1]["status"] if events else "no_ready_work"
-    if status in ("manual_review", "blocked_unknown_http"):
+    if status in ("manual_review", "blocked_unknown_http",
+                  "blocked_missing_cursor", "blocked_unverified_page",
+                  "account_blocked"):
         return status
     held = coordinator.db.execute(
         "SELECT lane FROM lanes WHERE halted=1 ORDER BY lane LIMIT 1").fetchone()
