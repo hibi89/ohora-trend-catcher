@@ -81,8 +81,9 @@ def run_offline_history_fixture_dispatch(
                 or (page["oldest_post_at"] is None and not page["terminal"])
                 or (page["terminal"] and response.next_cursor is not None)
                 or (not page["terminal"] and
-                    (not isinstance(response.next_cursor, str) or
-                     not response.next_cursor))):
+                    (not isinstance(response.next_cursor, str)
+                     or not response.next_cursor
+                     or response.next_cursor == entry[1]))):
             raise ValueError("Invalid offline history fixture boundary")
     available = set(complete)
     completed = []
