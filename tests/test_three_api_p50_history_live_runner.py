@@ -59,6 +59,9 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.next_cursors = []
         self.post_count = 1
         self.fail_first = False
+        self.unknown_first = False
+        self.invalid_cursor_first = False
+        self.usage_percent = 20
         self.post_date = '2026-10-21T10:00:00+0000'
 
         def sender(prepared, timeout):
@@ -68,7 +71,17 @@ class HistoryHTTPIntegration(unittest.TestCase):
             else:
                 username = self.accounts[self.calls - 1]["username"]
             next_cursor = self.next_cursors.pop(0) if self.next_cursors else "cursor" + str(self.calls)
+            if self.unknown_first and self.calls == 1:
+                raise OSError("synthetic interrupted HTTP outcome")
             response = MockResponse()
+            response.headers = (
+                {"x-app-usage": '{"call_count":' + str(self.usage_percent) + '}'}
+                if self.usage_percent is not None else {})
+            if self.invalid_cursor_first and self.calls == 1:
+                response.status = 400
+                response.payload = {"error": {
+                    "code": 100, "message": "Invalid cursor supplied"}}
+                return response
             if self.fail_first and self.calls == 1:
                 response.status = 400
                 response.payload = {"error": {"code": 110, "error_subcode": 2207013}}
@@ -229,6 +242,60 @@ class HistoryHTTPIntegration(unittest.TestCase):
         self.assertEqual(self.calls, 2)
         self.assertEqual(self.store.read(self.accounts[0]["key"])["state"],
                          "blocked_unverified_page")
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 1)
+
+    def test_usage_at_85_preserves_raw_and_stops_followup_requests(self):
+        self.anchor(1)
+        self.anchor(2)
+        self.names = ["nail_us_1"]
+        self.usage_percent = 85
+        first = self.step()
+        self.assertEqual(first["status"], "recovered")
+        self.assertEqual(first["usage_percent"], 85)
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 1)
+        self.assertEqual(self.raw._db.execute(
+            "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 1)
+        self.assertEqual(self.step()["status"], "quota_hold")
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 0)
+
+    def test_missing_usage_stops_and_keeps_cursor_without_resend(self):
+        self.anchor(1)
+        self.anchor(2)
+        self.usage_percent = None
+        self.names = ["nail_us_1"]
+        first = self.step()
+        self.assertEqual(first["status"], "manual_review")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], "tail1")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 0)
+        self.assertEqual(self.step()["status"], "quota_hold")
+        self.assertEqual(self.calls, 1)
+        self.assertEqual(self.raw._db.execute(
+            "SELECT COUNT(*) FROM three_api_contract_receipts").fetchone()[0], 0)
+
+    def test_unknown_http_result_blocks_without_automatic_retry(self):
+        self.anchor(1)
+        self.anchor(2)
+        self.unknown_first = True
+        self.names = ["nail_us_1"]
+        first = self.step()
+        self.assertEqual(first["status"], "manual_review")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], "tail1")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["state"], "blocked_unknown_http")
+        self.assertEqual(self.step()["status"], "quota_hold")
+        self.assertEqual(self.calls, 1)
+
+    def test_invalid_cursor_is_isolated_no_guess_or_retry(self):
+        self.anchor(1)
+        self.anchor(2)
+        self.invalid_cursor_first = True
+        self.names = ["nail_us_1", "nail_us_2"]
+        first = self.step()
+        self.assertEqual(first["status"], "account_blocked")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["cursor"], "tail1")
+        self.assertEqual(self.store.read(self.accounts[0]["key"])["pages_verified"], 0)
+        self.assertEqual(self.step()["status"], "recovered")
+        self.assertEqual(self.calls, 2)
         self.assertEqual(self.store.read(self.accounts[1]["key"])["pages_verified"], 1)
 
     def test_fair_round_of_fifty_pages(self):
