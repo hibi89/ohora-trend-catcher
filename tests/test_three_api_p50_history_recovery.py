@@ -79,6 +79,35 @@ class HistoryRecoveryTests(unittest.TestCase):
             self.assertEqual(store.read(account)["state"], "terminal_verified")
             self.assertEqual(result["network_requests"], 0)
 
+    def test_single_step_preserves_next_page_for_next_run(self):
+        with P50HistoryStore(self.path) as store:
+            account = self.keys[0]
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            captured = {
+                (account, "tail"): {
+                    "capture_id": "cap-1", "oldest_post_at": None, "terminal": False},
+                (account, "next"): {
+                    "capture_id": "cap-2", "oldest_post_at": None, "terminal": True},
+            }
+            def verified_commit(store_arg, journal, raw_writer, *,
+                                account_key, capture_id, oldest_post_at, terminal):
+                store_arg.db.execute(
+                    "UPDATE history_accounts SET cursor='next',pages_verified=1 "
+                    "WHERE account_key=?", (account_key,))
+                return {"state": "continuation_ready"}
+            with patch("three_api_p50_history_recovery.commit_persisted_history_page",
+                       side_effect=verified_commit) as commit:
+                result = recover_history_pages(
+                    store, None, None, self.keys, self.names,
+                    latest_complete_keys={account}, captured_pages=captured,
+                    max_steps=1)
+            self.assertEqual(commit.call_count, 1)
+            self.assertEqual(result["status"], "step_budget_exhausted")
+            self.assertEqual(store.read(account)["cursor"], "next")
+
     def test_invalid_step_budget_rejected(self):
         with P50HistoryStore(self.path) as store:
             with self.assertRaises(ValueError):
