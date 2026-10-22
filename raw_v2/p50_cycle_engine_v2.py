@@ -101,10 +101,11 @@ class CyclePlanner:
         return recovered
 
     def next_job(self):
-        """A->B->C within each cycle; unfinished accounts only.
+        """Select the earliest eligible account for an available lane.
 
-        An unavailable lane is bypassed, not falsely marked completed.
-        A cycle is not advanced until every lane's accounts are settled.
+        A halted lane cannot block progress on other lanes or later cycles.
+        A single account cursor is shared across lanes, and each successful
+        receipt advances that cursor exactly once.
         """
         self.db.execute("BEGIN IMMEDIATE")
         try:
@@ -112,8 +113,10 @@ class CyclePlanner:
                 self.db.execute("COMMIT")
                 return None
             for cycle in range(1, MAX_CYCLES + 1):
-                cycle_blocked = False
                 for lane in LANES:
+                    gate = self.db.execute("SELECT halted FROM lanes WHERE lane=?", (lane,)).fetchone()
+                    if gate["halted"]:
+                        continue
                     pending = self.db.execute("""
                       SELECT a.ordinal,a.cursor FROM accounts a
                       WHERE a.finished=0 AND NOT EXISTS(
@@ -122,10 +125,6 @@ class CyclePlanner:
                       ORDER BY a.ordinal LIMIT 1""", (cycle, lane)).fetchone()
                     if pending is None:
                         continue
-                    gate = self.db.execute("SELECT halted FROM lanes WHERE lane=?", (lane,)).fetchone()
-                    if gate["halted"]:
-                        cycle_blocked = True
-                        continue
                     self.db.execute("""
                       INSERT INTO jobs(cycle,lane,ordinal,state,cursor_before)
                       VALUES (?,?,?,'reserved',?)""",
@@ -133,9 +132,6 @@ class CyclePlanner:
                     self.db.execute("COMMIT")
                     return {"cycle":cycle,"lane":lane,"ordinal":pending["ordinal"],
                             "cursor":pending["cursor"],"limit":PAGE_LIMIT}
-                if cycle_blocked:
-                    self.db.execute("COMMIT")
-                    return None
             self.db.execute("COMMIT")
             return None
         except BaseException:
