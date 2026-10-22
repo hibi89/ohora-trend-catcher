@@ -43,6 +43,14 @@ class P50CycleSafetyTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["status"], "quota_hold")
 
 
+    def test_missing_coordinator_refuses_implicit_history_bootstrap(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "p50"
+            with self.assertRaisesRegex(ValueError, "coordinator missing"):
+                cycle._needs_latest(root)
+            self.assertFalse(root.exists())
+
     def test_latest_gate_rejects_wrong_workspace_before_db_open(self):
         with self.assertRaisesRegex(ValueError, "P50 workspace"):
             cycle._needs_latest("/synthetic/not-p50")
