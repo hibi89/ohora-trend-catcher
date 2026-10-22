@@ -411,6 +411,10 @@ def run_history(source, workspace, *, environment, max_pages=5000,
                     "SELECT state,COUNT(*) FROM history_accounts GROUP BY state").fetchall())
                 finished = counts.get("window_covered", 0) + counts.get("terminal_verified", 0)
                 final_status = _final_history_status(events, coordinator)
+                # Only an entirely verified 50-account window may report complete.
+                # Do not overwrite a safety hold or explicit failure with success.
+                if finished == len(accounts) and final_status == "no_ready_work":
+                    final_status = "completed"
                 # A run can make progress on healthy accounts after an isolated
                 # failure; its final no_ready_work must not hide blocked accounts.
                 if final_status == "no_ready_work" and finished != len(accounts):
