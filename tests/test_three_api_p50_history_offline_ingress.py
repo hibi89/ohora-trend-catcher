@@ -333,9 +333,18 @@ class OfflineHistoryIngressTests(unittest.TestCase):
                             "oldest_post_at": datetime(
                                 2026, 1, 1, 10, tzinfo=timezone.utc),
                             "terminal": True})
-                    result = ingest_offline_history_batch(
-                        store, journal, raw, pages, max_pages=50)
+                    from three_api_p50_history_fixture_runner import (
+                        run_offline_history_fixture_dispatch)
+                    fixtures = {
+                        (p["request"].account_key, p["request"].cursor): p
+                        for p in pages}
+                    result = run_offline_history_fixture_dispatch(
+                        store, journal, raw, keys,
+                        {key: f"nail_{i}" for i, key in enumerate(keys, 1)},
+                        latest_complete_keys=set(keys),
+                        fixture_pages=fixtures, max_pages=50, lane="A")
                     self.assertEqual(result["pages_committed"], 50)
+                    self.assertEqual(result["status"], "completed")
                     self.assertEqual(result["network_requests"], 0)
                     self.assertEqual(db.execute(
                         "SELECT COUNT(*) FROM three_api_contract_receipts"
