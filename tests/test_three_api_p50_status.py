@@ -49,6 +49,7 @@ class P50StatusTests(unittest.TestCase):
             db.execute("INSERT INTO posts VALUES ('p1')")
             db.execute("INSERT INTO post_observations VALUES (1)")
             db.execute("INSERT INTO three_api_contract_receipts VALUES ('c1')")
+            db.commit()  # closing() closes without committing the transaction
         day = self.root / "2026-10-22"
         day.mkdir()
         with closing(sqlite3.connect(day / "coordinator.sqlite")) as db:
