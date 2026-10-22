@@ -50,6 +50,8 @@ def commit_persisted_history_page(store, journal, raw_writer, *,
             raise ValueError("Oldest post timestamp differs from persisted Capture")
     elif actual_oldest is not None:
         raise ValueError("Missing oldest post timestamp from persisted Capture")
+    if actual_oldest is None and not terminal:
+        raise ValueError("Nonterminal history Capture has no dated posts")
     if type(terminal) is not bool:
         raise ValueError("Explicit terminal boolean required")
     if terminal and record.cursor_state.next_cursor is not None:
