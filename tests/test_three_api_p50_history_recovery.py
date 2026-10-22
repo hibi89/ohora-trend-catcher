@@ -142,6 +142,28 @@ class HistoryRecoveryTests(unittest.TestCase):
                 commit.assert_not_called()
             self.assertEqual(store.read(account)["cursor"], "tail")
 
+    def test_preflight_rejects_missing_username_before_commit(self):
+        with P50HistoryStore(self.path) as store:
+            account = self.keys[0]
+            store.anchor_verified_latest_tail(
+                account_key=account, next_cursor="tail",
+                capture_id="latest-cap", raw_receipt_id="latest-raw",
+                raw_receipt_verified=True, capture_verified=True)
+            with patch("three_api_p50_history_recovery.commit_persisted_history_page") as commit:
+                with self.assertRaisesRegex(ValueError, "username"):
+                    recover_history_pages(
+                        store, None, None, self.keys,
+                        {k: v for k, v in self.names.items() if k != account},
+                        latest_complete_keys={account}, captured_pages={})
+                commit.assert_not_called()
+
+    def test_unknown_lane_rejected_before_history_dispatch(self):
+        with P50HistoryStore(self.path) as store:
+            with self.assertRaisesRegex(ValueError, "API lane"):
+                recover_history_pages(
+                    store, None, None, self.keys, self.names,
+                    latest_complete_keys=set(), captured_pages={}, lane="D")
+
     def test_invalid_step_budget_rejected(self):
         with P50HistoryStore(self.path) as store:
             with self.assertRaises(ValueError):
