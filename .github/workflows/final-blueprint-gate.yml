@@ -1,0 +1,11 @@
+name: Final blueprint completion evidence gate
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-final-blueprint:
+    uses: hibi89/hackathon-command-center-2026/.github/workflows/blueprint-validation.yml@main
+    permissions:
+      contents: read
