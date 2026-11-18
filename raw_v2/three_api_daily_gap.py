@@ -95,6 +95,8 @@ class DailyGapLedger:
                 CHECK(status IN ('front_open','catchup_pending','verified',
                                  'needs_review','bootstrap_history')),
               PRIMARY KEY(account_key,day));
+            CREATE INDEX IF NOT EXISTS idx_daily_window_account_status_day
+              ON daily_window(account_key,status,day);
             CREATE TABLE IF NOT EXISTS page_proof (
               account_key TEXT NOT NULL, day TEXT NOT NULL,
               phase TEXT NOT NULL CHECK(phase IN ('front','catchup')),
@@ -274,14 +276,25 @@ class DailyGapLedger:
             raise GapEvidenceError("Duplicate roster account")
         for account in accounts:
             self._account(account)
-        fronts=[];catchups=[];history=[];reviews=[]
+        # The front barrier applies to the *entire* requested roster. Read
+        # current-day status once, including absent windows as unfinished
+        # fronts. Historical gap queries are unnecessary while any front
+        # remains: global policy would return ONLY the fronts in that case.
+        current_status = {
+            row["account_key"]: row["status"]
+            for row in self.db.execute(
+                "SELECT account_key,status FROM daily_window WHERE day=?", (day,)
+            )
+        }
+        fronts = [
+            {"account_key": account, "phase": "front"}
+            for account in accounts
+            if current_status.get(account, "front_open") == "front_open"
+        ]
+        if fronts:
+            return fronts
+        catchups=[];history=[];reviews=[]
         for account in accounts:
-            s = self.db.execute(
-                "SELECT status,front_next,catch_next,day FROM daily_window "
-                "WHERE account_key=? AND day=?",(account,day)).fetchone()
-            if s is None or s["status"] == "front_open":
-                fronts.append({"account_key":account,"phase":"front"})
-                continue
             unfinished = list(self.db.execute(
                 "SELECT status,day FROM daily_window WHERE account_key=? "
                 "AND day<=? AND status IN ('catchup_pending','needs_review') "
@@ -301,16 +314,16 @@ class DailyGapLedger:
                                     "gap_day":blocked["day"]})
                 else:
                     catchups.append(self._pending_gap_action(account, unfinished[0]["day"]))
-            elif s["status"] == "needs_review":
+            elif current_status[account] == "needs_review":
                 reviews.append({"account_key":account,"phase":"needs_review","gap_day":day})
-            elif s["status"] == "bootstrap_history":
+            elif current_status[account] == "bootstrap_history":
                 history.append({"account_key":account,"phase":"history_unverified"})
             else:
                 history.append({"account_key":account,"phase":"history"})
-        if fronts:
-            return fronts
         if catchups:
             return reviews + catchups
-        if reviews:
-            return reviews
-        return history
+        # Manual-review gaps block only the affected account. Once no
+        # recoverable catch-up remains, unrelated verified accounts may be
+        # reported as history-eligible without treating the gaps as resolved.
+        # This is a decision-only API: it never dispatches history requests.
+        return reviews + history

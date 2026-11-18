@@ -47,9 +47,24 @@ def validate_page_edge(response, *, requested_cursor=None, prior_cursors=()):
         raise ValueError("Invalid next URL")
     if next_url and not after:
         raise ValueError("Next page without usable cursor")
+    record_count = len(response["data"])
+    if record_count == 0 and after:
+        raise ValueError("Empty page carries an unverified next cursor")
+    if next_url:
+        status = "cursor_candidate"
+    elif after:
+        # Business Discovery can return a cursor without a paging.next URL.
+        # Preserve it as a candidate; only a follow-up request can prove more
+        # data exists, and a short page without a cursor is the terminal proof.
+        status = "cursor_candidate"
+    elif record_count < 4:
+        status = "terminal_verified"
+    else:
+        status = "pagination_ambiguous"
     return {
-        "next_cursor": after if next_url else None,
-        "terminal": not bool(next_url),
+        "next_cursor": after if status == "cursor_candidate" else None,
+        "terminal": status == "terminal_verified",
+        "pagination_status": status,
         "records": len(response["data"]),
         "verified_from_response": True,
     }

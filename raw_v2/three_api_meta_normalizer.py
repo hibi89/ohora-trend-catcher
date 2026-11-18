@@ -14,14 +14,14 @@ import re
 
 from three_api_paging import validate_page_edge
 
-FIELDS = ("id", "caption", "media_type", "media_url", "permalink",
-          "timestamp", "like_count", "comments_count", "thumbnail_url")
+FIELDS = ("id", "caption", "media_type", "media_product_type", "media_url", "permalink",
+          "timestamp", "like_count", "comments_count", "thumbnail_url", "view_count")
 CHILD_FIELDS = ("id", "media_type", "media_url", "thumbnail_url")
 _MEDIA_ID = re.compile(r"[0-9]{1,64}\Z")
 _MAX_CHILDREN = 20
 
 
-def _normalize_children(post):
+def _normalize_children(post, *, allow_partial=False):
     """Return allowlisted children in original order, or None if not supplied."""
     if "children" not in post:
         return None
@@ -36,10 +36,10 @@ def _normalize_children(post):
     paging = children.get("paging", {})
     if not isinstance(paging, dict):
         raise ValueError("Invalid carousel child paging evidence")
-    # No child-page fetcher exists. Silently truncating at the first page
-    # would corrupt trends, so never stage a knowingly incomplete carousel.
-    if paging.get("next") or paging.get("has_next") is True:
-        raise ValueError("Partial carousel child page not supported")
+    # Existing source/mirror callers intentionally reject partial pages:
+    # only the new immutable Capture/RAW contract may opt into preservation.
+    if (paging.get("next") or paging.get("has_next") is True) and not allow_partial:
+        raise ValueError("Partial carousel child page requires capture opt-in")
     seen = {post["id"]}
     normalized = []
     for child in items:
@@ -53,16 +53,16 @@ def _normalize_children(post):
         seen.add(media_id)
         record = {field: child[field] for field in CHILD_FIELDS if field in child}
         for field in ("media_type", "media_url", "thumbnail_url"):
-            if field in record and (not isinstance(record[field], str)
-                                    or len(record[field]) > 2048):
+            if field in record and record[field] is not None and (
+                    not isinstance(record[field], str) or len(record[field]) > 2048):
                 raise ValueError("Invalid carousel child metadata")
-        if "media_type" in record and record["media_type"] not in ("IMAGE", "VIDEO"):
+        if "media_type" in record and record["media_type"] is not None and record["media_type"] not in ("IMAGE", "VIDEO"):
             raise ValueError("Invalid carousel media type")
         normalized.append(record)
     return normalized
 
 
-def normalize_meta_page(payload, *, requested_cursor=None):
+def normalize_meta_page(payload, *, requested_cursor=None, allow_partial_children=False):
     if not isinstance(payload, dict) or "error" in payload:
         raise ValueError("Meta error or invalid response")
     # Business Discovery may wrap media in business_discovery.media.
@@ -83,11 +83,11 @@ def normalize_meta_page(payload, *, requested_cursor=None):
         post_id = post.get("id")
         if not isinstance(post_id, str) or not post_id.strip():
             raise ValueError("Missing media id")
-        for numeric in ("like_count", "comments_count"):
-            if numeric in post and (type(post[numeric]) is not int or post[numeric] < 0):
+        for numeric in ("like_count", "comments_count", "view_count"):
+            if numeric in post and post[numeric] is not None and (type(post[numeric]) is not int or post[numeric] < 0):
                 raise ValueError("Invalid engagement count")
         record = {key: post[key] for key in FIELDS if key in post}
-        children = _normalize_children(post)
+        children = _normalize_children(post, allow_partial=allow_partial_children)
         if children is not None:
             record["children"] = children
         cleaned.append(record)
@@ -101,9 +101,13 @@ def normalize_meta_page(payload, *, requested_cursor=None):
     validate_page_edge({"data": cleaned, "paging": paging},
                        requested_cursor=requested_cursor)
     normalized = {"data": cleaned}
-    if paging.get("next"):
-        normalized["paging"] = {
-            "next": "offline-next-page",
-            "cursors": {"after": cursors["after"]},
-        }
+    if paging.get("next") or cursors.get("after"):
+        normalized_paging = {}
+        if paging.get("next"):
+            # Preserve the fact that a next edge existed without retaining the
+            # URL, which may contain credentials or other sensitive query data.
+            normalized_paging["next"] = "offline-next-page"
+        if cursors.get("after"):
+            normalized_paging["cursors"] = {"after": cursors["after"]}
+        normalized["paging"] = normalized_paging
     return normalized

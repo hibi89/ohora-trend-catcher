@@ -22,7 +22,7 @@ class OfflineRawMirrorTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "three_api_raw_mirror.sqlite"
         self.mirror = OfflineRawMirror(self.path)
-        self.addCleanup(self.mirror.close)
+        self.addCleanup(lambda: self.mirror.close())
 
     def stage(self, request="A_KR_001_p1", account="KR_001",
               posts=None, observed=OBSERVED):

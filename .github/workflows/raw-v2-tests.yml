@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - 'raw_v2/**'
+      - 'tests/test_three_api_p2_clone_migration.py'
+      - 'tests/test_three_api_p2_observations.py'
+      - 'tests/test_three_api_reel_metrics.py'
       - 'tests/test_raw_v2.py'
       - 'tests/test_daily_scheduler.py'
       - 'tests/test_raw_integrity.py'
@@ -15,12 +18,17 @@ on:
       - 'tests/test_three_api_carousel_optin.py'
       - 'tests/test_three_api_raw_mirror.py'
       - 'tests/test_three_api_raw_projection.py'
+      - 'tests/test_three_api_epochs.py'
       - 'tests/test_three_api_daily_orchestrator.py'
       - 'tests/test_three_api_operator_report.py'
       - 'tests/test_three_api_live_readiness.py'
       - 'tests/test_three_api_full_roster_batch.py'
       - '.github/workflows/raw-v2-tests.yml'
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     runs-on: ubuntu-latest

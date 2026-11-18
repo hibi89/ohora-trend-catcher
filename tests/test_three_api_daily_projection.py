@@ -180,7 +180,7 @@ class DailyProjectionTests(unittest.TestCase):
         for page,lane in enumerate("ACB",1):
             c.db.execute(
                 "INSERT INTO jobs(account_ordinal,page,lane,phase) VALUES (?,?,?,?)",
-                (1,page,lane,"front" if page==1 else "history"))
+                (1,page,lane,"front" if page==1 else "catchup"))
         for page,(lane,post_ids,next_cursor) in enumerate([
             ("A",["115","114","113","112"],"page_2"),
             ("C",["111","110","109","108"],"page_3"),

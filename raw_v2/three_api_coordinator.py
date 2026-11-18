@@ -48,7 +48,7 @@ class Coordinator:
             account_ordinal INTEGER NOT NULL CHECK(account_ordinal BETWEEN 1 AND 294),
             page INTEGER NOT NULL CHECK(page BETWEEN 1 AND 3),
             lane TEXT NOT NULL CHECK(lane IN ('A','B','C')),
-            phase TEXT NOT NULL CHECK(phase IN ('front','history')),
+            phase TEXT NOT NULL CHECK(phase IN ('front','catchup')),
             state TEXT NOT NULL DEFAULT 'pending'
                 CHECK(state IN ('pending','leased','done')),
             lease_id TEXT,
@@ -75,16 +75,22 @@ class Coordinator:
                     self.db.execute(
                         """INSERT OR IGNORE INTO jobs
                            (account_ordinal,page,lane,phase) VALUES (?,?,?,?)""",
-                        (account,page,lane,"front" if page == 1 else "history"),
+                        (account,page,lane,"front" if page == 1 else "catchup"),
                     )
             self.db.execute("COMMIT")
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
 
-    def lease(self, lane, now=None):
+    def lease(self, lane, now=None, *, skip_bound=False, only_bound=False, exclude_job_ids=()):
         if lane not in LANES:
             raise ValueError("Unknown lane")
+        if skip_bound and only_bound:
+            raise ValueError("Conflicting binding filters")
+        if (not isinstance(exclude_job_ids, (tuple, list, frozenset))
+                or any(type(x) is not int or x <= 0 for x in exclude_job_ids)):
+            raise ValueError("Invalid excluded job IDs")
+        exclude_job_ids = tuple(sorted(set(exclude_job_ids)))
         now = now or utcnow()
         current = stamp(now)
         expires = stamp(now + timedelta(minutes=LEASE_MINUTES))
@@ -94,7 +100,8 @@ class Coordinator:
             state = self.db.execute(
                 "SELECT * FROM lanes WHERE lane=?", (lane,)
             ).fetchone()
-            if state["halted"] or state["ready_at"] > current:
+            # Quota gates apply to HTTP dispatch only. Bound recovery never sends HTTP.
+            if not only_bound and (state["halted"] or state["ready_at"] > current):
                 self.db.execute("COMMIT")
                 return None
             # Evidence-aware mode is enabled only after PageEvidenceStore
@@ -113,6 +120,22 @@ class Coordinator:
                 ))"""
                 if evidence_enabled else ""
             )
+            binding_filter = (" AND NOT EXISTS (SELECT 1 FROM job_request_bindings binding "
+                              "WHERE binding.job_id=jobs.id)" if skip_bound and self.db.execute(
+                                  "SELECT 1 FROM sqlite_master WHERE type='table' "
+                                  "AND name='job_request_bindings'").fetchone() else "")
+            if only_bound:
+                if not self.db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='job_request_bindings'"
+                ).fetchone():
+                    self.db.execute("COMMIT")
+                    return None
+                binding_filter = """ AND EXISTS (
+                    SELECT 1 FROM job_request_bindings binding
+                    WHERE binding.job_id=jobs.id
+                )"""
+            exclusion_filter = (" AND jobs.id NOT IN (" + ",".join("?" for _ in exclude_job_ids) + ")" if exclude_job_ids else "")
             job = self.db.execute(
                 """SELECT * FROM jobs WHERE lane=?
                    AND (state='pending' OR (state='leased' AND leased_until<=?))
@@ -121,10 +144,10 @@ class Coordinator:
                        WHERE earlier.account_ordinal=jobs.account_ordinal
                        AND earlier.page<jobs.page AND earlier.state!='done'
                    )
-                   """ + proof_filter + """
+                   """ + proof_filter + binding_filter + exclusion_filter + """
                    ORDER BY CASE phase WHEN 'front' THEN 0 ELSE 1 END,
                             page,account_ordinal LIMIT 1""",
-                (lane,current),
+                (lane,current,*exclude_job_ids),
             ).fetchone()
             if job is None:
                 self.db.execute("COMMIT")
@@ -138,6 +161,29 @@ class Coordinator:
         except BaseException:
             self.db.execute("ROLLBACK")
             raise
+
+    def lease_for_dispatch(self, lane, now=None):
+        """Lease only never-bound work; safe candidate for first-time dispatch.
+
+        The caller must still use JobRequestBindingStore.dispatch_once to
+        reserve a request BEFORE any transport attempt. This method alone
+        never authorizes HTTP.
+        """
+        return self.lease(lane, now=now, skip_bound=True)
+
+    def lease_for_recovery(self, lane, now=None, *, exclude_job_ids=()):
+        """Lease bound work only, for capture-only reconciliation.
+
+        Never consumes fresh unbound jobs and never authorizes HTTP.
+        """
+        return self.lease_bound_for_recovery(lane, now=now, exclude_job_ids=exclude_job_ids)
+
+    def lease_bound_for_recovery(self, lane, now=None, *, exclude_job_ids=()):
+        """Lease only already-bound work for capture-only recovery.
+
+        This method never authorizes HTTP, and skips unbound work entirely.
+        """
+        return self.lease(lane, now=now, only_bound=True, exclude_job_ids=exclude_job_ids)
 
     def complete(self, job_id, lease_id):
         """Bare completion is forbidden if page evidence is enabled."""
@@ -188,6 +234,182 @@ class Coordinator:
                WHERE lane=? AND ready_at<=?""", (lane,stamp(now))
         )
         return result.rowcount == 1
+
+    def dispatch_diagnostics(self, now=None):
+        """Read-only, offline counts for dispatch and recovery planning.
+
+        A bound unfinished job is NEVER eligible for first-time dispatch,
+        regardless of lease expiry. The diagnostic does not authorize sends.
+        """
+        now = now or utcnow()
+        current = stamp(now)
+        bound_exists = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='job_request_bindings'"
+        ).fetchone() is not None
+        bound_join = (
+            " LEFT JOIN job_request_bindings b ON b.job_id=j.id "
+            if bound_exists else ""
+        )
+        bound_condition = "b.job_id IS NOT NULL" if bound_exists else "0"
+        rows = self.db.execute(
+            """SELECT j.lane,
+               SUM(CASE WHEN j.state='done' THEN 1 ELSE 0 END) AS done,
+               SUM(CASE WHEN j.state!='done' AND """ + bound_condition + """
+                        THEN 1 ELSE 0 END) AS bound_recovery,
+               SUM(CASE WHEN j.state!='done' AND NOT (""" +
+            bound_condition + """) THEN 1 ELSE 0 END) AS unbound,
+               SUM(CASE WHEN j.state='leased' AND j.leased_until>?
+                        THEN 1 ELSE 0 END) AS active_leases,
+               SUM(CASE WHEN j.state='leased' AND j.leased_until<=?
+                        THEN 1 ELSE 0 END) AS expired_leases
+               FROM jobs j""" + bound_join + """
+               GROUP BY j.lane ORDER BY j.lane""",
+            (current, current),
+        ).fetchall()
+        return {
+            "mode": "OFFLINE_DIAGNOSTIC_NO_DISPATCH",
+            "as_of_utc": current,
+            "lanes": [
+                {"lane": row["lane"],
+                 "done": row["done"],
+                 "bound_recovery": row["bound_recovery"],
+                 "unbound": row["unbound"],
+                 "active_leases": row["active_leases"],
+                 "expired_leases": row["expired_leases"]}
+                for row in rows
+            ],
+        }
+
+    def dispatch_ready_diagnostics(self, now=None):
+        """Read-only exact candidate counts under current lease prerequisites.
+
+        Uses the same per-job state, predecessor, cursor-proof and lane-gate
+        predicates as dispatch-only lease selection. These are candidate
+        counts, not guarantees that a future HTTP request will succeed.
+        """
+        now = now or utcnow()
+        current = stamp(now)
+        tables = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        proof = (
+            """ AND (j.page=1 OR EXISTS (
+                    SELECT 1 FROM page_evidence proof
+                    WHERE proof.account_ordinal=j.account_ordinal
+                      AND proof.page=j.page-1 AND proof.terminal=0
+                      AND proof.response_cursor IS NOT NULL
+                ))""" if "page_evidence" in tables else ""
+        )
+        bound = (
+            """ AND NOT EXISTS (
+                    SELECT 1 FROM job_request_bindings b
+                    WHERE b.job_id=j.id
+                )""" if "job_request_bindings" in tables else ""
+        )
+        rows = self.db.execute(
+            """SELECT lane.lane,
+               CASE WHEN lane.halted=0 AND lane.ready_at<=?
+                    THEN 1 ELSE 0 END AS lane_ready,
+               COUNT(j.id) AS eligible_jobs
+               FROM lanes lane
+               LEFT JOIN jobs j ON j.lane=lane.lane
+                 AND (j.state='pending' OR
+                      (j.state='leased' AND j.leased_until<=?))
+                 AND NOT EXISTS (
+                     SELECT 1 FROM jobs earlier
+                     WHERE earlier.account_ordinal=j.account_ordinal
+                       AND earlier.page<j.page AND earlier.state!='done'
+                 )""" + proof + bound + """
+               GROUP BY lane.lane,lane.halted,lane.ready_at
+               ORDER BY lane.lane""",
+            (current,current),
+        ).fetchall()
+        return {
+            "mode": "OFFLINE_READ_ONLY_NO_DISPATCH",
+            "as_of_utc": current,
+            "lanes": [
+                {"lane": row["lane"],
+                 "lane_ready": bool(row["lane_ready"]),
+                 "eligible_jobs": row["eligible_jobs"],
+                 "dispatchable_now": (
+                     row["eligible_jobs"] if row["lane_ready"] else 0)}
+                for row in rows
+            ],
+        }
+
+    def dispatch_lane_order(self, now=None):
+        """Fair, read-only lane preference for eligible first-time sends.
+
+        Keep the frozen A/B/C account/page assignment; only the order of
+        already dispatchable lanes changes. Fewer completed pages win,
+        with stable A/B/C tie breaking. Proof, quota, bound-request and
+        predecessor checks remain owned by the original coordinator lease.
+        No new job, lease, cursor or database column is created here.
+        """
+        ready = self.dispatch_ready_diagnostics(now=now)["lanes"]
+        completed = {
+            row["lane"]: row["done"]
+            for row in self.dispatch_diagnostics(now=now)["lanes"]
+        }
+        available = [
+            row["lane"] for row in ready if row["dispatchable_now"] > 0
+        ]
+        return tuple(sorted(
+            available,
+            key=lambda lane: (completed[lane], LANES.index(lane)),
+        ))
+
+    def recovery_ready_diagnostics(self, now=None):
+        """Read-only counts of bound recovery candidates per lane.
+
+        Mirrors lease_for_recovery eligibility without changing leases.
+        Bound work with an active lease, blocked predecessor, or absent
+        cursor proof is excluded. Quota-halted lanes still report bound, no-HTTP recovery jobs.
+        """
+        now = now or utcnow()
+        current = stamp(now)
+        tables = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        proof = (
+            """ AND (j.page=1 OR EXISTS (
+                SELECT 1 FROM page_evidence proof
+                WHERE proof.account_ordinal=j.account_ordinal
+                  AND proof.page=j.page-1 AND proof.terminal=0
+                  AND proof.response_cursor IS NOT NULL
+            ))""" if "page_evidence" in tables else ""
+        )
+        bound = (
+            """ AND EXISTS (
+                SELECT 1 FROM job_request_bindings b WHERE b.job_id=j.id
+            )""" if "job_request_bindings" in tables else " AND 0"
+        )
+        rows = self.db.execute(
+            """SELECT lane.lane,
+               1 AS lane_ready,
+               COUNT(j.id) AS eligible_jobs
+               FROM lanes lane
+               LEFT JOIN jobs j ON j.lane=lane.lane
+                 AND (j.state='pending' OR
+                      (j.state='leased' AND j.leased_until<=?))
+                 AND NOT EXISTS (
+                     SELECT 1 FROM jobs earlier
+                     WHERE earlier.account_ordinal=j.account_ordinal
+                       AND earlier.page<j.page AND earlier.state!='done'
+                 )""" + proof + bound + """
+               GROUP BY lane.lane
+               ORDER BY lane.lane""",
+            (current,),
+        ).fetchall()
+        return {
+            "mode": "OFFLINE_RECOVERY_READ_ONLY_NO_DISPATCH",
+            "as_of_utc": current,
+            "lanes": [
+                {"lane": row["lane"], "lane_ready": bool(row["lane_ready"]),
+                 "eligible_jobs": row["eligible_jobs"],
+                 "recoverable_now": row["eligible_jobs"] if row["lane_ready"] else 0}
+                for row in rows
+            ],
+        }
 
     def summary(self):
         return {

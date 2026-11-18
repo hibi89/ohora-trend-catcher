@@ -31,6 +31,7 @@ class PreparedGraphRequest:
     token_env_name: str
     method: str = "GET"
     include_carousel_children: bool = False
+    include_account_metrics: bool = False
 
     def __repr__(self):
         return "PreparedGraphRequest(%r)" % self.safe_summary()
@@ -41,6 +42,7 @@ class PreparedGraphRequest:
                 "host": _HOST, "version": self.version,
                 "page_size": 4, "after_present": self.after_present,
                 "carousel_children_opt_in": self.include_carousel_children,
+                "account_metrics_opt_in": self.include_account_metrics,
                 "authenticated": False, "mode": "OFFLINE_PREFLIGHT"}
 
     def unsigned_parts(self) -> dict:
@@ -59,7 +61,8 @@ def prepare_graph_request(spec: RequestSpec, credentials: CredentialReference,
     # Validate again: callers could construct a dataclass without using the validator.
     canonical = build_request_spec(spec.lane, spec.username,
                                    after=spec.after, limit=spec.limit,
-                                   include_carousel_children=spec.include_carousel_children)
+                                   include_carousel_children=spec.include_carousel_children,
+                                   include_account_metrics=("followers_count" in spec.account_fields))
     if spec != canonical:
         raise ValueError("Untrusted request specification")
     if spec.lane != credentials.lane:
@@ -78,6 +81,7 @@ def prepare_graph_request(spec: RequestSpec, credentials: CredentialReference,
         after_present=spec.after is not None, after=spec.after,
         token_env_name=credentials.token_env_name,
         include_carousel_children=spec.include_carousel_children,
+        include_account_metrics=("followers_count" in spec.account_fields),
     )
 
 

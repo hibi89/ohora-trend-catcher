@@ -41,7 +41,7 @@ class CatchupPayloadTests(unittest.TestCase):
         self.fixtures={("KR_001",TODAY,"p4"):page([103,102,101,100],like_count=0,
                                                        comments_count=3,media_type="IMAGE")}
         self.mirror=OfflineRawMirror(root/"three_api_raw_mirror.sqlite")
-        self.addCleanup(self.mirror.close)
+        self.addCleanup(lambda: self.mirror.close())
         self.front()
         self.runner=OfflineCatchupRunner(self.ledger,self.coordinator,
                                           ["KR_001"],self.fixtures)

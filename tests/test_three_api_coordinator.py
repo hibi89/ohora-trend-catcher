@@ -30,6 +30,17 @@ class CoordinatorTests(unittest.TestCase):
                 (ordinal,)).fetchall()
             self.assertEqual([r[0] for r in pages], [1, 2, 3])
 
+    def test_daily_page_continuation_uses_allowed_catchup_phase(self):
+        """Page 2/3 are daily continuation, not paused historical backfill."""
+        rows = self.c.db.execute(
+            "SELECT page, phase, COUNT(*) FROM jobs GROUP BY page, phase "
+            "ORDER BY page"
+        ).fetchall()
+        self.assertEqual(
+            [(row[0], row[1], row[2]) for row in rows],
+            [(1, "front", 294), (2, "catchup", 294), (3, "catchup", 294)],
+        )
+
     def test_lease_exclusive_and_stale_completion(self):
         t = datetime(2026, 10, 19, tzinfo=timezone.utc)
         first = self.c.lease("A", t)
@@ -49,6 +60,39 @@ class CoordinatorTests(unittest.TestCase):
         self.assertTrue(self.c.complete(first["id"],first["lease_id"]))
         second = self.c.lease("C",t)
         self.assertEqual((second["account_ordinal"],second["page"]), (1,2))
+
+    def test_evidence_mode_blocks_page_two_without_cursor(self):
+        """A completed page alone cannot authorize a later-page lease."""
+        t = datetime(2026, 10, 19, tzinfo=timezone.utc)
+        self.c.db.execute(
+            "CREATE TABLE page_evidence (account_ordinal INTEGER, "
+            "page INTEGER, terminal INTEGER, response_cursor TEXT)"
+        )
+        first = self.c.lease("A", t)
+        self.assertEqual((first["account_ordinal"], first["page"]), (1, 1))
+        with self.assertRaises(RuntimeError):
+            self.c.complete(first["id"], first["lease_id"])
+        self.c.db.execute(
+            "UPDATE jobs SET state='done' WHERE id=?", (first["id"],)
+        )
+        self.assertIsNone(self.c.lease("C", t))
+        self.c.db.execute(
+            "INSERT INTO page_evidence VALUES (1, 1, 0, NULL)"
+        )
+        self.assertIsNone(self.c.lease("C", t))
+        self.c.db.execute(
+            "UPDATE page_evidence SET response_cursor='opaque-next'"
+        )
+        second = self.c.lease("C", t)
+        self.assertEqual((second["account_ordinal"], second["page"]), (1, 2))
+
+    def test_expired_lease_can_be_reissued_without_outcome_reconciliation(self):
+        """Characterize unsafe legacy behavior; adapter must refuse resend."""
+        t = datetime(2026, 10, 19, tzinfo=timezone.utc)
+        first = self.c.lease("A", t)
+        reissued = self.c.lease("A", t + timedelta(minutes=16))
+        self.assertEqual(first["id"], reissued["id"])
+        self.assertNotEqual(first["lease_id"], reissued["lease_id"])
 
     def test_usage_halts_only_affected_lane(self):
         t = datetime(2026, 10, 19, tzinfo=timezone.utc)

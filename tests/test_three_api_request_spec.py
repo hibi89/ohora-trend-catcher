@@ -16,6 +16,16 @@ class RequestSpecTests(unittest.TestCase):
         self.assertNotIn("access_token", field)
         self.assertIsNone(spec.after)
 
+    def test_owner_required_view_count_in_all_new_collection_pages(self):
+        for lane in ("A", "B", "C"):
+            spec = build_request_spec(lane, "nail.artist", limit=4)
+            fields = business_discovery_field(spec)
+            self.assertIn("media.limit(4)", fields)
+            self.assertIn("media_product_type", spec.media_fields.split(","))
+            self.assertIn("view_count", spec.media_fields.split(","))
+            self.assertIn("view_count", fields)
+            self.assertNotIn("access_token", fields)
+
     def test_next_page(self):
         spec = build_request_spec("C", "nails_01", after="abc_123=")
         self.assertIn("media.after(abc_123=).limit(4)", business_discovery_field(spec))
@@ -31,6 +41,44 @@ class RequestSpecTests(unittest.TestCase):
         for cursor in ("https://example.com", "x&access_token=abc", "a b", ""):
             with self.subTest(cursor=cursor), self.assertRaises(ValueError):
                 build_request_spec("A", "nails", after=cursor)
+
+    def test_explicit_account_metrics_opt_in_preserves_default_contract(self):
+        from three_api_runtime_contract import canonical_bytes
+        from three_api_http_preflight import prepare_graph_request
+        from three_api_credentials import make_references
+        base = build_request_spec("A", "nails")
+        profile = build_request_spec("A", "nails", include_account_metrics=True)
+        self.assertEqual(base.limit, profile.limit)
+        self.assertEqual(base.limit, 4)
+        self.assertNotIn("followers_count", business_discovery_field(base))
+        self.assertIn("followers_count,media_count", business_discovery_field(profile))
+        self.assertNotIn(b'"account_fields"', canonical_bytes(base))
+        self.assertIn(b'"account_fields"', canonical_bytes(profile))
+        refs = make_references({lane: {
+            "token_env_name": "TEST_%s_TOKEN" % lane,
+            "ig_user_id_env_name": "TEST_%s_IG_USER_ID" % lane,
+        } for lane in "ABC"})
+        prepared = prepare_graph_request(profile, refs["A"], "17840000000000000")
+        self.assertTrue(prepared.include_account_metrics)
+        self.assertIn("followers_count", prepared.fields)
+        with self.assertRaises(ValueError):
+            build_request_spec("A", "nails", include_account_metrics=1)
+
+    def test_every_lane_uses_fixed_four_for_first_and_cursor_pages(self):
+        for lane in ("A", "B", "C"):
+            for cursor in (None, "cursor_123"):
+                with self.subTest(lane=lane, cursor=cursor):
+                    spec = build_request_spec(lane, "nails", after=cursor)
+                    self.assertEqual(spec.limit, 4)
+                    field = business_discovery_field(spec)
+                    self.assertIn("limit(4)", field)
+                    self.assertIn("view_count", field)
+                    self.assertNotIn("access_token", field)
+
+    def test_fixed_four_rejects_numeric_equivalents_and_overrides(self):
+        for value in (None, 0, 3, 5, 4.0, True, False, "4"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                build_request_spec("A", "nails", limit=value)
 
     def test_fixed_page_size_and_lane(self):
         for limit in (0, 5, True):

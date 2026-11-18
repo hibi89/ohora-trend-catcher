@@ -73,10 +73,16 @@ class Reply:
 
 
 class OptInRequestTests(unittest.TestCase):
-    def test_default_query_bytewise_unchanged(self):
+    def test_default_query_mandates_reels_views_and_legacy_spec_is_readable(self):
+        # Owner's new requirement supersedes the old default-query fixture.
+        # Historical RequestSpec evidence must still retain its original fields.
         old="id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count,thumbnail_url"
+        from three_api_request_spec import RequestSpec
+        legacy=RequestSpec("A","nails_1",4,old,None)
+        self.assertEqual(legacy.media_fields,old)
         spec=build_request_spec("A","nails_1")
-        self.assertEqual(spec.media_fields,old)
+        self.assertIn("media_product_type",spec.media_fields.split(","))
+        self.assertIn("view_count",spec.media_fields.split(","))
         self.assertFalse(spec.include_carousel_children)
         self.assertNotIn("children{",business_discovery_field(spec))
         self.assertFalse(spec.as_safe_dict()["carousel_children_opt_in"])

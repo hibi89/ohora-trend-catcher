@@ -27,6 +27,26 @@ _MAX_BYTES = 512 * 1024
 _USAGE_NAMES = frozenset(("x-app-usage", "x-business-use-case-usage"))
 _VERSION_RE = re.compile(r"v[0-9]{1,3}\.[0-9]{1,2}\Z")
 _ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
+_INVALID_CURSOR_RE = re.compile(
+    r"\b(?:invalid|expired|stale)\s+(?:(?:paging|after)\s+)?cursor\b|"
+    r"\bcursor\s+(?:is\s+)?(?:invalid|expired|stale)\b|"
+    r"\bcursor\s+(?:has\s+)?expired\b|"
+    r"\bcursor\s+is\s+no\s+longer\s+valid\b",
+    re.IGNORECASE,
+)
+
+
+def _explicit_invalid_cursor(status, error):
+    """Return a boolean only for an explicit Graph invalid-cursor message.
+
+    Free-form Meta error text is never returned or persisted. Requiring both
+    HTTP 400 and Graph code 100 avoids interpreting generic HTTP 400, token,
+    permission, or unrelated parameter failures as cursor invalidation.
+    """
+    if (status != 400 or not isinstance(error, dict) or error.get("code") != 100):
+        return False
+    message = error.get("message")
+    return isinstance(message, str) and bool(_INVALID_CURSOR_RE.search(message))
 
 
 class GraphHTTPBlocked(RuntimeError):
@@ -67,7 +87,8 @@ def _validate_prepared(prepared):
     try:
         spec = build_request_spec(prepared.lane, prepared.username,
                                   after=prepared.after, limit=4,
-                                  include_carousel_children=prepared.include_carousel_children)
+                                  include_carousel_children=prepared.include_carousel_children,
+                                  include_account_metrics=prepared.include_account_metrics)
     except (ValueError, TypeError):
         raise GraphHTTPBlocked("Invalid Graph request specification") from None
     if (prepared.after_present != (prepared.after is not None)
@@ -111,8 +132,11 @@ def _read_envelope(response, status):
         if not 200 <= status <= 299 or "error" in body:
             err = body.get("error")
             if isinstance(err, dict):
-                err = {k: err[k] for k in ("code", "error_subcode")
-                       if type(err.get(k)) is int and 0 <= err[k] <= 1000000}
+                original_error = err
+                err = {k: original_error[k] for k in ("code", "error_subcode")
+                       if type(original_error.get(k)) is int and 0 <= original_error[k] <= 1000000000}
+                if _explicit_invalid_cursor(status, original_error):
+                    err["cursor_invalid"] = True
             else:
                 err = {}
             body = {"error": err}

@@ -5,6 +5,7 @@ No real HTTP or Meta calls. No real tokens. All IDs are synthetic.
 from datetime import datetime, timezone
 from email.message import Message
 from io import BytesIO
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -105,6 +106,34 @@ class GraphHTTPTests(unittest.TestCase):
         envelope = client.fetch(prepared(), TOKEN)
         self.assertEqual(envelope["body"], {"error": {"code": 190, "error_subcode": 123}})
         self.assertNotIn(TOKEN, str(envelope))
+
+    def test_only_explicit_code_100_invalid_cursor_message_becomes_boolean(self):
+        body = json.dumps({"error": {
+            "code": 100, "error_subcode": 33,
+            "message": "(#100) The supplied after cursor is invalid: " + TOKEN,
+        }}).encode()
+        client = GraphHTTPClient(sender=lambda *_a, **_k: MemoryResponse(
+            400, body=body), approved=True)
+        envelope = client.fetch(prepared(after="opaque-old-cursor"), TOKEN)
+        self.assertEqual(envelope["body"], {"error": {
+            "code": 100, "error_subcode": 33, "cursor_invalid": True,
+        }})
+        self.assertNotIn(TOKEN, str(envelope))
+        self.assertNotIn("supplied after cursor", str(envelope))
+
+    def test_generic_parameter_or_auth_400_is_not_cursor_invalid(self):
+        for status, code, message in (
+            (400, 100, "Invalid parameter: field selection"),
+            (400, 190, "Invalid cursor because token expired"),
+            (403, 100, "Invalid cursor"),
+        ):
+            body = json.dumps({"error": {"code": code, "message": message}}).encode()
+            client = GraphHTTPClient(sender=lambda *_a, **_k: MemoryResponse(
+                status, body=body), approved=True)
+            with self.subTest(status=status, code=code):
+                envelope = client.fetch(prepared(after="opaque-old-cursor"), TOKEN)
+                self.assertNotIn("cursor_invalid", envelope["body"]["error"])
+                self.assertNotIn("Invalid parameter", str(envelope))
 
     def test_http_200_error_body_is_redacted(self):
         body = ('{"error":{"code":613,"message":"Authorization: ' + TOKEN + '"}}').encode()

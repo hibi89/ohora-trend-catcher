@@ -1,0 +1,80 @@
+{
+  "id": "p6-error-alert-v1",
+  "name": "OHORA P6 failure alert",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "p6-error-trigger",
+      "name": "P6 workflow failed",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst execution = input.execution || {};\nconst workflow = input.workflow || {};\nreturn [{json: {source: 'OHORA P6', alert_code: 'workflow_execution_failed',\n  workflow_name: typeof workflow.name === 'string' ? workflow.name : 'unknown',\n  execution_id: execution.id || null,\n  last_node: execution.lastNodeExecuted || null,\n  failed: true}}];"
+      },
+      "id": "p6-error-redact",
+      "name": "Redact failure details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OHORA_P6_ALERT_WEBHOOK }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "p6-error-webhook",
+      "name": "Send redacted failure alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "P6 workflow failed": {
+      "main": [
+        [
+          {
+            "node": "Redact failure details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redact failure details": {
+      "main": [
+        [
+          {
+            "node": "Send redacted failure alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "p6-error-v1",
+  "tags": []
+}
